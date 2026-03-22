@@ -6,6 +6,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 
 import { createServer } from "../src/server.js";
 import { FileArtifactRepository } from "../src/artifact-repository.js";
+import { FileBackgroundJobRepository } from "../src/background-job-repository.js";
 import { FileClarificationRequestRepository } from "../src/clarification-request-repository.js";
 import { FileMarketCacheRepository } from "../src/market-cache-repository.js";
 import { FileReviewerScanRepository } from "../src/reviewer-scan-repository.js";
@@ -62,6 +63,12 @@ async function createMarketCacheRepository(tempDir, markets = [VALID_MARKET]) {
 
 async function createReviewerScanRepository(tempDir) {
   const repository = new FileReviewerScanRepository(path.join(tempDir, "reviewer-scans.json"));
+  await repository.save([]);
+  return repository;
+}
+
+async function createBackgroundJobRepository(tempDir) {
+  const repository = new FileBackgroundJobRepository(path.join(tempDir, "background-jobs.json"));
   await repository.save([]);
   return repository;
 }
@@ -1727,19 +1734,35 @@ test("POST /api/reviewer/clarifications/:clarificationId/finalize stores off-cha
   }
 });
 
-test("POST /api/clarify/:eventId marks automatic interpretation failures as retryable", async () => {
+test("POST /api/clarify/:eventId enqueues a retryable interpretation job and retry does not duplicate side effects", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
   const repository = new FileClarificationRequestRepository(
     path.join(tempDir, "clarification-requests.json")
   );
+  const backgroundJobRepository = await createBackgroundJobRepository(tempDir);
+  const artifactRepository = new FileArtifactRepository(path.join(tempDir, "artifacts.json"));
   const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  let shouldFail = true;
   const { server, baseUrl } = await startTestServer({
     clarificationRequestRepository: repository,
+    backgroundJobRepository,
+    artifactRepository,
     marketCacheRepository,
     now: () => new Date("2026-03-21T19:30:00.000Z"),
     createClarificationId: () => "clar_paid_pipeline_fail_001",
-    runAutomaticClarificationPipeline: async () => {
-      throw new Error("LLM provider timeout");
+    createBackgroundJobId: () => "job_clarification_001",
+    reviewerAuthToken: "reviewer-secret",
+    runAutomaticClarificationPipeline: async (options) => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error("LLM provider timeout");
+      }
+
+      const { runAutomaticClarificationPipeline } = await import(
+        "../src/automatic-llm-pipeline.js"
+      );
+
+      return runAutomaticClarificationPipeline(options);
     }
   });
 
@@ -1766,13 +1789,41 @@ test("POST /api/clarify/:eventId marks automatic interpretation failures as retr
     assert.deepEqual(await response.json(), {
       ok: true,
       clarificationId: "clar_paid_pipeline_fail_001",
-      status: "processing"
+      status: "processing",
+      job: {
+        jobId: "job_clarification_001",
+        kind: "clarification_pipeline",
+        status: "processing",
+        attempts: 1,
+        retryable: false,
+        target: {
+          clarificationId: "clar_paid_pipeline_fail_001",
+          eventId: "gm_btc_above_100k"
+        }
+      }
     });
 
     await waitFor(async () => {
       const storedRequest = await repository.findByClarificationId("clar_paid_pipeline_fail_001");
       assert.ok(storedRequest);
       assert.equal(storedRequest.status, "failed");
+    });
+
+    const failedJob = await backgroundJobRepository.findByJobId("job_clarification_001");
+    assert.deepEqual(failedJob, {
+      jobId: "job_clarification_001",
+      kind: "clarification_pipeline",
+      status: "failed",
+      createdAt: "2026-03-21T19:30:00.000Z",
+      updatedAt: "2026-03-21T19:30:00.000Z",
+      attempts: 1,
+      retryable: true,
+      target: {
+        clarificationId: "clar_paid_pipeline_fail_001",
+        eventId: "gm_btc_above_100k"
+      },
+      errorMessage: "LLM provider timeout",
+      result: null
     });
 
     const storedRequest = await repository.findByClarificationId("clar_paid_pipeline_fail_001");
@@ -1793,6 +1844,64 @@ test("POST /api/clarify/:eventId marks automatic interpretation failures as retr
         timestamp: "2026-03-21T19:30:00.000Z"
       }
     ]);
+
+    const retryResponse = await fetch(
+      `${baseUrl}/api/reviewer/jobs/job_clarification_001/retry`,
+      {
+        method: "POST",
+        headers: createReviewerHeaders()
+      }
+    );
+
+    assert.equal(retryResponse.status, 202);
+    assert.deepEqual(await retryResponse.json(), {
+      ok: true,
+      job: {
+        jobId: "job_clarification_001",
+        kind: "clarification_pipeline",
+        status: "processing",
+        attempts: 2,
+        retryable: true,
+        target: {
+          clarificationId: "clar_paid_pipeline_fail_001",
+          eventId: "gm_btc_above_100k"
+        }
+      }
+    });
+
+    await waitFor(async () => {
+      const retriedRequest = await repository.findByClarificationId("clar_paid_pipeline_fail_001");
+      assert.ok(retriedRequest);
+      assert.equal(retriedRequest.status, "completed");
+      assert.match(retriedRequest.artifactCid ?? "", /^bafy[a-z0-9]+$/);
+    });
+
+    const retriedJob = await backgroundJobRepository.findByJobId("job_clarification_001");
+    assert.deepEqual(retriedJob, {
+      jobId: "job_clarification_001",
+      kind: "clarification_pipeline",
+      status: "completed",
+      createdAt: "2026-03-21T19:30:00.000Z",
+      updatedAt: "2026-03-21T19:30:00.000Z",
+      attempts: 2,
+      retryable: false,
+      target: {
+        clarificationId: "clar_paid_pipeline_fail_001",
+        eventId: "gm_btc_above_100k"
+      },
+      errorMessage: null,
+      result: {
+        clarificationId: "clar_paid_pipeline_fail_001",
+        artifactCid: (
+          await repository.findByClarificationId("clar_paid_pipeline_fail_001")
+        ).artifactCid
+      }
+    });
+
+    const allClarifications = await repository.list();
+    assert.equal(allClarifications.length, 1);
+    const artifacts = await artifactRepository.load();
+    assert.equal(artifacts.artifacts.length, 1);
   } finally {
     await stopTestServer(server);
   }
@@ -1803,6 +1912,7 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
   const clarificationRequestRepository = new FileClarificationRequestRepository(
     path.join(tempDir, "clarification-requests.json")
   );
+  const backgroundJobRepository = await createBackgroundJobRepository(tempDir);
   const reviewerScanRepository = await createReviewerScanRepository(tempDir);
   const marketCacheRepository = await createMarketCacheRepository(tempDir, [
     VALID_MARKET,
@@ -1826,10 +1936,15 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
   ];
   const { server, baseUrl } = await startTestServer({
     clarificationRequestRepository,
+    backgroundJobRepository,
     reviewerScanRepository,
     marketCacheRepository,
     now: () => new Date(timeline[Math.min(nowCallCount++, timeline.length - 1)]),
-    reviewerAuthToken: "reviewer-secret"
+    reviewerAuthToken: "reviewer-secret",
+    createBackgroundJobId: (() => {
+      let nextJob = 1;
+      return () => `job_scan_${String(nextJob++).padStart(3, "0")}`;
+    })()
   });
 
   try {
@@ -1844,27 +1959,37 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
     assert.equal(singleScanResponse.status, 202);
     assert.deepEqual(await singleScanResponse.json(), {
       ok: true,
-      scan: {
-        scanId: "scan_gm_btc_above_100k_2026-03-21T19:40:00.000Z",
-        eventId: "gm_btc_above_100k",
-        createdAt: "2026-03-21T19:40:00.000Z",
-        ambiguity_score: 0.72,
-        recommendation: "review",
-        flagged_clauses: [VALID_MARKET.resolution],
-        suggested_market_text:
-          "Will Gemini BTC/USD spot trade above $100,000 on the primary Gemini exchange feed before December 31 2026 23:59 UTC?",
-        suggested_note:
-          "Use Gemini's primary BTC/USD spot exchange feed and count the first eligible trade print above $100,000 before expiry.",
-        review_window: {
-          review_window_secs: 86400,
-          review_window_reason:
-            "Base window set from gt_72h time-to-end bucket. Final window 86400 seconds within 3600-86400 second policy bounds.",
-          time_to_end_bucket: "gt_72h",
-          activity_signal: "normal",
-          ambiguity_score: 0.72
+      job: {
+        jobId: "job_scan_001",
+        kind: "reviewer_scan",
+        status: "processing",
+        attempts: 1,
+        retryable: false,
+        target: {
+          eventId: "gm_btc_above_100k"
         }
       }
     });
+
+    await waitFor(async () => {
+      const storedScan = await reviewerScanRepository.findLatestByEventId("gm_btc_above_100k");
+      assert.ok(storedScan);
+      assert.equal(storedScan.jobId, "job_scan_001");
+    });
+
+    const singleScanJob = await backgroundJobRepository.findByJobId("job_scan_001");
+    assert.equal(singleScanJob.jobId, "job_scan_001");
+    assert.equal(singleScanJob.kind, "reviewer_scan");
+    assert.equal(singleScanJob.status, "completed");
+    assert.equal(singleScanJob.createdAt, "2026-03-21T19:40:00.000Z");
+    assert.equal(singleScanJob.attempts, 1);
+    assert.equal(singleScanJob.retryable, false);
+    assert.deepEqual(singleScanJob.target, {
+      eventId: "gm_btc_above_100k"
+    });
+    assert.equal(singleScanJob.errorMessage, null);
+    assert.match(singleScanJob.updatedAt, /^2026-03-21T19:(45|50):00.000Z$/);
+    assert.match(singleScanJob.result.scanId, /^scan_gm_btc_above_100k_2026-03-21T19:/);
 
     const queueResponse = await fetch(`${baseUrl}/api/reviewer/queue`, {
       headers: createReviewerHeaders()
@@ -1963,15 +2088,21 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
     assert.equal(scanAllResponse.status, 202);
     const scanAllPayload = await scanAllResponse.json();
     assert.equal(scanAllPayload.ok, true);
-    assert.equal(scanAllPayload.scans.length, 2);
-    assert.equal(scanAllPayload.scans[0].eventId, "gm_btc_above_100k");
-    assert.equal(scanAllPayload.scans[1].eventId, "gm_eth_above_5000");
+    assert.equal(scanAllPayload.jobs.length, 2);
+    assert.equal(scanAllPayload.jobs[0].target.eventId, "gm_btc_above_100k");
+    assert.equal(scanAllPayload.jobs[1].target.eventId, "gm_eth_above_5000");
+
+    await waitFor(async () => {
+      const storedScans = await reviewerScanRepository.list();
+      assert.equal(storedScans.length, 3);
+    });
 
     const storedScans = await reviewerScanRepository.list();
     assert.equal(storedScans.length, 3);
     assert.deepEqual(
       storedScans.map((scan) => ({
         eventId: scan.eventId,
+        jobId: scan.jobId,
         recommendation: scan.recommendation,
         hasSuggestedNote: typeof scan.suggested_note === "string",
         hasReviewWindow: typeof scan.review_window?.review_window_secs === "number"
@@ -1979,18 +2110,21 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
       [
         {
           eventId: "gm_btc_above_100k",
+          jobId: "job_scan_001",
           recommendation: "review",
           hasSuggestedNote: true,
           hasReviewWindow: true
         },
         {
           eventId: "gm_btc_above_100k",
+          jobId: "job_scan_002",
           recommendation: "review",
           hasSuggestedNote: true,
           hasReviewWindow: true
         },
         {
           eventId: "gm_eth_above_5000",
+          jobId: "job_scan_003",
           recommendation: "review",
           hasSuggestedNote: true,
           hasReviewWindow: true
@@ -2007,6 +2141,7 @@ test("GET /api/reviewer/scans lists historical reviewer scan records and rejects
   const clarificationRequestRepository = new FileClarificationRequestRepository(
     path.join(tempDir, "clarification-requests.json")
   );
+  const backgroundJobRepository = await createBackgroundJobRepository(tempDir);
   const reviewerScanRepository = await createReviewerScanRepository(tempDir);
   const marketCacheRepository = await createMarketCacheRepository(tempDir, [
     VALID_MARKET,
@@ -2030,10 +2165,15 @@ test("GET /api/reviewer/scans lists historical reviewer scan records and rejects
   ];
   const { server, baseUrl } = await startTestServer({
     clarificationRequestRepository,
+    backgroundJobRepository,
     reviewerScanRepository,
     marketCacheRepository,
     now: () => new Date(timeline[Math.min(nowCallCount++, timeline.length - 1)]),
-    reviewerAuthToken: "reviewer-secret"
+    reviewerAuthToken: "reviewer-secret",
+    createBackgroundJobId: (() => {
+      let nextJob = 1;
+      return () => `job_scan_history_${String(nextJob++).padStart(3, "0")}`;
+    })()
   });
 
   try {
@@ -2061,60 +2201,127 @@ test("GET /api/reviewer/scans lists historical reviewer scan records and rejects
       headers: createReviewerHeaders()
     });
 
+    await waitFor(async () => {
+      const scans = await reviewerScanRepository.list();
+      assert.equal(scans.length, 3);
+    });
+
     const response = await fetch(`${baseUrl}/api/reviewer/scans`, {
       headers: createReviewerHeaders()
     });
 
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), {
-      ok: true,
-      scans: [
-        {
-          scanId: "scan_gm_eth_above_5000_2026-03-21T20:10:00.000Z",
-          eventId: "gm_eth_above_5000",
-          createdAt: "2026-03-21T20:10:00.000Z",
-          ambiguityScore: 0.72,
-          recommendation: "review",
-          reviewWindow: {
-            review_window_secs: 3600,
-            review_window_reason:
-              "Base window set from lt_6h time-to-end bucket. High activity reduced the review window by one policy step. Final window 3600 seconds within 3600-86400 second policy bounds.",
-            time_to_end_bucket: "lt_6h",
-            activity_signal: "high",
-            ambiguity_score: 0.72
-          }
-        },
-        {
-          scanId: "scan_gm_btc_above_100k_2026-03-21T20:05:00.000Z",
-          eventId: "gm_btc_above_100k",
-          createdAt: "2026-03-21T20:05:00.000Z",
-          ambiguityScore: 0.72,
-          recommendation: "review",
-          reviewWindow: {
-            review_window_secs: 86400,
-            review_window_reason:
-              "Base window set from gt_72h time-to-end bucket. Final window 86400 seconds within 3600-86400 second policy bounds.",
-            time_to_end_bucket: "gt_72h",
-            activity_signal: "normal",
-            ambiguity_score: 0.72
-          }
-        },
-        {
-          scanId: "scan_gm_btc_above_100k_2026-03-21T20:00:00.000Z",
-          eventId: "gm_btc_above_100k",
-          createdAt: "2026-03-21T20:00:00.000Z",
-          ambiguityScore: 0.72,
-          recommendation: "review",
-          reviewWindow: {
-            review_window_secs: 86400,
-            review_window_reason:
-              "Base window set from gt_72h time-to-end bucket. Final window 86400 seconds within 3600-86400 second policy bounds.",
-            time_to_end_bucket: "gt_72h",
-            activity_signal: "normal",
-            ambiguity_score: 0.72
-          }
-        }
-      ]
+    const payload = await response.json();
+    assert.equal(payload.ok, true);
+    assert.equal(payload.scans.length, 3);
+    assert.deepEqual(
+      payload.scans.map((scan) => scan.eventId).sort(),
+      ["gm_btc_above_100k", "gm_btc_above_100k", "gm_eth_above_5000"]
+    );
+    assert.ok(
+      payload.scans.every(
+        (scan) =>
+          typeof scan.scanId === "string" &&
+          typeof scan.createdAt === "string" &&
+          scan.ambiguityScore === 0.72 &&
+          scan.recommendation === "review" &&
+          typeof scan.reviewWindow?.review_window_secs === "number"
+      )
+    );
+    assert.ok(
+      payload.scans.some(
+        (scan) =>
+          scan.eventId === "gm_eth_above_5000" &&
+          scan.reviewWindow.time_to_end_bucket === "lt_6h"
+      )
+    );
+    assert.equal(
+      payload.scans.filter((scan) => scan.eventId === "gm_btc_above_100k").length,
+      2
+    );
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/reviewer/jobs/:jobId/retry reruns failed scan jobs without duplicating scan side effects", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-scan-retry-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const backgroundJobRepository = await createBackgroundJobRepository(tempDir);
+  const reviewerScanRepository = await createReviewerScanRepository(tempDir);
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  let shouldFail = true;
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
+    backgroundJobRepository,
+    reviewerScanRepository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T20:20:00.000Z"),
+    reviewerAuthToken: "reviewer-secret",
+    createBackgroundJobId: () => "job_scan_retry_001",
+    runReviewerMarketScan: async (options) => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error("scan worker timeout");
+      }
+
+      const { createReviewerMarketScan } = await import("../src/reviewer-scan-service.js");
+      return createReviewerMarketScan(options);
+    }
+  });
+
+  try {
+    const firstResponse = await fetch(`${baseUrl}/api/reviewer/scan/gm_btc_above_100k`, {
+      method: "POST",
+      headers: createReviewerHeaders()
+    });
+
+    assert.equal(firstResponse.status, 202);
+
+    await waitFor(async () => {
+      const job = await backgroundJobRepository.findByJobId("job_scan_retry_001");
+      assert.ok(job);
+      assert.equal(job.status, "failed");
+    });
+
+    assert.deepEqual(await reviewerScanRepository.list(), []);
+
+    const retryResponse = await fetch(
+      `${baseUrl}/api/reviewer/jobs/job_scan_retry_001/retry`,
+      {
+        method: "POST",
+        headers: createReviewerHeaders()
+      }
+    );
+
+    assert.equal(retryResponse.status, 202);
+
+    await waitFor(async () => {
+      const scans = await reviewerScanRepository.list();
+      assert.equal(scans.length, 1);
+    });
+
+    const scans = await reviewerScanRepository.list();
+    assert.equal(scans[0].jobId, "job_scan_retry_001");
+
+    const job = await backgroundJobRepository.findByJobId("job_scan_retry_001");
+    assert.deepEqual(job, {
+      jobId: "job_scan_retry_001",
+      kind: "reviewer_scan",
+      status: "completed",
+      createdAt: "2026-03-21T20:20:00.000Z",
+      updatedAt: "2026-03-21T20:20:00.000Z",
+      attempts: 2,
+      retryable: false,
+      target: {
+        eventId: "gm_btc_above_100k"
+      },
+      errorMessage: null,
+      result: {
+        scanId: "scan_gm_btc_above_100k_2026-03-21T20:20:00.000Z"
+      }
     });
   } finally {
     await stopTestServer(server);

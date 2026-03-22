@@ -1,4 +1,5 @@
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 
 import { runAutomaticClarificationPipeline as runDefaultAutomaticClarificationPipeline } from "./automatic-llm-pipeline.js";
 import { refreshReviewerMarketData } from "./reviewer-refresh-market.js";
@@ -511,6 +512,17 @@ function parseReviewerWorkflowPayload(payload) {
   };
 }
 
+function buildBackgroundJobPayload(job) {
+  return {
+    jobId: job.jobId,
+    kind: job.kind,
+    status: job.status,
+    attempts: job.attempts,
+    retryable: job.retryable,
+    target: job.target
+  };
+}
+
 async function readJsonBody(request) {
   const chunks = [];
 
@@ -530,16 +542,138 @@ async function readJsonBody(request) {
 export function createServer({
   clarificationRequestRepository,
   artifactRepository,
+  backgroundJobRepository,
   reviewerScanRepository,
   marketCacheRepository,
   now,
   createRequestId,
   createClarificationId,
+  createBackgroundJobId = () => randomUUID(),
   llmTraceability,
   reviewerAuthToken,
   fetchReviewerMarketSource,
-  runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline
+  runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline,
+  runReviewerMarketScan = createReviewerMarketScan
 }) {
+  async function markJobProcessing(job) {
+    const processingTimestamp = now().toISOString();
+
+    return (
+      (await backgroundJobRepository?.updateByJobId?.(job.jobId, {
+        status: "processing",
+        updatedAt: processingTimestamp,
+        attempts: (job.attempts ?? 0) + 1
+      })) ?? {
+        ...job,
+        status: "processing",
+        updatedAt: processingTimestamp,
+        attempts: (job.attempts ?? 0) + 1
+      }
+    );
+  }
+
+  async function executeClarificationPipelineJob(job) {
+    await clarificationRequestRepository.updateByClarificationId(job.target.clarificationId, {
+      status: "processing",
+      updatedAt: job.updatedAt,
+      errorMessage: null,
+      retryable: false
+    });
+
+    try {
+      const clarification = await clarificationRequestRepository.findByClarificationId(
+        job.target.clarificationId
+      );
+      const artifact = await runAutomaticClarificationPipeline({
+        clarification,
+        clarificationRequestRepository,
+        artifactRepository,
+        marketCacheRepository,
+        now,
+        llmTraceability
+      });
+
+      await backgroundJobRepository?.updateByJobId?.(job.jobId, {
+        status: "completed",
+        updatedAt: now().toISOString(),
+        retryable: false,
+        errorMessage: null,
+        result: {
+          clarificationId: job.target.clarificationId,
+          artifactCid: artifact?.artifact?.cid ?? null
+        }
+      });
+    } catch (pipelineError) {
+      const failedAt = now().toISOString();
+
+      await clarificationRequestRepository.updateByClarificationId(job.target.clarificationId, {
+        status: "failed",
+        updatedAt: failedAt,
+        errorMessage: pipelineError.message,
+        retryable: true,
+        llmOutput: null
+      });
+
+      await backgroundJobRepository?.updateByJobId?.(job.jobId, {
+        status: "failed",
+        updatedAt: failedAt,
+        retryable: true,
+        errorMessage: pipelineError.message,
+        result: null
+      });
+    }
+  }
+
+  async function executeReviewerScanJob(job) {
+    try {
+      const scan = await runReviewerMarketScan({
+        jobId: job.jobId,
+        eventId: job.target.eventId,
+        marketCacheRepository,
+        reviewerScanRepository,
+        now
+      });
+
+      await backgroundJobRepository?.updateByJobId?.(job.jobId, {
+        status: "completed",
+        updatedAt: now().toISOString(),
+        retryable: false,
+        errorMessage: null,
+        result: {
+          scanId: scan.scanId
+        }
+      });
+    } catch (scanError) {
+      await backgroundJobRepository?.updateByJobId?.(job.jobId, {
+        status: "failed",
+        updatedAt: now().toISOString(),
+        retryable: true,
+        errorMessage: scanError.message,
+        result: null
+      });
+    }
+  }
+
+  async function executeBackgroundJob(job) {
+    if (job.kind === "clarification_pipeline") {
+      await executeClarificationPipelineJob(job);
+      return;
+    }
+
+    if (job.kind === "reviewer_scan") {
+      await executeReviewerScanJob(job);
+      return;
+    }
+
+    throw new Error(`Unsupported background job kind: ${job.kind}`);
+  }
+
+  async function startBackgroundJob(job) {
+    const processingJob = await markJobProcessing(job);
+    void Promise.resolve().then(() => executeBackgroundJob(processingJob));
+    return processingJob;
+  }
+
   return http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url, "http://127.0.0.1");
 
@@ -647,40 +781,67 @@ export function createServer({
           updatedAt: timestamp
         });
 
-        const processingClarification =
-          await clarificationRequestRepository.updateByClarificationId(clarification.clarificationId, {
-            status: "processing",
-            updatedAt: now().toISOString()
-          });
+        const jobTimestamp = now().toISOString();
+        const queuedJob =
+          (await backgroundJobRepository?.create?.({
+            jobId: createBackgroundJobId(),
+            kind: "clarification_pipeline",
+            status: "queued",
+            createdAt: jobTimestamp,
+            updatedAt: jobTimestamp,
+            attempts: 0,
+            retryable: false,
+            target: {
+              clarificationId: clarification.clarificationId,
+              eventId
+            },
+            errorMessage: null,
+            result: null
+          })) ?? null;
+        const processingJob = queuedJob ? await startBackgroundJob(queuedJob) : null;
 
-        void Promise.resolve()
-          .then(() =>
-            runAutomaticClarificationPipeline({
-              clarification: processingClarification,
-              clarificationRequestRepository,
-              artifactRepository,
-              marketCacheRepository,
-              now,
-              llmTraceability
-            })
-          )
-          .catch(async (pipelineError) => {
-            await clarificationRequestRepository.updateByClarificationId(
-              clarification.clarificationId,
-              {
-                status: "failed",
-                updatedAt: now().toISOString(),
-                errorMessage: pipelineError.message,
-                retryable: true,
-                llmOutput: null
-              }
+        await clarificationRequestRepository.updateByClarificationId(clarification.clarificationId, {
+          status: "processing",
+          updatedAt: jobTimestamp,
+          errorMessage: null,
+          retryable: false
+        });
+
+        if (!queuedJob) {
+          const processingClarification =
+            await clarificationRequestRepository.findByClarificationId(
+              clarification.clarificationId
             );
-          });
+          void Promise.resolve()
+            .then(() =>
+              runAutomaticClarificationPipeline({
+                clarification: processingClarification,
+                clarificationRequestRepository,
+                artifactRepository,
+                marketCacheRepository,
+                now,
+                llmTraceability
+              })
+            )
+            .catch(async (pipelineError) => {
+              await clarificationRequestRepository.updateByClarificationId(
+                clarification.clarificationId,
+                {
+                  status: "failed",
+                  updatedAt: now().toISOString(),
+                  errorMessage: pipelineError.message,
+                  retryable: true,
+                  llmOutput: null
+                }
+              );
+            });
+        }
 
         sendJson(response, 202, {
           ok: true,
           clarificationId: clarification.clarificationId,
-          status: processingClarification.status
+          status: "processing",
+          ...(processingJob ? { job: buildBackgroundJobPayload(processingJob) } : {})
         });
       } catch (error) {
         if (error instanceof SyntaxError) {
@@ -843,16 +1004,55 @@ export function createServer({
         const eventId = decodeURIComponent(
           requestUrl.pathname.replace(/^\/api\/reviewer\/scan\/([^/]+)$/, "$1")
         );
-        const scan = await createReviewerMarketScan({
-          eventId,
-          marketCacheRepository,
-          reviewerScanRepository,
-          now
-        });
+        const timestamp = now().toISOString();
+        const queuedJob =
+          (await backgroundJobRepository?.create?.({
+            jobId: createBackgroundJobId(),
+            kind: "reviewer_scan",
+            status: "queued",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            attempts: 0,
+            retryable: false,
+            target: {
+              eventId
+            },
+            errorMessage: null,
+            result: null
+          })) ?? {
+            jobId: createBackgroundJobId(),
+            kind: "reviewer_scan",
+            status: "queued",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            attempts: 0,
+            retryable: false,
+            target: {
+              eventId
+            },
+            errorMessage: null,
+            result: null
+          };
+        if (!backgroundJobRepository) {
+          const scan = await runReviewerMarketScan({
+            eventId,
+            marketCacheRepository,
+            reviewerScanRepository,
+            now
+          });
+
+          sendJson(response, 202, {
+            ok: true,
+            scan
+          });
+          return;
+        }
+
+        const processingJob = await startBackgroundJob(queuedJob);
 
         sendJson(response, 202, {
           ok: true,
-          scan
+          job: buildBackgroundJobPayload(processingJob)
         });
       } catch (error) {
         if (error.statusCode) {
@@ -886,22 +1086,101 @@ export function createServer({
 
       try {
         const markets = (await marketCacheRepository?.list?.()) ?? [];
-        const scans = [];
+        const jobs = [];
 
         for (const market of markets) {
-          scans.push(
-            await createReviewerMarketScan({
-              eventId: market.marketId,
-              marketCacheRepository,
-              reviewerScanRepository,
-              now
-            })
-          );
+          const timestamp = now().toISOString();
+          const queuedJob =
+            (await backgroundJobRepository?.create?.({
+              jobId: createBackgroundJobId(),
+              kind: "reviewer_scan",
+              status: "queued",
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              attempts: 0,
+              retryable: false,
+              target: {
+                eventId: market.marketId
+              },
+              errorMessage: null,
+              result: null
+            })) ?? null;
+
+          if (queuedJob) {
+            jobs.push(await startBackgroundJob(queuedJob));
+          } else {
+            jobs.push(
+              await runReviewerMarketScan({
+                eventId: market.marketId,
+                marketCacheRepository,
+                reviewerScanRepository,
+                now
+              })
+            );
+          }
         }
 
         sendJson(response, 202, {
           ok: true,
-          scans
+          ...(backgroundJobRepository
+            ? { jobs: jobs.map(buildBackgroundJobPayload) }
+            : { scans: jobs })
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      /^\/api\/reviewer\/jobs\/[^/]+\/retry$/.test(requestUrl.pathname)
+    ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const jobId = decodeURIComponent(
+          requestUrl.pathname.replace(/^\/api\/reviewer\/jobs\/([^/]+)\/retry$/, "$1")
+        );
+        const job = await backgroundJobRepository?.findByJobId?.(jobId);
+
+        if (!job) {
+          sendJson(response, 404, {
+            ok: false,
+            error: {
+              code: "JOB_NOT_FOUND",
+              message: "Background job was not found."
+            }
+          });
+          return;
+        }
+
+        if (job.status !== "failed" || !job.retryable) {
+          sendJson(response, 409, {
+            ok: false,
+            error: {
+              code: "JOB_NOT_RETRYABLE",
+              message: "Only failed retryable jobs can be retried."
+            }
+          });
+          return;
+        }
+
+        const processingJob = await startBackgroundJob(job);
+
+        sendJson(response, 202, {
+          ok: true,
+          job: buildBackgroundJobPayload(processingJob)
         });
       } catch (error) {
         sendJson(response, 500, {

@@ -6,6 +6,7 @@ function buildRecommendation(llmOutput) {
 }
 
 export async function createReviewerMarketScan({
+  jobId,
   eventId,
   marketCacheRepository,
   reviewerScanRepository,
@@ -31,6 +32,7 @@ export async function createReviewerMarketScan({
   });
   const scan = {
     scanId: `scan_${eventId}_${createdAt}`,
+    jobId: jobId ?? null,
     eventId,
     createdAt,
     ambiguity_score: llmOutput.ambiguity_score,

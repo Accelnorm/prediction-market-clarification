@@ -6,6 +6,7 @@ const EMPTY_STORE = { scans: [] };
 export class FileReviewerScanRepository {
   constructor(filePath) {
     this.filePath = filePath;
+    this.writeChain = Promise.resolve();
   }
 
   async load() {
@@ -47,9 +48,32 @@ export class FileReviewerScanRepository {
   }
 
   async create(scan) {
-    const store = await this.load();
-    const scans = [...store.scans, scan];
-    await this.save(scans);
-    return scan;
+    return this.withWriteLock(async () => {
+      const store = await this.load();
+      const existingIndex =
+        typeof scan.jobId === "string"
+          ? store.scans.findIndex((existingScan) => existingScan.jobId === scan.jobId)
+          : -1;
+
+      if (existingIndex !== -1) {
+        const scans = [...store.scans];
+        scans[existingIndex] = {
+          ...scans[existingIndex],
+          ...scan
+        };
+        await this.save(scans);
+        return scans[existingIndex];
+      }
+
+      const scans = [...store.scans, scan];
+      await this.save(scans);
+      return scan;
+    });
+  }
+
+  async withWriteLock(work) {
+    const nextOperation = this.writeChain.then(work);
+    this.writeChain = nextOperation.catch(() => {});
+    return nextOperation;
   }
 }
