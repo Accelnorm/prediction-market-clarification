@@ -876,6 +876,65 @@ test("reviewer-only clarification routes reject incorrect reviewer tokens", asyn
   }
 });
 
+test("reviewer-only artifact routes reject incorrect reviewer tokens", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const artifactRepository = new FileArtifactRepository(path.join(tempDir, "artifacts.json"));
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+
+  await repository.create({
+    clarificationId: "clar_reviewer_artifact_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_btc_above_100k",
+    question: "Should only Gemini spot prints count?",
+    llmOutput: {
+      ambiguity_score: 0.61
+    },
+    artifactCid: "bafyreviewerartifact001",
+    artifactUrl: "ipfs://bafyreviewerartifact001",
+    createdAt: "2026-03-21T19:29:30.000Z",
+    updatedAt: "2026-03-21T19:29:30.000Z"
+  });
+  const artifact = await artifactRepository.createArtifact({
+    clarificationId: "clar_reviewer_artifact_001",
+    eventId: "gm_btc_above_100k",
+    marketText: VALID_MARKET.resolution,
+    suggestedEditedMarketText: "Use Gemini BTC/USD spot prints only.",
+    clarificationNote: "Reviewer-only artifact payload",
+    generatedAtUtc: "2026-03-21T19:29:30.000Z"
+  });
+
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    artifactRepository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T19:29:30.000Z"),
+    createClarificationId: () => "unused",
+    reviewerAuthToken: "reviewer-secret"
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/artifacts/${artifact.cid}`, {
+      headers: createReviewerHeaders("wrong-reviewer-secret")
+    });
+
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      error: {
+        code: "REVIEWER_AUTH_REQUIRED",
+        message: "Reviewer authentication is required for this route."
+      }
+    });
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test("clarification detail responses include adaptive review windows bounded between one and twenty-four hours", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
   const repository = new FileClarificationRequestRepository(
