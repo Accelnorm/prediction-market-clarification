@@ -54,7 +54,61 @@ function formatWorkflowLabel(state) {
     .join(" ");
 }
 
-function buildFundingDetails(clarifications = []) {
+function normalizeFundingHistory(history = []) {
+  return history
+    .filter(
+      (entry) =>
+        entry &&
+        typeof entry.contributor === "string" &&
+        entry.contributor.trim() !== "" &&
+        typeof entry.amount === "string" &&
+        entry.amount !== "" &&
+        typeof entry.timestamp === "string" &&
+        entry.timestamp !== ""
+    )
+    .map((entry) => ({
+      contributor: entry.contributor,
+      amount: Number.parseFloat(entry.amount).toFixed(2),
+      timestamp: entry.timestamp,
+      reference: entry.reference ?? null
+    }))
+    .sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+}
+
+function buildFundingDetailsFromHistory(history = [], targetAmount = "1.00") {
+  const normalizedHistory = normalizeFundingHistory(history);
+
+  if (normalizedHistory.length === 0) {
+    return {
+      targetAmount,
+      raisedAmount: "0.00",
+      contributorCount: 0,
+      fundingState: "unfunded",
+      history: []
+    };
+  }
+
+  const raisedAmount = normalizedHistory
+    .reduce((total, entry) => total + Number.parseFloat(entry.amount), 0)
+    .toFixed(2);
+  const contributorCount = new Set(
+    normalizedHistory.map((entry) => entry.contributor)
+  ).size;
+  const fundingState =
+    Number.parseFloat(raisedAmount) >= Number.parseFloat(targetAmount)
+      ? "funded"
+      : "funding_in_progress";
+
+  return {
+    targetAmount,
+    raisedAmount,
+    contributorCount,
+    fundingState,
+    history: normalizedHistory
+  };
+}
+
+function buildFundingDetailsFromClarifications(clarifications = []) {
   const fundingProgress = buildFundingProgress(clarifications);
   const history = clarifications
     .filter(
@@ -73,6 +127,28 @@ function buildFundingDetails(clarifications = []) {
     ...fundingProgress,
     history
   };
+}
+
+function buildFundingDetails(clarification, relatedClarifications = []) {
+  if (clarification?.funding && Array.isArray(clarification.funding.history)) {
+    return buildFundingDetailsFromHistory(
+      clarification.funding.history,
+      clarification.funding.targetAmount ?? "1.00"
+    );
+  }
+
+  return buildFundingDetailsFromClarifications(relatedClarifications);
+}
+
+function buildStoredFundingDetails(clarification) {
+  if (clarification?.funding && Array.isArray(clarification.funding.history)) {
+    return buildFundingDetailsFromHistory(
+      clarification.funding.history,
+      clarification.funding.targetAmount ?? "1.00"
+    );
+  }
+
+  return buildFundingDetailsFromHistory([]);
 }
 
 function buildReviewerVotePayload(clarification) {
@@ -105,7 +181,7 @@ function buildReviewerClarificationPayload({
       slug: market?.slug ?? null,
       url: market?.url ?? null
     },
-    funding: buildFundingDetails(relatedClarifications),
+    funding: buildFundingDetails(clarification, relatedClarifications),
     vote: buildReviewerVotePayload(clarification),
     ...adaptiveReviewWindow
   };
@@ -172,6 +248,43 @@ function buildFundingProgress(clarifications = []) {
     targetAmount: "1.00",
     contributorCount,
     fundingState
+  };
+}
+
+function buildQueueFundingProgress(latestClarification, clarifications = []) {
+  return latestClarification?.funding
+    ? buildFundingDetails(latestClarification, clarifications)
+    : buildFundingProgress(clarifications);
+}
+
+function parseReviewerFundingContributionPayload(payload) {
+  const contributor = String(payload?.contributor ?? "").trim();
+  const amount = String(payload?.amount ?? "").trim();
+  const reference =
+    payload?.reference === undefined || payload?.reference === null
+      ? null
+      : String(payload.reference).trim() || null;
+
+  if (!contributor) {
+    const error = new Error("Contributor is required.");
+    error.statusCode = 400;
+    error.code = "INVALID_FUNDING_CONTRIBUTOR";
+    throw error;
+  }
+
+  const parsedAmount = Number.parseFloat(amount);
+
+  if (!amount || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    const error = new Error("Funding amount must be a positive decimal string.");
+    error.statusCode = 400;
+    error.code = "INVALID_FUNDING_AMOUNT";
+    throw error;
+  }
+
+  return {
+    contributor,
+    amount: parsedAmount.toFixed(2),
+    reference
   };
 }
 
@@ -510,7 +623,10 @@ export function createServer({
               market,
               now: now()
             });
-          const fundingProgress = buildFundingProgress(eventClarifications);
+          const fundingProgress = buildQueueFundingProgress(
+            latestClarification,
+            eventClarifications
+          );
           const voteStatus = latestClarification?.reviewerWorkflowStatus ?? "not_started";
           const queueStates = buildQueueStates({
             latestScan,
@@ -952,6 +1068,145 @@ export function createServer({
               finalizedBy: finalizedClarification.finalizedBy
             }
           }
+        });
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          sendJson(response, 400, {
+            ok: false,
+            error: {
+              code: "INVALID_JSON",
+              message: "Request body must be valid JSON."
+            }
+          });
+          return;
+        }
+
+        if (error.statusCode) {
+          sendJson(response, error.statusCode, {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message
+            }
+          });
+          return;
+        }
+
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      /^\/api\/reviewer\/clarifications\/[^/]+\/funding$/.test(requestUrl.pathname)
+    ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const clarificationId = decodeURIComponent(
+          requestUrl.pathname.replace(
+            /^\/api\/reviewer\/clarifications\/([^/]+)\/funding$/,
+            "$1"
+          )
+        );
+        const clarification =
+          await clarificationRequestRepository.findByClarificationId(clarificationId);
+
+        if (!clarification) {
+          sendJson(response, 404, {
+            ok: false,
+            error: {
+              code: "CLARIFICATION_NOT_FOUND",
+              message: "Clarification not found."
+            }
+          });
+          return;
+        }
+
+        sendJson(response, 200, {
+          ok: true,
+          funding: buildStoredFundingDetails(clarification)
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      /^\/api\/reviewer\/clarifications\/[^/]+\/funding\/contributions$/.test(
+        requestUrl.pathname
+      )
+    ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const clarificationId = decodeURIComponent(
+          requestUrl.pathname.replace(
+            /^\/api\/reviewer\/clarifications\/([^/]+)\/funding\/contributions$/,
+            "$1"
+          )
+        );
+        const clarification =
+          await clarificationRequestRepository.findByClarificationId(clarificationId);
+
+        if (!clarification) {
+          sendJson(response, 404, {
+            ok: false,
+            error: {
+              code: "CLARIFICATION_NOT_FOUND",
+              message: "Clarification not found."
+            }
+          });
+          return;
+        }
+
+        const contribution = parseReviewerFundingContributionPayload(
+          await readJsonBody(request)
+        );
+        const updatedAt = now().toISOString();
+        const existingFunding = buildStoredFundingDetails(clarification);
+        const funding = buildFundingDetailsFromHistory(
+          [
+            {
+              ...contribution,
+              timestamp: updatedAt
+            },
+            ...existingFunding.history
+          ],
+          existingFunding.targetAmount
+        );
+        const updatedClarification =
+          await clarificationRequestRepository.updateByClarificationId(clarificationId, {
+            funding,
+            updatedAt
+          });
+
+        sendJson(response, 201, {
+          ok: true,
+          funding: updatedClarification.funding
         });
       } catch (error) {
         if (error instanceof SyntaxError) {

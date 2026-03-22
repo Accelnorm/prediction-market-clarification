@@ -1281,6 +1281,180 @@ test("GET /api/reviewer/clarifications/:clarificationId returns reviewer detail 
   }
 });
 
+test("GET /api/reviewer/clarifications/:clarificationId/funding returns a per-clarification funding read model and contribution history", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-funding-status-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  await clarificationRequestRepository.create({
+    clarificationId: "clar_funding_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_btc_above_100k",
+    question: "Should reviewer funding history stay attached to one clarification?",
+    requesterId: "wallet_funding_001",
+    paymentAmount: "1.00",
+    paymentAsset: "USDC",
+    paymentReference: "x402_ref_funding_001",
+    paymentProof: "pay_proof_funding_001",
+    paymentVerifiedAt: "2026-03-21T20:55:00.000Z",
+    createdAt: "2026-03-21T20:55:00.000Z",
+    updatedAt: "2026-03-21T20:55:00.000Z"
+  });
+
+  let nowCallCount = 0;
+  const timestamps = ["2026-03-21T21:00:00.000Z", "2026-03-21T21:05:00.000Z"];
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
+    marketCacheRepository,
+    now: () => new Date(timestamps[Math.min(nowCallCount++, timestamps.length - 1)]),
+    reviewerAuthToken: "reviewer-secret"
+  });
+
+  try {
+    const emptyFundingResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_funding_001/funding`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+
+    assert.equal(emptyFundingResponse.status, 200);
+    assert.deepEqual(await emptyFundingResponse.json(), {
+      ok: true,
+      funding: {
+        targetAmount: "1.00",
+        raisedAmount: "0.00",
+        contributorCount: 0,
+        fundingState: "unfunded",
+        history: []
+      }
+    });
+
+    const firstContributionResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_funding_001/funding/contributions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...createReviewerHeaders()
+        },
+        body: JSON.stringify({
+          contributor: "desk.alpha",
+          amount: "0.40"
+        })
+      }
+    );
+
+    assert.equal(firstContributionResponse.status, 201);
+    assert.deepEqual(await firstContributionResponse.json(), {
+      ok: true,
+      funding: {
+        targetAmount: "1.00",
+        raisedAmount: "0.40",
+        contributorCount: 1,
+        fundingState: "funding_in_progress",
+        history: [
+          {
+            contributor: "desk.alpha",
+            amount: "0.40",
+            timestamp: "2026-03-21T21:00:00.000Z",
+            reference: null
+          }
+        ]
+      }
+    });
+
+    const secondContributionResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_funding_001/funding/contributions`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...createReviewerHeaders()
+        },
+        body: JSON.stringify({
+          contributor: "desk.beta",
+          amount: "0.60",
+          reference: "contribution_beta_001"
+        })
+      }
+    );
+
+    assert.equal(secondContributionResponse.status, 201);
+    assert.deepEqual(await secondContributionResponse.json(), {
+      ok: true,
+      funding: {
+        targetAmount: "1.00",
+        raisedAmount: "1.00",
+        contributorCount: 2,
+        fundingState: "funded",
+        history: [
+          {
+            contributor: "desk.beta",
+            amount: "0.60",
+            timestamp: "2026-03-21T21:05:00.000Z",
+            reference: "contribution_beta_001"
+          },
+          {
+            contributor: "desk.alpha",
+            amount: "0.40",
+            timestamp: "2026-03-21T21:00:00.000Z",
+            reference: null
+          }
+        ]
+      }
+    });
+
+    const detailResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_funding_001`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+    assert.equal(detailResponse.status, 200);
+    assert.deepEqual((await detailResponse.json()).clarification.funding, {
+      targetAmount: "1.00",
+      raisedAmount: "1.00",
+      contributorCount: 2,
+      fundingState: "funded",
+      history: [
+        {
+          contributor: "desk.beta",
+          amount: "0.60",
+          timestamp: "2026-03-21T21:05:00.000Z",
+          reference: "contribution_beta_001"
+        },
+        {
+          contributor: "desk.alpha",
+          amount: "0.40",
+          timestamp: "2026-03-21T21:00:00.000Z",
+          reference: null
+        }
+      ]
+    });
+
+    const missingResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_missing_404/funding`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+    assert.equal(missingResponse.status, 404);
+    assert.deepEqual(await missingResponse.json(), {
+      ok: false,
+      error: {
+        code: "CLARIFICATION_NOT_FOUND",
+        message: "Clarification not found."
+      }
+    });
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test("POST /api/reviewer/clarifications/:clarificationId/awaiting-panel-vote stores placeholder vote workflow status without chain integration", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-vote-placeholder-"));
   const clarificationRequestRepository = new FileClarificationRequestRepository(
