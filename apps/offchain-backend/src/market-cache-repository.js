@@ -38,4 +38,22 @@ export class FileMarketCacheRepository {
     const cache = await this.load();
     return cache.markets.find((market) => market.marketId === marketId) ?? null;
   }
+
+  async upsert(market) {
+    const cache = await this.load();
+    const marketIndex = cache.markets.findIndex(
+      (existingMarket) => existingMarket.marketId === market.marketId
+    );
+    const nextMarkets = [...cache.markets];
+
+    if (marketIndex === -1) {
+      nextMarkets.push(market);
+    } else {
+      nextMarkets[marketIndex] = market;
+    }
+
+    nextMarkets.sort((left, right) => left.marketId.localeCompare(right.marketId));
+    await this.save(nextMarkets);
+    return market;
+  }
 }

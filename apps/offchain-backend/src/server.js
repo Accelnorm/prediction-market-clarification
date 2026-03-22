@@ -1,6 +1,7 @@
 import http from "node:http";
 
 import { runAutomaticClarificationPipeline as runDefaultAutomaticClarificationPipeline } from "./automatic-llm-pipeline.js";
+import { refreshReviewerMarketData } from "./reviewer-refresh-market.js";
 import { createTelegramClarificationRequest } from "./telegram-request-flow.js";
 import {
   buildTelegramDeliveryPayload,
@@ -113,6 +114,7 @@ export function createServer({
   createClarificationId,
   llmTraceability,
   reviewerAuthToken,
+  fetchReviewerMarketSource,
   runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline
 }) {
   return http.createServer(async (request, response) => {
@@ -447,6 +449,54 @@ export function createServer({
           scans
         });
       } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      /^\/api\/reviewer\/refresh-market\/[^/]+$/.test(requestUrl.pathname)
+    ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const eventId = decodeURIComponent(
+          requestUrl.pathname.replace(/^\/api\/reviewer\/refresh-market\/([^/]+)$/, "$1")
+        );
+        const market = await refreshReviewerMarketData({
+          eventId,
+          marketCacheRepository,
+          fetchReviewerMarketSource,
+          now
+        });
+
+        sendJson(response, 200, {
+          ok: true,
+          market
+        });
+      } catch (error) {
+        if (error.statusCode) {
+          sendJson(response, error.statusCode, {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message
+            }
+          });
+          return;
+        }
+
         sendJson(response, 500, {
           ok: false,
           error: {
