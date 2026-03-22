@@ -645,6 +645,17 @@ function buildPrelaunchQueueItem({ market, latestScan, now }) {
   };
 }
 
+function isFutureUpcomingMarket(market, referenceNow) {
+  const closesAt = market?.closesAt ?? market?.endTime ?? market?.expiryDate ?? null;
+
+  if (typeof closesAt !== "string" || closesAt.trim() === "") {
+    return false;
+  }
+
+  const closesAtMs = Date.parse(closesAt);
+  return Number.isFinite(closesAtMs) && closesAtMs > referenceNow.getTime();
+}
+
 function parseReviewerFinalizationPayload(payload) {
   const finalEditedText = String(payload?.finalEditedText ?? "").trim();
   const finalNote = String(payload?.finalNote ?? "").trim();
@@ -770,6 +781,7 @@ export function createServer({
   const log = buildLogger(logger);
   const rateLimiter = clarifyRateLimiter ?? createInMemoryRateLimiter();
   let isShuttingDown = false;
+  const upcomingMarketTextScanLocks = new Map();
 
   function getMarketRepositoryForStage(marketStage = "active") {
     return marketStage === "upcoming" ? upcomingMarketCacheRepository : marketCacheRepository;
@@ -886,7 +898,11 @@ export function createServer({
         marketCacheRepository: getMarketRepositoryForStage(marketStage),
         reviewerScanRepository: getReviewerScanRepositoryForStage(marketStage),
         now,
-        llmRuntime
+        llmRuntime,
+        requireUpcomingOpenMarket: marketStage === "upcoming",
+        dedupeByMarketText: marketStage === "upcoming",
+        inFlightMarketTextScans:
+          marketStage === "upcoming" ? upcomingMarketTextScanLocks : null
       });
 
       await backgroundJobRepository?.updateByJobId?.(job.jobId, {
@@ -1691,7 +1707,11 @@ export function createServer({
             eventId,
             marketCacheRepository: upcomingMarketCacheRepository,
             reviewerScanRepository: upcomingReviewerScanRepository,
-            now
+            now,
+            llmRuntime,
+            requireUpcomingOpenMarket: true,
+            dedupeByMarketText: true,
+            inFlightMarketTextScans: upcomingMarketTextScanLocks
           });
 
           sendJson(response, 202, {
@@ -1799,7 +1819,9 @@ export function createServer({
       }
 
       try {
-        const markets = (await upcomingMarketCacheRepository?.list?.()) ?? [];
+        const markets = ((await upcomingMarketCacheRepository?.list?.()) ?? []).filter((market) =>
+          isFutureUpcomingMarket(market, now())
+        );
         const jobs = [];
 
         for (const market of markets) {
@@ -1829,7 +1851,11 @@ export function createServer({
                 eventId: market.marketId,
                 marketCacheRepository: upcomingMarketCacheRepository,
                 reviewerScanRepository: upcomingReviewerScanRepository,
-                now
+                now,
+                llmRuntime,
+                requireUpcomingOpenMarket: true,
+                dedupeByMarketText: true,
+                inFlightMarketTextScans: upcomingMarketTextScanLocks
               })
             );
           }

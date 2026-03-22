@@ -54,6 +54,14 @@ const UPCOMING_MARKET = {
   lastSyncedAt: "2026-03-21T20:00:00.000Z"
 };
 
+function buildUpcomingMarket(overrides = {}) {
+  return {
+    ...UPCOMING_MARKET,
+    ...overrides,
+    contracts: overrides.contracts ?? UPCOMING_MARKET.contracts
+  };
+}
+
 async function startTestServer(options) {
   const server = createServer(options);
 
@@ -151,6 +159,138 @@ test("reviewer prelaunch queue and scan endpoints operate on upcoming Gemini mar
     assert.equal(queueAfterScanPayload.queue[0].needsScan, false);
     assert.equal(queueAfterScanPayload.queue[0].latestScanId, scanPayload.scan.scanId);
   } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("prelaunch scan-all only analyzes future upcoming markets and reuses identical market text", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "prelaunch-reviewer-"));
+  const upcomingMarkets = [
+    buildUpcomingMarket({
+      marketId: "9058",
+      ticker: "BRENT2603222100",
+      resolution:
+        "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC.",
+      resolutionText:
+        "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC."
+    }),
+    buildUpcomingMarket({
+      marketId: "9059",
+      ticker: "BRENT2603222200",
+      title: "Oil (Brent) alternate listing?",
+      slug: "oil-brent-price-alternate",
+      resolution:
+        "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC.",
+      resolutionText:
+        "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC."
+    }),
+    buildUpcomingMarket({
+      marketId: "9060",
+      ticker: "BRENT2603202100",
+      title: "Expired market should not scan",
+      slug: "expired-market-should-not-scan",
+      closesAt: "2026-03-20T21:00:00.000Z",
+      endTime: "2026-03-20T21:00:00.000Z",
+      expiryDate: "2026-03-20T21:00:00.000Z",
+      resolution: "Resolves YES if Brent settles above $106 on March 20 2026.",
+      resolutionText: "Resolves YES if Brent settles above $106 on March 20 2026."
+    })
+  ];
+  const upcomingMarketCacheRepository = await createUpcomingMarketCacheRepository(
+    tempDir,
+    upcomingMarkets
+  );
+  const upcomingReviewerScanRepository = await createUpcomingReviewerScanRepository(tempDir);
+  const originalFetch = globalThis.fetch;
+  const llmRequests = [];
+
+  globalThis.fetch = async (url, options) => {
+    if (String(url).startsWith("https://openrouter.test/api/v1/")) {
+      llmRequests.push({ url, options });
+
+      return {
+        ok: true,
+        async json() {
+          return {
+            model: "openrouter/auto",
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    verdict: "needs_clarification",
+                    llm_status: "completed",
+                    reasoning: "The resolution text does not specify whether auction prints count.",
+                    cited_clause:
+                      "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC.",
+                    ambiguity_score: 0.81,
+                    ambiguity_summary: "The qualifying Gemini trade source is underspecified.",
+                    suggested_market_text:
+                      "Will Gemini BTC/USD spot trade above $100,000 on the primary continuous order book before December 31 2026 23:59 UTC?",
+                    suggested_note:
+                      "Exclude auctions and use the first qualifying continuous-order-book trade."
+                  })
+                }
+              }
+            ]
+          };
+        }
+      };
+    }
+
+    return originalFetch(url, options);
+  };
+
+  const { server, baseUrl } = await startTestServer({
+    reviewerAuthToken: "reviewer-secret",
+    now: () => new Date("2026-03-21T21:00:00.000Z"),
+    llmRuntime: {
+      provider: "openrouter",
+      apiKey: "openrouter-key",
+      model: "openrouter/auto",
+      baseUrl: "https://openrouter.test/api/v1"
+    },
+    upcomingMarketCacheRepository,
+    upcomingReviewerScanRepository
+  });
+
+  try {
+    const scanAllResponse = await fetch(`${baseUrl}/api/reviewer/prelaunch/scan-all`, {
+      method: "POST",
+      headers: createReviewerHeaders()
+    });
+
+    assert.equal(scanAllResponse.status, 202);
+    const scanAllPayload = await scanAllResponse.json();
+    assert.equal(scanAllPayload.ok, true);
+    assert.equal(scanAllPayload.scans.length, 2);
+    assert.equal(llmRequests.length, 1);
+
+    const storedScans = await upcomingReviewerScanRepository.list();
+    assert.equal(storedScans.length, 2);
+    assert.deepEqual(
+      storedScans.map((scan) => scan.eventId).sort(),
+      ["9058", "9059"]
+    );
+    assert.equal(
+      storedScans.filter((scan) => scan.eventId === "9060").length,
+      0
+    );
+
+    const primaryScan = storedScans.find((scan) => scan.eventId === "9058");
+    const reusedScan = storedScans.find((scan) => scan.eventId === "9059");
+
+    assert.equal(primaryScan.ambiguity_score, 0.81);
+    assert.equal(reusedScan.ambiguity_score, 0.81);
+    assert.equal(
+      reusedScan.reusedFromEventId,
+      "9058"
+    );
+    assert.equal(
+      reusedScan.marketTextKey,
+      primaryScan.marketTextKey
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
     await stopTestServer(server);
   }
 });
