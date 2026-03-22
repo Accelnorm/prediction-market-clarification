@@ -32,8 +32,71 @@ export class FileClarificationRequestRepository {
 
   async create(request) {
     const store = await this.load();
-    const requests = [...store.requests, request];
+    const requests = [
+      ...store.requests,
+      {
+        ...request,
+        updatedAt: request.updatedAt ?? request.createdAt,
+        clarificationId: request.clarificationId ?? null,
+        summary: request.summary ?? null,
+        errorMessage: request.errorMessage ?? null,
+        statusHistory: Array.isArray(request.statusHistory)
+          ? request.statusHistory
+          : [{ status: request.status, timestamp: request.updatedAt ?? request.createdAt }]
+      }
+    ];
     await this.save(requests);
-    return request;
+    return requests.at(-1);
+  }
+
+  async findByTelegramIdentifiers({ telegramChatId, telegramUserId }) {
+    const store = await this.load();
+
+    return store.requests.filter((request) => {
+      if (telegramChatId && request.telegramChatId !== telegramChatId) {
+        return false;
+      }
+
+      if (telegramUserId && request.telegramUserId !== telegramUserId) {
+        return false;
+      }
+
+      return true;
+    });
+  }
+
+  async findByRequestId(requestId) {
+    const store = await this.load();
+    return store.requests.find((request) => request.requestId === requestId) ?? null;
+  }
+
+  async updateStatus(requestId, updates) {
+    const store = await this.load();
+    const requestIndex = store.requests.findIndex((request) => request.requestId === requestId);
+
+    if (requestIndex === -1) {
+      return null;
+    }
+
+    const existingRequest = store.requests[requestIndex];
+    const nextRequest = {
+      ...existingRequest,
+      status: updates.status,
+      updatedAt: updates.updatedAt,
+      clarificationId: updates.clarificationId ?? existingRequest.clarificationId ?? null,
+      summary: updates.summary ?? existingRequest.summary ?? null,
+      errorMessage: updates.errorMessage ?? existingRequest.errorMessage ?? null,
+      statusHistory: [
+        ...(Array.isArray(existingRequest.statusHistory) ? existingRequest.statusHistory : []),
+        {
+          status: updates.status,
+          timestamp: updates.updatedAt
+        }
+      ]
+    };
+    const requests = [...store.requests];
+    requests[requestIndex] = nextRequest;
+    await this.save(requests);
+    return nextRequest;
   }
 }

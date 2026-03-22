@@ -90,7 +90,17 @@ test("POST /api/telegram/webhook stores a pending clarification request and retu
       telegramChatId: "9001",
       telegramUserId: "42",
       telegramUsername: "marketwatcher",
-      createdAt: "2026-03-21T18:00:00.000Z"
+      createdAt: "2026-03-21T18:00:00.000Z",
+      updatedAt: "2026-03-21T18:00:00.000Z",
+      clarificationId: null,
+      summary: null,
+      errorMessage: null,
+      statusHistory: [
+        {
+          status: "pending",
+          timestamp: "2026-03-21T18:00:00.000Z"
+        }
+      ]
     });
   } finally {
     await stopTestServer(server);
@@ -188,6 +198,248 @@ test("POST /api/telegram/webhook rejects invalid market identifiers with an acti
 
     const stored = await repository.load();
     assert.deepEqual(stored.requests, []);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("GET /api/telegram/requests can look up clarification requests by originating chat and user identifiers", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "telegram-webhook-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    now: () => new Date("2026-03-21T18:10:00.000Z"),
+    createRequestId: () => "clr_telegram_lookup_001"
+  });
+
+  try {
+    const createResponse = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        update_id: 1004,
+        message: {
+          message_id: 80,
+          chat: {
+            id: 9010,
+            type: "private"
+          },
+          from: {
+            id: 55,
+            username: "lookupuser"
+          },
+          text: "/clarify gm_btc_above_100k Will Gemini auction prints count?"
+        }
+      })
+    });
+
+    assert.equal(createResponse.status, 202);
+
+    const response = await fetch(
+      `${baseUrl}/api/telegram/requests?chat_id=9010&user_id=55`
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      requests: [
+        {
+          requestId: "clr_telegram_lookup_001",
+          status: "pending",
+          marketId: "gm_btc_above_100k",
+          question: "Will Gemini auction prints count?",
+          telegramChatId: "9010",
+          telegramUserId: "55",
+          clarificationId: null,
+          summary: null,
+          errorMessage: null,
+          createdAt: "2026-03-21T18:10:00.000Z",
+          updatedAt: "2026-03-21T18:10:00.000Z"
+        }
+      ]
+    });
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/telegram/requests/:requestId/status emits processing and completed delivery payloads", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "telegram-webhook-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const timestamps = [
+    new Date("2026-03-21T18:20:00.000Z"),
+    new Date("2026-03-21T18:21:00.000Z"),
+    new Date("2026-03-21T18:22:00.000Z")
+  ];
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    now: () => timestamps.shift() ?? new Date("2026-03-21T18:22:00.000Z"),
+    createRequestId: () => "clr_telegram_status_001"
+  });
+
+  try {
+    await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        update_id: 1005,
+        message: {
+          message_id: 81,
+          chat: {
+            id: 9011,
+            type: "private"
+          },
+          from: {
+            id: 56
+          },
+          text: "/clarify gm_sol_above_500 Does the daily candle close decide the result?"
+        }
+      })
+    });
+
+    const processingResponse = await fetch(
+      `${baseUrl}/api/telegram/requests/clr_telegram_status_001/status`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          status: "processing"
+        })
+      }
+    );
+
+    assert.equal(processingResponse.status, 200);
+    assert.deepEqual(await processingResponse.json(), {
+      ok: true,
+      requestId: "clr_telegram_status_001",
+      status: "processing",
+      delivery: {
+        chatId: "9011",
+        text: "Clarification request clr_telegram_status_001 is processing for market gm_sol_above_500."
+      }
+    });
+
+    const completedResponse = await fetch(
+      `${baseUrl}/api/telegram/requests/clr_telegram_status_001/status`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          status: "completed",
+          clarificationId: "clar_001",
+          summary: "Gemini auction and spot prints both count toward resolution."
+        })
+      }
+    );
+
+    assert.equal(completedResponse.status, 200);
+    assert.deepEqual(await completedResponse.json(), {
+      ok: true,
+      requestId: "clr_telegram_status_001",
+      status: "completed",
+      delivery: {
+        chatId: "9011",
+        text: "Clarification clar_001 completed for request clr_telegram_status_001: Gemini auction and spot prints both count toward resolution."
+      }
+    });
+
+    const stored = await repository.load();
+    assert.equal(stored.requests[0].status, "completed");
+    assert.equal(stored.requests[0].clarificationId, "clar_001");
+    assert.equal(
+      stored.requests[0].summary,
+      "Gemini auction and spot prints both count toward resolution."
+    );
+    assert.deepEqual(
+      stored.requests[0].statusHistory.map((entry) => entry.status),
+      ["pending", "processing", "completed"]
+    );
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/telegram/requests/:requestId/status emits sanitized failed delivery payloads", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "telegram-webhook-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const timestamps = [
+    new Date("2026-03-21T18:30:00.000Z"),
+    new Date("2026-03-21T18:31:00.000Z")
+  ];
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    now: () => timestamps.shift() ?? new Date("2026-03-21T18:31:00.000Z"),
+    createRequestId: () => "clr_telegram_failed_001"
+  });
+
+  try {
+    await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        update_id: 1006,
+        message: {
+          message_id: 82,
+          chat: {
+            id: 9012,
+            type: "private"
+          },
+          from: {
+            id: 57
+          },
+          text: "/clarify gm_eth_below_2k Does the market use any non-USD Gemini pairs?"
+        }
+      })
+    });
+
+    const failedResponse = await fetch(
+      `${baseUrl}/api/telegram/requests/clr_telegram_failed_001/status`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          status: "failed",
+          errorMessage:
+            "Interpretation failed. Error: stack trace at worker.js:12:4 should not be exposed."
+        })
+      }
+    );
+
+    assert.equal(failedResponse.status, 200);
+    assert.deepEqual(await failedResponse.json(), {
+      ok: true,
+      requestId: "clr_telegram_failed_001",
+      status: "failed",
+      delivery: {
+        chatId: "9012",
+        text: "Clarification request clr_telegram_failed_001 failed. Please retry later."
+      }
+    });
+
+    const stored = await repository.load();
+    assert.equal(stored.requests[0].status, "failed");
+    assert.equal(
+      stored.requests[0].errorMessage,
+      "Interpretation failed. Error: stack trace at worker.js:12:4 should not be exposed."
+    );
   } finally {
     await stopTestServer(server);
   }
