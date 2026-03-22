@@ -95,6 +95,8 @@ test("POST /api/telegram/webhook stores a pending clarification request and retu
       clarificationId: null,
       summary: null,
       errorMessage: null,
+      retryable: false,
+      llmOutput: null,
       statusHistory: [
         {
           status: "pending",

@@ -1,5 +1,6 @@
 import http from "node:http";
 
+import { runAutomaticClarificationPipeline as runDefaultAutomaticClarificationPipeline } from "./automatic-llm-pipeline.js";
 import { createTelegramClarificationRequest } from "./telegram-request-flow.js";
 import {
   buildTelegramDeliveryPayload,
@@ -35,7 +36,8 @@ export function createServer({
   marketCacheRepository,
   now,
   createRequestId,
-  createClarificationId
+  createClarificationId,
+  runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline
 }) {
   return http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url, "http://127.0.0.1");
@@ -127,7 +129,7 @@ export function createServer({
           clarificationId: createClarificationId(),
           requestId: null,
           source: "paid_api",
-          status: "processing",
+          status: "queued",
           eventId,
           question: payload.question,
           normalizedInput: {
@@ -144,10 +146,38 @@ export function createServer({
           updatedAt: timestamp
         });
 
+        const processingClarification =
+          await clarificationRequestRepository.updateByClarificationId(clarification.clarificationId, {
+            status: "processing",
+            updatedAt: now().toISOString()
+          });
+
+        void Promise.resolve()
+          .then(() =>
+            runAutomaticClarificationPipeline({
+              clarification: processingClarification,
+              clarificationRequestRepository,
+              marketCacheRepository,
+              now
+            })
+          )
+          .catch(async (pipelineError) => {
+            await clarificationRequestRepository.updateByClarificationId(
+              clarification.clarificationId,
+              {
+                status: "failed",
+                updatedAt: now().toISOString(),
+                errorMessage: pipelineError.message,
+                retryable: true,
+                llmOutput: null
+              }
+            );
+          });
+
         sendJson(response, 202, {
           ok: true,
           clarificationId: clarification.clarificationId,
-          status: clarification.status
+          status: processingClarification.status
         });
       } catch (error) {
         if (error instanceof SyntaxError) {

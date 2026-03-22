@@ -40,6 +40,8 @@ export class FileClarificationRequestRepository {
         clarificationId: request.clarificationId ?? null,
         summary: request.summary ?? null,
         errorMessage: request.errorMessage ?? null,
+        retryable: request.retryable ?? false,
+        llmOutput: request.llmOutput ?? null,
         statusHistory: Array.isArray(request.statusHistory)
           ? request.statusHistory
           : [{ status: request.status, timestamp: request.updatedAt ?? request.createdAt }]
@@ -68,6 +70,13 @@ export class FileClarificationRequestRepository {
   async findByRequestId(requestId) {
     const store = await this.load();
     return store.requests.find((request) => request.requestId === requestId) ?? null;
+  }
+
+  async findByClarificationId(clarificationId) {
+    const store = await this.load();
+    return (
+      store.requests.find((request) => request.clarificationId === clarificationId) ?? null
+    );
   }
 
   async findByPaymentProof(paymentProof) {
@@ -102,6 +111,54 @@ export class FileClarificationRequestRepository {
           timestamp: updates.updatedAt
         }
       ]
+    };
+    const requests = [...store.requests];
+    requests[requestIndex] = nextRequest;
+    await this.save(requests);
+    return nextRequest;
+  }
+
+  async updateByClarificationId(clarificationId, updates) {
+    const store = await this.load();
+    const requestIndex = store.requests.findIndex(
+      (request) => request.clarificationId === clarificationId
+    );
+
+    if (requestIndex === -1) {
+      return null;
+    }
+
+    const existingRequest = store.requests[requestIndex];
+    const nextStatus = updates.status ?? existingRequest.status;
+    const nextUpdatedAt = updates.updatedAt ?? existingRequest.updatedAt;
+    const shouldAppendStatusHistory =
+      typeof updates.status === "string" && updates.status !== existingRequest.status;
+    const nextRequest = {
+      ...existingRequest,
+      ...updates,
+      status: nextStatus,
+      updatedAt: nextUpdatedAt,
+      errorMessage:
+        Object.prototype.hasOwnProperty.call(updates, "errorMessage")
+          ? updates.errorMessage
+          : existingRequest.errorMessage ?? null,
+      retryable:
+        Object.prototype.hasOwnProperty.call(updates, "retryable")
+          ? updates.retryable
+          : existingRequest.retryable ?? false,
+      llmOutput:
+        Object.prototype.hasOwnProperty.call(updates, "llmOutput")
+          ? updates.llmOutput
+          : existingRequest.llmOutput ?? null,
+      statusHistory: shouldAppendStatusHistory
+        ? [
+            ...(Array.isArray(existingRequest.statusHistory) ? existingRequest.statusHistory : []),
+            {
+              status: updates.status,
+              timestamp: nextUpdatedAt
+            }
+          ]
+        : existingRequest.statusHistory
     };
     const requests = [...store.requests];
     requests[requestIndex] = nextRequest;

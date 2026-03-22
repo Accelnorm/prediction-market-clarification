@@ -52,6 +52,24 @@ async function createMarketCacheRepository(tempDir, markets = [VALID_MARKET]) {
   return repository;
 }
 
+async function waitFor(assertion, { attempts = 25, delayMs = 10 } = {}) {
+  let lastError;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => {
+        setTimeout(resolve, delayMs);
+      });
+    }
+  }
+
+  throw lastError;
+}
+
 test("POST /api/clarify/:eventId rejects unpaid requests", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
   const repository = new FileClarificationRequestRepository(
@@ -109,7 +127,8 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
     clarificationRequestRepository: repository,
     marketCacheRepository,
     now: () => new Date("2026-03-21T19:05:00.000Z"),
-    createClarificationId: () => "clar_paid_001"
+    createClarificationId: () => "clar_paid_001",
+    runAutomaticClarificationPipeline: async () => {}
   });
 
   const payload = {
@@ -181,7 +200,13 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
       updatedAt: "2026-03-21T19:05:00.000Z",
       summary: null,
       errorMessage: null,
+      retryable: false,
+      llmOutput: null,
       statusHistory: [
+        {
+          status: "queued",
+          timestamp: "2026-03-21T19:05:00.000Z"
+        },
         {
           status: "processing",
           timestamp: "2026-03-21T19:05:00.000Z"
@@ -327,7 +352,8 @@ test("POST /api/clarify/:eventId stores normalized paid request input for compar
     clarificationRequestRepository: repository,
     marketCacheRepository,
     now: () => new Date("2026-03-21T19:20:00.000Z"),
-    createClarificationId: () => `clar_paid_norm_${String(nextClarification++).padStart(3, "0")}`
+    createClarificationId: () => `clar_paid_norm_${String(nextClarification++).padStart(3, "0")}`,
+    runAutomaticClarificationPipeline: async () => {}
   });
 
   try {
@@ -387,6 +413,158 @@ test("POST /api/clarify/:eventId stores normalized paid request input for compar
       {
         eventId: "gm_btc_above_100k",
         question: "Should Gemini auction prints count?"
+      }
+    ]);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/clarify/:eventId automatically runs the interpretation pipeline and stores completed output", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T19:25:00.000Z"),
+    createClarificationId: () => "clar_paid_pipeline_001"
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        requesterId: "wallet_pipeline",
+        question: "Should the market resolve from Gemini BTC/USD spot prints only?",
+        payment: {
+          proof: "pay_proof_pipeline_001",
+          amount: "1.00",
+          asset: "USDC",
+          reference: "x402_ref_pipeline_001",
+          verified: true
+        }
+      })
+    });
+
+    assert.equal(response.status, 202);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      clarificationId: "clar_paid_pipeline_001",
+      status: "processing"
+    });
+
+    await waitFor(async () => {
+      const storedRequest = await repository.findByClarificationId("clar_paid_pipeline_001");
+      assert.ok(storedRequest);
+      assert.equal(storedRequest.status, "completed");
+    });
+
+    const storedRequest = await repository.findByClarificationId("clar_paid_pipeline_001");
+    assert.deepEqual(storedRequest.statusHistory, [
+      {
+        status: "queued",
+        timestamp: "2026-03-21T19:25:00.000Z"
+      },
+      {
+        status: "processing",
+        timestamp: "2026-03-21T19:25:00.000Z"
+      },
+      {
+        status: "completed",
+        timestamp: "2026-03-21T19:25:00.000Z"
+      }
+    ]);
+    assert.deepEqual(storedRequest.llmOutput, {
+      verdict: "needs_clarification",
+      llm_status: "completed",
+      reasoning:
+        "The market text depends on Gemini BTC/USD spot prints but leaves room for ambiguity around which Gemini price feed or session record is authoritative.",
+      cited_clause:
+        "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC.",
+      ambiguity_score: 0.72,
+      ambiguity_summary:
+        "The resolution source is named at a high level, but the exact qualifying Gemini print is not explicit.",
+      suggested_market_text:
+        "Will Gemini BTC/USD spot trade above $100,000 on the primary Gemini exchange feed before December 31 2026 23:59 UTC?",
+      suggested_note:
+        "Use Gemini's primary BTC/USD spot exchange feed and count the first eligible trade print above $100,000 before expiry."
+    });
+    assert.equal(storedRequest.errorMessage, null);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/clarify/:eventId marks automatic interpretation failures as retryable", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T19:30:00.000Z"),
+    createClarificationId: () => "clar_paid_pipeline_fail_001",
+    runAutomaticClarificationPipeline: async () => {
+      throw new Error("LLM provider timeout");
+    }
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        requesterId: "wallet_pipeline_fail",
+        question: "What source data settles the market if Gemini pauses trading?",
+        payment: {
+          proof: "pay_proof_pipeline_fail_001",
+          amount: "1.00",
+          asset: "USDC",
+          reference: "x402_ref_pipeline_fail_001",
+          verified: true
+        }
+      })
+    });
+
+    assert.equal(response.status, 202);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      clarificationId: "clar_paid_pipeline_fail_001",
+      status: "processing"
+    });
+
+    await waitFor(async () => {
+      const storedRequest = await repository.findByClarificationId("clar_paid_pipeline_fail_001");
+      assert.ok(storedRequest);
+      assert.equal(storedRequest.status, "failed");
+    });
+
+    const storedRequest = await repository.findByClarificationId("clar_paid_pipeline_fail_001");
+    assert.equal(storedRequest.errorMessage, "LLM provider timeout");
+    assert.equal(storedRequest.retryable, true);
+    assert.equal(storedRequest.llmOutput, null);
+    assert.deepEqual(storedRequest.statusHistory, [
+      {
+        status: "queued",
+        timestamp: "2026-03-21T19:30:00.000Z"
+      },
+      {
+        status: "processing",
+        timestamp: "2026-03-21T19:30:00.000Z"
+      },
+      {
+        status: "failed",
+        timestamp: "2026-03-21T19:30:00.000Z"
       }
     ]);
   } finally {
