@@ -5,6 +5,7 @@ import {
   buildTelegramDeliveryPayload,
   parseTelegramStatusUpdate
 } from "./telegram-status-delivery.js";
+import { parsePaidClarificationRequest } from "./x402-paid-clarification.js";
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -32,7 +33,8 @@ async function readJsonBody(request) {
 export function createServer({
   clarificationRequestRepository,
   now,
-  createRequestId
+  createRequestId,
+  createClarificationId
 }) {
   return http.createServer(async (request, response) => {
     const requestUrl = new URL(request.url, "http://127.0.0.1");
@@ -51,6 +53,85 @@ export function createServer({
           ok: true,
           requestId: result.requestId,
           status: result.status
+        });
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          sendJson(response, 400, {
+            ok: false,
+            error: {
+              code: "INVALID_JSON",
+              message: "Request body must be valid JSON."
+            }
+          });
+          return;
+        }
+
+        if (error.statusCode) {
+          sendJson(response, error.statusCode, {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message
+            }
+          });
+          return;
+        }
+
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      /^\/api\/clarify\/[^/]+$/.test(requestUrl.pathname)
+    ) {
+      try {
+        const eventId = decodeURIComponent(
+          requestUrl.pathname.replace(/^\/api\/clarify\/([^/]+)$/, "$1")
+        );
+        const payload = parsePaidClarificationRequest(await readJsonBody(request));
+        const existingClarification =
+          await clarificationRequestRepository.findByPaymentProof(payload.paymentProof);
+
+        if (existingClarification) {
+          sendJson(response, 200, {
+            ok: true,
+            clarificationId: existingClarification.clarificationId,
+            status: existingClarification.status
+          });
+          return;
+        }
+
+        const timestamp = now().toISOString();
+        const clarification = await clarificationRequestRepository.create({
+          clarificationId: createClarificationId(),
+          requestId: null,
+          source: "paid_api",
+          status: "processing",
+          eventId,
+          question: payload.question,
+          requesterId: payload.requesterId,
+          paymentAmount: payload.paymentAmount,
+          paymentAsset: payload.paymentAsset,
+          paymentReference: payload.paymentReference,
+          paymentProof: payload.paymentProof,
+          paymentVerifiedAt: timestamp,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        });
+
+        sendJson(response, 202, {
+          ok: true,
+          clarificationId: clarification.clarificationId,
+          status: clarification.status
         });
       } catch (error) {
         if (error instanceof SyntaxError) {

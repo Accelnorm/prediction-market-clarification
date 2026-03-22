@@ -70,6 +70,15 @@ export class FileClarificationRequestRepository {
     return store.requests.find((request) => request.requestId === requestId) ?? null;
   }
 
+  async findByPaymentProof(paymentProof) {
+    const store = await this.load();
+    return (
+      store.requests.find(
+        (request) => typeof request.paymentProof === "string" && request.paymentProof === paymentProof
+      ) ?? null
+    );
+  }
+
   async updateStatus(requestId, updates) {
     const store = await this.load();
     const requestIndex = store.requests.findIndex((request) => request.requestId === requestId);
