@@ -49,7 +49,9 @@ test("syncMarkets stores normalized active markets in a file-backed cache", asyn
   assert.deepEqual(stored.markets[0], {
     marketId: activeMarket.id,
     title: activeMarket.title,
+    resolution: activeMarket.resolution,
     resolutionText: activeMarket.resolution,
+    closesAt: activeMarket.closesAt,
     endTime: activeMarket.closesAt,
     slug: activeMarket.slug,
     url: activeMarket.url,

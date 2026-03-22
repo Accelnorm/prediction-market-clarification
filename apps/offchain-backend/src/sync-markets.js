@@ -10,12 +10,43 @@ function isActiveMarket(market) {
   return false;
 }
 
+function extractRichTextText(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(extractRichTextText).filter(Boolean).join(" ").trim();
+  }
+
+  if (typeof value.value === "string") {
+    return value.value;
+  }
+
+  if (Array.isArray(value.content)) {
+    return value.content.map(extractRichTextText).filter(Boolean).join(" ").trim();
+  }
+
+  return "";
+}
+
 function normalizeMarket(market, lastSyncedAt) {
+  const resolutionText = String(
+    market.resolution ?? market.resolutionText ?? extractRichTextText(market.description)
+  );
+  const endTime = String(market.closesAt ?? market.endTime ?? market.expiryDate ?? "");
+
   return {
     marketId: String(market.id),
     title: String(market.title ?? ""),
-    resolutionText: String(market.resolution ?? market.resolutionText ?? ""),
-    endTime: String(market.closesAt ?? market.endTime ?? ""),
+    resolution: resolutionText,
+    resolutionText,
+    closesAt: endTime,
+    endTime,
     slug: market.slug ? String(market.slug) : null,
     url: market.url ? String(market.url) : null,
     lastSyncedAt
@@ -26,7 +57,9 @@ function sameMarketShape(left, right) {
   return (
     left.marketId === right.marketId &&
     left.title === right.title &&
+    left.resolution === right.resolution &&
     left.resolutionText === right.resolutionText &&
+    left.closesAt === right.closesAt &&
     left.endTime === right.endTime &&
     left.slug === right.slug &&
     left.url === right.url

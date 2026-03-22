@@ -1,30 +1,9 @@
-import { readFile } from "node:fs/promises";
-
 import { FileMarketCacheRepository } from "../market-cache-repository.js";
+import {
+  DEFAULT_GEMINI_MARKETS_SOURCE_URL,
+  fetchConfiguredMarkets
+} from "../gemini-markets-source.js";
 import { syncMarkets } from "../sync-markets.js";
-
-async function fetchConfiguredMarkets() {
-  const sourceUrl = process.env.GEMINI_MARKETS_SOURCE_URL;
-
-  if (!sourceUrl) {
-    throw new Error("GEMINI_MARKETS_SOURCE_URL is required");
-  }
-
-  if (sourceUrl.startsWith("file://")) {
-    const raw = await readFile(new URL(sourceUrl), "utf8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed.markets) ? parsed.markets : parsed;
-  }
-
-  const response = await fetch(sourceUrl);
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch markets: ${response.status} ${response.statusText}`);
-  }
-
-  const parsed = await response.json();
-  return Array.isArray(parsed.markets) ? parsed.markets : parsed;
-}
 
 async function main() {
   const cachePath =
@@ -32,7 +11,10 @@ async function main() {
   const repository = new FileMarketCacheRepository(cachePath);
   const result = await syncMarkets({
     repository,
-    fetchMarkets: fetchConfiguredMarkets
+    fetchMarkets: () =>
+      fetchConfiguredMarkets({
+        sourceUrl: process.env.GEMINI_MARKETS_SOURCE_URL ?? DEFAULT_GEMINI_MARKETS_SOURCE_URL
+      })
   });
 
   process.stdout.write(`${JSON.stringify(result)}\n`);
