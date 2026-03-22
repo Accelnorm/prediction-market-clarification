@@ -1594,6 +1594,21 @@ export function createServer({
         );
         const updatedAt = now().toISOString();
         const existingFunding = buildStoredFundingDetails(clarification);
+        const existingContribution =
+          contribution.reference === null
+            ? null
+            : existingFunding.history.find(
+                (entry) => entry.reference === contribution.reference
+              ) ?? null;
+
+        if (existingContribution) {
+          sendJson(response, 200, {
+            ok: true,
+            funding: existingFunding
+          });
+          return;
+        }
+
         const funding = buildFundingDetailsFromHistory(
           [
             {

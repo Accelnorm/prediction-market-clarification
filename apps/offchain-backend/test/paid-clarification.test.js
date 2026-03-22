@@ -1462,6 +1462,185 @@ test("GET /api/reviewer/clarifications/:clarificationId/funding returns a per-cl
   }
 });
 
+test("POST /api/reviewer/clarifications/:clarificationId/funding/contributions is idempotent by contribution reference and preserves structured 4xx/5xx errors", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-funding-idempotency-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+
+  await clarificationRequestRepository.create({
+    clarificationId: "clar_funding_idempotent_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_btc_above_100k",
+    question: "Should replayed contribution references be deduplicated?",
+    requesterId: "wallet_funding_dedupe_001",
+    paymentAmount: "1.00",
+    paymentAsset: "USDC",
+    paymentReference: "x402_ref_funding_dedupe_001",
+    paymentProof: "pay_proof_funding_dedupe_001",
+    paymentVerifiedAt: "2026-03-21T21:08:00.000Z",
+    createdAt: "2026-03-21T21:08:00.000Z",
+    updatedAt: "2026-03-21T21:08:00.000Z"
+  });
+
+  const contributionPath =
+    "/api/reviewer/clarifications/clar_funding_idempotent_001/funding/contributions";
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T21:10:00.000Z"),
+    reviewerAuthToken: "reviewer-secret"
+  });
+
+  try {
+    const firstContributionResponse = await fetch(`${baseUrl}${contributionPath}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...createReviewerHeaders()
+      },
+      body: JSON.stringify({
+        contributor: "desk.gamma",
+        amount: "0.55",
+        reference: "contribution_gamma_001"
+      })
+    });
+
+    assert.equal(firstContributionResponse.status, 201);
+    assert.deepEqual(await firstContributionResponse.json(), {
+      ok: true,
+      funding: {
+        targetAmount: "1.00",
+        raisedAmount: "0.55",
+        contributorCount: 1,
+        fundingState: "funding_in_progress",
+        history: [
+          {
+            contributor: "desk.gamma",
+            amount: "0.55",
+            timestamp: "2026-03-21T21:10:00.000Z",
+            reference: "contribution_gamma_001"
+          }
+        ]
+      }
+    });
+
+    const replayContributionResponse = await fetch(`${baseUrl}${contributionPath}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...createReviewerHeaders()
+      },
+      body: JSON.stringify({
+        contributor: "desk.gamma",
+        amount: "0.55",
+        reference: "contribution_gamma_001"
+      })
+    });
+
+    assert.equal(replayContributionResponse.status, 200);
+    assert.deepEqual(await replayContributionResponse.json(), {
+      ok: true,
+      funding: {
+        targetAmount: "1.00",
+        raisedAmount: "0.55",
+        contributorCount: 1,
+        fundingState: "funding_in_progress",
+        history: [
+          {
+            contributor: "desk.gamma",
+            amount: "0.55",
+            timestamp: "2026-03-21T21:10:00.000Z",
+            reference: "contribution_gamma_001"
+          }
+        ]
+      }
+    });
+
+    const storedClarification =
+      await clarificationRequestRepository.findByClarificationId("clar_funding_idempotent_001");
+    assert.deepEqual(storedClarification.funding.history, [
+      {
+        contributor: "desk.gamma",
+        amount: "0.55",
+        timestamp: "2026-03-21T21:10:00.000Z",
+        reference: "contribution_gamma_001"
+      }
+    ]);
+
+    const validationFailureResponse = await fetch(`${baseUrl}${contributionPath}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...createReviewerHeaders()
+      },
+      body: JSON.stringify({
+        contributor: "desk.gamma",
+        amount: "0"
+      })
+    });
+
+    assert.equal(validationFailureResponse.status, 400);
+    assert.deepEqual(await validationFailureResponse.json(), {
+      ok: false,
+      error: {
+        code: "INVALID_FUNDING_AMOUNT",
+        message: "Funding amount must be a positive decimal string."
+      }
+    });
+
+    const failingRepository = {
+      ...clarificationRequestRepository,
+      async findByClarificationId(clarificationId) {
+        return clarificationRequestRepository.findByClarificationId(clarificationId);
+      },
+      async updateByClarificationId() {
+        throw new Error("disk write failed");
+      }
+    };
+    const failingServer = await startTestServer({
+      clarificationRequestRepository: failingRepository,
+      marketCacheRepository,
+      now: () => new Date("2026-03-21T21:15:00.000Z"),
+      reviewerAuthToken: "reviewer-secret"
+    });
+
+    try {
+      const internalFailureResponse = await fetch(
+        `${failingServer.baseUrl}${contributionPath}`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...createReviewerHeaders()
+          },
+          body: JSON.stringify({
+            contributor: "desk.delta",
+            amount: "0.25",
+            reference: "contribution_delta_001"
+          })
+        }
+      );
+
+      assert.equal(internalFailureResponse.status, 500);
+      assert.deepEqual(await internalFailureResponse.json(), {
+        ok: false,
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "An unexpected error occurred."
+        }
+      });
+    } finally {
+      await stopTestServer(failingServer.server);
+    }
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test("POST /api/reviewer/clarifications/:clarificationId/awaiting-panel-vote stores placeholder vote workflow status without chain integration", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-vote-placeholder-"));
   const clarificationRequestRepository = new FileClarificationRequestRepository(
