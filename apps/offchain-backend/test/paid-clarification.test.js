@@ -2415,3 +2415,308 @@ test("GET /api/reviewer/queue supports persisted queue filters and segment metad
     await stopTestServer(server);
   }
 });
+
+test("GET /api/reviewer/clarifications/:clarificationId/audit reconstructs lifecycle state from persisted records", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-audit-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const artifactRepository = new FileArtifactRepository(path.join(tempDir, "artifacts.json"));
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+
+  const artifact = await artifactRepository.createArtifact({
+    clarificationId: "clar_audit_001",
+    eventId: "gm_btc_above_100k",
+    marketText: VALID_MARKET.resolution,
+    suggestedEditedMarketText:
+      "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?",
+    clarificationNote:
+      "Resolve only from Gemini's primary BTC/USD spot feed and exclude auction prints.",
+    generatedAtUtc: "2026-03-21T22:00:03.000Z"
+  });
+
+  await clarificationRequestRepository.create({
+    clarificationId: "clar_audit_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_btc_above_100k",
+    question: "Should Gemini auction prints count toward resolution?",
+    normalizedInput: {
+      eventId: "gm_btc_above_100k",
+      question: "Should Gemini auction prints count toward resolution?"
+    },
+    requesterId: "wallet_audit_001",
+    paymentAmount: "1.00",
+    paymentAsset: "USDC",
+    paymentReference: "x402_ref_audit_001",
+    paymentProof: "pay_proof_audit_001",
+    paymentVerifiedAt: "2026-03-21T22:00:00.000Z",
+    llmOutput: {
+      verdict: "needs_clarification",
+      llm_status: "completed",
+      reasoning: "The market text does not specify whether Gemini auction prints qualify.",
+      cited_clause: VALID_MARKET.resolution,
+      ambiguity_score: 0.81,
+      ambiguity_summary: "Gemini price source handling is ambiguous.",
+      suggested_market_text:
+        "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC?",
+      suggested_note:
+        "Use Gemini's primary BTC/USD spot exchange feed and exclude auction-only prints."
+    },
+    llmTrace: {
+      promptTemplateVersion: "prompt-v1",
+      modelId: "gemini-reviewer-001",
+      requestedAt: "2026-03-21T22:00:02.000Z",
+      processingVersion: "offchain-pipeline-2026-03-21"
+    },
+    artifactCid: artifact.cid,
+    artifactUrl: artifact.url,
+    reviewerWorkflowStatus: "finalized",
+    finalEditedText:
+      "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?",
+    finalNote:
+      "Resolve only from Gemini's primary BTC/USD spot feed and exclude auction prints.",
+    finalizedAt: "2026-03-21T22:05:00.000Z",
+    finalizedBy: "reviewer.alex",
+    funding: {
+      targetAmount: "1.00",
+      raisedAmount: "1.00",
+      contributorCount: 1,
+      fundingState: "funded",
+      history: [
+        {
+          contributor: "wallet_audit_001",
+          amount: "1.00",
+          timestamp: "2026-03-21T22:04:00.000Z",
+          reference: "fund_ref_audit_001"
+        }
+      ]
+    },
+    reviewerActions: [
+      {
+        type: "marked_awaiting_panel_vote",
+        actor: "reviewer.casey",
+        timestamp: "2026-03-21T22:03:00.000Z",
+        previousReviewerWorkflowStatus: "not_started"
+      },
+      {
+        type: "finalized",
+        actor: "reviewer.alex",
+        timestamp: "2026-03-21T22:05:00.000Z",
+        previousReviewerWorkflowStatus: "awaiting_panel_vote",
+        finalEditedText:
+          "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?",
+        finalNote:
+          "Resolve only from Gemini's primary BTC/USD spot feed and exclude auction prints."
+      }
+    ],
+    statusHistory: [
+      {
+        status: "queued",
+        timestamp: "2026-03-21T22:00:00.000Z"
+      },
+      {
+        status: "processing",
+        timestamp: "2026-03-21T22:00:01.000Z"
+      },
+      {
+        status: "completed",
+        timestamp: "2026-03-21T22:00:03.000Z"
+      }
+    ],
+    createdAt: "2026-03-21T22:00:00.000Z",
+    updatedAt: "2026-03-21T22:05:00.000Z"
+  });
+
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
+    artifactRepository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T22:06:00.000Z"),
+    reviewerAuthToken: "reviewer-secret"
+  });
+
+  try {
+    const unauthorizedResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_audit_001/audit`
+    );
+    assert.equal(unauthorizedResponse.status, 401);
+
+    const response = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_audit_001/audit`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      audit: {
+        clarificationId: "clar_audit_001",
+        eventId: "gm_btc_above_100k",
+        request: {
+          requestId: null,
+          source: "paid_api",
+          requesterId: "wallet_audit_001",
+          question: "Should Gemini auction prints count toward resolution?",
+          normalizedInput: {
+            eventId: "gm_btc_above_100k",
+            question: "Should Gemini auction prints count toward resolution?"
+          },
+          createdAt: "2026-03-21T22:00:00.000Z"
+        },
+        payment: {
+          amount: "1.00",
+          asset: "USDC",
+          reference: "x402_ref_audit_001",
+          proof: "pay_proof_audit_001",
+          verifiedAt: "2026-03-21T22:00:00.000Z"
+        },
+        statusHistory: [
+          {
+            status: "queued",
+            timestamp: "2026-03-21T22:00:00.000Z"
+          },
+          {
+            status: "processing",
+            timestamp: "2026-03-21T22:00:01.000Z"
+          },
+          {
+            status: "completed",
+            timestamp: "2026-03-21T22:00:03.000Z"
+          }
+        ],
+        llm: {
+          output: {
+            verdict: "needs_clarification",
+            llm_status: "completed",
+            reasoning:
+              "The market text does not specify whether Gemini auction prints qualify.",
+            cited_clause: VALID_MARKET.resolution,
+            ambiguity_score: 0.81,
+            ambiguity_summary: "Gemini price source handling is ambiguous.",
+            suggested_market_text:
+              "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC?",
+            suggested_note:
+              "Use Gemini's primary BTC/USD spot exchange feed and exclude auction-only prints."
+          },
+          trace: {
+            promptTemplateVersion: "prompt-v1",
+            modelId: "gemini-reviewer-001",
+            requestedAt: "2026-03-21T22:00:02.000Z",
+            processingVersion: "offchain-pipeline-2026-03-21"
+          }
+        },
+        artifact: {
+          cid: artifact.cid,
+          url: artifact.url,
+          generatedAtUtc: "2026-03-21T22:00:03.000Z"
+        },
+        funding: {
+          targetAmount: "1.00",
+          raisedAmount: "1.00",
+          contributorCount: 1,
+          fundingState: "funded",
+          history: [
+            {
+              contributor: "wallet_audit_001",
+              amount: "1.00",
+              timestamp: "2026-03-21T22:04:00.000Z",
+              reference: "fund_ref_audit_001"
+            }
+          ]
+        },
+        reviewerActions: [
+          {
+            type: "marked_awaiting_panel_vote",
+            actor: "reviewer.casey",
+            timestamp: "2026-03-21T22:03:00.000Z",
+            previousReviewerWorkflowStatus: "not_started"
+          },
+          {
+            type: "finalized",
+            actor: "reviewer.alex",
+            timestamp: "2026-03-21T22:05:00.000Z",
+            previousReviewerWorkflowStatus: "awaiting_panel_vote",
+            finalEditedText:
+              "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?",
+            finalNote:
+              "Resolve only from Gemini's primary BTC/USD spot feed and exclude auction prints."
+          }
+        ],
+        finalization: {
+          reviewerWorkflowStatus: "finalized",
+          finalEditedText:
+            "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?",
+          finalNote:
+            "Resolve only from Gemini's primary BTC/USD spot feed and exclude auction prints.",
+          finalizedAt: "2026-03-21T22:05:00.000Z",
+          finalizedBy: "reviewer.alex"
+        },
+        timeline: [
+          {
+            type: "status_changed",
+            timestamp: "2026-03-21T22:00:00.000Z",
+            status: "queued"
+          },
+          {
+            type: "status_changed",
+            timestamp: "2026-03-21T22:00:01.000Z",
+            status: "processing"
+          },
+          {
+            type: "llm_requested",
+            timestamp: "2026-03-21T22:00:02.000Z",
+            promptTemplateVersion: "prompt-v1",
+            modelId: "gemini-reviewer-001",
+            processingVersion: "offchain-pipeline-2026-03-21"
+          },
+          {
+            type: "status_changed",
+            timestamp: "2026-03-21T22:00:03.000Z",
+            status: "completed"
+          },
+          {
+            type: "artifact_published",
+            timestamp: "2026-03-21T22:00:03.000Z",
+            cid: artifact.cid,
+            url: artifact.url
+          },
+          {
+            type: "reviewer_action",
+            timestamp: "2026-03-21T22:03:00.000Z",
+            action: "marked_awaiting_panel_vote",
+            actor: "reviewer.casey",
+            details: {
+              previousReviewerWorkflowStatus: "not_started"
+            }
+          },
+          {
+            type: "funding_contribution_recorded",
+            timestamp: "2026-03-21T22:04:00.000Z",
+            contributor: "wallet_audit_001",
+            amount: "1.00",
+            reference: "fund_ref_audit_001"
+          },
+          {
+            type: "reviewer_action",
+            timestamp: "2026-03-21T22:05:00.000Z",
+            action: "finalized",
+            actor: "reviewer.alex",
+            details: {
+              previousReviewerWorkflowStatus: "awaiting_panel_vote",
+              finalEditedText:
+                "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?",
+              finalNote:
+                "Resolve only from Gemini's primary BTC/USD spot feed and exclude auction prints."
+            }
+          }
+        ]
+      }
+    });
+  } finally {
+    await stopTestServer(server);
+  }
+});

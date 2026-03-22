@@ -205,6 +205,133 @@ function buildReviewerClarificationPayload({
   return clarificationPayload;
 }
 
+function buildReviewerActionDetails(action) {
+  return Object.fromEntries(
+    Object.entries(action).filter(([key]) => !["type", "actor", "timestamp"].includes(key))
+  );
+}
+
+function buildClarificationAuditTimeline({ clarification, artifact }) {
+  const timeline = [];
+
+  for (const entry of Array.isArray(clarification.statusHistory)
+    ? clarification.statusHistory
+    : []) {
+    timeline.push({
+      type: "status_changed",
+      timestamp: entry.timestamp,
+      status: entry.status
+    });
+  }
+
+  if (clarification.llmTrace?.requestedAt) {
+    timeline.push({
+      type: "llm_requested",
+      timestamp: clarification.llmTrace.requestedAt,
+      promptTemplateVersion: clarification.llmTrace.promptTemplateVersion ?? null,
+      modelId: clarification.llmTrace.modelId ?? null,
+      processingVersion: clarification.llmTrace.processingVersion ?? null
+    });
+  }
+
+  if (artifact?.cid && artifact?.url) {
+    timeline.push({
+      type: "artifact_published",
+      timestamp: artifact.generatedAtUtc ?? clarification.updatedAt ?? clarification.createdAt,
+      cid: artifact.cid,
+      url: artifact.url
+    });
+  }
+
+  for (const contribution of buildStoredFundingDetails(clarification).history) {
+    timeline.push({
+      type: "funding_contribution_recorded",
+      timestamp: contribution.timestamp,
+      contributor: contribution.contributor,
+      amount: contribution.amount,
+      reference: contribution.reference ?? null
+    });
+  }
+
+  for (const action of Array.isArray(clarification.reviewerActions)
+    ? clarification.reviewerActions
+    : []) {
+    timeline.push({
+      type: "reviewer_action",
+      timestamp: action.timestamp,
+      action: action.type,
+      actor: action.actor ?? null,
+      details: buildReviewerActionDetails(action)
+    });
+  }
+
+  const priority = {
+    status_changed: 1,
+    llm_requested: 2,
+    artifact_published: 3,
+    reviewer_action: 4,
+    funding_contribution_recorded: 5
+  };
+
+  return timeline.sort((left, right) => {
+    const timestampComparison = left.timestamp.localeCompare(right.timestamp);
+
+    if (timestampComparison !== 0) {
+      return timestampComparison;
+    }
+
+    return (priority[left.type] ?? 99) - (priority[right.type] ?? 99);
+  });
+}
+
+function buildClarificationAuditPayload({ clarification, artifact }) {
+  return {
+    clarificationId: clarification.clarificationId,
+    eventId: clarification.eventId ?? null,
+    request: {
+      requestId: clarification.requestId ?? null,
+      source: clarification.source ?? null,
+      requesterId: clarification.requesterId ?? null,
+      question: clarification.question ?? null,
+      normalizedInput: clarification.normalizedInput ?? null,
+      createdAt: clarification.createdAt ?? null
+    },
+    payment: {
+      amount: clarification.paymentAmount ?? null,
+      asset: clarification.paymentAsset ?? null,
+      reference: clarification.paymentReference ?? null,
+      proof: clarification.paymentProof ?? null,
+      verifiedAt: clarification.paymentVerifiedAt ?? null
+    },
+    statusHistory: Array.isArray(clarification.statusHistory)
+      ? clarification.statusHistory
+      : [],
+    llm: {
+      output: clarification.llmOutput ?? null,
+      trace: clarification.llmTrace ?? null
+    },
+    artifact: artifact
+      ? {
+          cid: artifact.cid,
+          url: artifact.url,
+          generatedAtUtc: artifact.generatedAtUtc ?? null
+        }
+      : null,
+    funding: buildStoredFundingDetails(clarification),
+    reviewerActions: Array.isArray(clarification.reviewerActions)
+      ? clarification.reviewerActions
+      : [],
+    finalization: {
+      reviewerWorkflowStatus: clarification.reviewerWorkflowStatus ?? null,
+      finalEditedText: clarification.finalEditedText ?? null,
+      finalNote: clarification.finalNote ?? null,
+      finalizedAt: clarification.finalizedAt ?? null,
+      finalizedBy: clarification.finalizedBy ?? null
+    },
+    timeline: buildClarificationAuditTimeline({ clarification, artifact })
+  };
+}
+
 const REVIEWER_QUEUE_FILTERS = [
   { key: "needs_scan", label: "Needs Scan" },
   { key: "high_ambiguity", label: "High Ambiguity" },
@@ -1231,6 +1358,60 @@ export function createServer({
           return;
         }
 
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      /^\/api\/reviewer\/clarifications\/[^/]+\/audit$/.test(requestUrl.pathname)
+    ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const clarificationId = decodeURIComponent(
+          requestUrl.pathname.replace(
+            /^\/api\/reviewer\/clarifications\/([^/]+)\/audit$/,
+            "$1"
+          )
+        );
+        const clarification =
+          await clarificationRequestRepository.findByClarificationId(clarificationId);
+
+        if (!clarification) {
+          sendJson(response, 404, {
+            ok: false,
+            error: {
+              code: "CLARIFICATION_NOT_FOUND",
+              message: "Clarification not found."
+            }
+          });
+          return;
+        }
+
+        const artifact = clarification.artifactCid
+          ? await artifactRepository?.findByCid(clarification.artifactCid)
+          : null;
+
+        sendJson(response, 200, {
+          ok: true,
+          audit: buildClarificationAuditPayload({
+            clarification,
+            artifact
+          })
+        });
+      } catch (error) {
         sendJson(response, 500, {
           ok: false,
           error: {
