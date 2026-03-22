@@ -826,6 +826,56 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
   }
 });
 
+test("reviewer-only clarification routes reject incorrect reviewer tokens", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+
+  await repository.create({
+    clarificationId: "clar_reviewer_auth_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_btc_above_100k",
+    question: "Should only Gemini spot prints count?",
+    llmOutput: {
+      ambiguity_score: 0.61
+    },
+    createdAt: "2026-03-21T19:29:00.000Z",
+    updatedAt: "2026-03-21T19:29:00.000Z"
+  });
+
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T19:29:00.000Z"),
+    createClarificationId: () => "unused",
+    reviewerAuthToken: "reviewer-secret"
+  });
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_reviewer_auth_001`,
+      {
+        headers: createReviewerHeaders("wrong-reviewer-secret")
+      }
+    );
+
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      error: {
+        code: "REVIEWER_AUTH_REQUIRED",
+        message: "Reviewer authentication is required for this route."
+      }
+    });
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test("clarification detail responses include adaptive review windows bounded between one and twenty-four hours", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
   const repository = new FileClarificationRequestRepository(
