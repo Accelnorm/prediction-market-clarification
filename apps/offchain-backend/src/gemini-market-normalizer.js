@@ -36,6 +36,15 @@ function normalizeOptionalString(value) {
   return normalized === null ? undefined : normalized;
 }
 
+function normalizeOptionalNumberString(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  const normalized = String(value);
+  return normalized === "" ? undefined : normalized;
+}
+
 function normalizeArray(values) {
   if (!Array.isArray(values)) {
     return [];
@@ -120,6 +129,7 @@ export function normalizeGeminiMarket(market, lastSyncedAt) {
     subcategory: normalizeSubcategory(market?.subcategory),
     tags: normalizeArray(market?.tags),
     status: normalizeNullableString(market?.status),
+    createdAt: normalizeNullableString(market?.createdAt),
     effectiveDate: normalizeNullableString(market?.effectiveDate ?? market?.startTime),
     expiryDate: normalizeNullableString(market?.expiryDate ?? market?.closesAt),
     resolvedAt: normalizeNullableString(market?.resolvedAt),
@@ -127,6 +137,12 @@ export function normalizeGeminiMarket(market, lastSyncedAt) {
     contracts: Array.isArray(market?.contracts)
       ? market.contracts.map(normalizeContract)
       : [],
+    ...(normalizeOptionalNumberString(market?.volume)
+      ? { volumeUsd: normalizeOptionalNumberString(market?.volume) }
+      : {}),
+    ...(normalizeOptionalNumberString(market?.liquidity)
+      ? { liquidityUsd: normalizeOptionalNumberString(market?.liquidity) }
+      : {}),
     ...(normalizeOptionalString(market?.activitySignal)
       ? { activitySignal: normalizeOptionalString(market?.activitySignal) }
       : {}),

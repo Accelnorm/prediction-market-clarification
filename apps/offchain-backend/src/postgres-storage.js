@@ -14,6 +14,20 @@ function parsePayloadRow(row) {
   return row?.payload ?? null;
 }
 
+function uniqueMarkets(markets = []) {
+  const dedupedById = new Map();
+
+  for (const market of Array.isArray(markets) ? markets : []) {
+    if (!market || typeof market.marketId !== "string" || market.marketId === "") {
+      continue;
+    }
+
+    dedupedById.set(market.marketId, market);
+  }
+
+  return [...dedupedById.values()].sort((left, right) => left.marketId.localeCompare(right.marketId));
+}
+
 function parseBooleanEnv(value) {
   return value === "1" || value === "true";
 }
@@ -108,6 +122,28 @@ export async function initializePostgresSchema(pool) {
 
     CREATE INDEX IF NOT EXISTS reviewer_scans_stage_event_id_idx
       ON reviewer_scans (market_stage, event_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS market_sync_state (
+      scope TEXT PRIMARY KEY,
+      updated_at TIMESTAMPTZ NULL,
+      payload JSONB NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS category_catalogs (
+      scope TEXT PRIMARY KEY,
+      updated_at TIMESTAMPTZ NULL,
+      payload JSONB NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS trade_activity (
+      event_id TEXT PRIMARY KEY,
+      last_trade_at TIMESTAMPTZ NULL,
+      last_fetched_at TIMESTAMPTZ NULL,
+      payload JSONB NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS trade_activity_last_trade_at_idx
+      ON trade_activity (last_trade_at DESC NULLS LAST);
   `);
 }
 
@@ -649,13 +685,14 @@ export class PostgresMarketCacheRepository {
   }
 
   async save(markets) {
+    const unique = uniqueMarkets(markets);
     const client = await this.pool.connect();
 
     try {
       await client.query("BEGIN");
       await client.query(`DELETE FROM market_cache WHERE market_stage = $1`, [this.marketStage]);
 
-      for (const market of markets) {
+      for (const market of unique) {
         await client.query(
           `
             INSERT INTO market_cache (
@@ -696,7 +733,7 @@ export class PostgresMarketCacheRepository {
       `,
       [this.marketStage]
     );
-    return result.rows.map(parsePayloadRow);
+    return uniqueMarkets(result.rows.map(parsePayloadRow));
   }
 
   async findByMarketId(marketId) {
@@ -801,6 +838,103 @@ export class PostgresReviewerScanRepository {
       ]
     );
     return scan;
+  }
+}
+
+export class PostgresSyncStateRepository {
+  constructor(pool) {
+    this.pool = pool;
+  }
+
+  async getState(scope) {
+    const result = await this.pool.query(
+      `SELECT payload FROM market_sync_state WHERE scope = $1 LIMIT 1`,
+      [scope]
+    );
+    return parsePayloadRow(result.rows[0]);
+  }
+
+  async setState(scope, value) {
+    await this.pool.query(
+      `
+        INSERT INTO market_sync_state (scope, updated_at, payload)
+        VALUES ($1, $2, $3::jsonb)
+        ON CONFLICT (scope) DO UPDATE
+        SET updated_at = EXCLUDED.updated_at,
+            payload = EXCLUDED.payload
+      `,
+      [scope, value?.updatedAt ?? null, JSON.stringify(value)]
+    );
+    return value;
+  }
+}
+
+export class PostgresCategoryCatalogRepository {
+  constructor(pool) {
+    this.pool = pool;
+  }
+
+  async getCatalog(scope) {
+    const result = await this.pool.query(
+      `SELECT payload FROM category_catalogs WHERE scope = $1 LIMIT 1`,
+      [scope]
+    );
+    return parsePayloadRow(result.rows[0]) ?? { categories: [], updatedAt: null };
+  }
+
+  async setCatalog(scope, value) {
+    const payload = {
+      categories: [...new Set((value?.categories ?? []).filter((entry) => typeof entry === "string"))].sort(
+        (left, right) => left.localeCompare(right)
+      ),
+      updatedAt: value?.updatedAt ?? null
+    };
+
+    await this.pool.query(
+      `
+        INSERT INTO category_catalogs (scope, updated_at, payload)
+        VALUES ($1, $2, $3::jsonb)
+        ON CONFLICT (scope) DO UPDATE
+        SET updated_at = EXCLUDED.updated_at,
+            payload = EXCLUDED.payload
+      `,
+      [scope, payload.updatedAt, JSON.stringify(payload)]
+    );
+    return payload;
+  }
+}
+
+export class PostgresTradeActivityRepository {
+  constructor(pool) {
+    this.pool = pool;
+  }
+
+  async findByEventId(eventId) {
+    const result = await this.pool.query(
+      `SELECT payload FROM trade_activity WHERE event_id = $1 LIMIT 1`,
+      [eventId]
+    );
+    return parsePayloadRow(result.rows[0]);
+  }
+
+  async upsert(activity) {
+    await this.pool.query(
+      `
+        INSERT INTO trade_activity (event_id, last_trade_at, last_fetched_at, payload)
+        VALUES ($1, $2, $3, $4::jsonb)
+        ON CONFLICT (event_id) DO UPDATE
+        SET last_trade_at = EXCLUDED.last_trade_at,
+            last_fetched_at = EXCLUDED.last_fetched_at,
+            payload = EXCLUDED.payload
+      `,
+      [
+        activity.eventId,
+        activity.lastTradeAt ?? null,
+        activity.lastFetchedAt ?? null,
+        JSON.stringify(activity)
+      ]
+    );
+    return activity;
   }
 }
 

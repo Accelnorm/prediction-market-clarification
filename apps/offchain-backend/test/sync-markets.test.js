@@ -4,8 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 
+import { FileCategoryCatalogRepository } from "../src/category-catalog-repository.js";
 import { FileMarketCacheRepository } from "../src/market-cache-repository.js";
-import { syncMarkets, syncUpcomingMarkets } from "../src/sync-markets.js";
+import { FileSyncStateRepository } from "../src/sync-state-repository.js";
+import {
+  syncMarketCategories,
+  syncMarkets,
+  syncNewlyListedMarkets,
+  syncUpcomingMarkets
+} from "../src/sync-markets.js";
 
 const activeMarket = {
   id: "gm_eth_above_5000",
@@ -112,6 +119,7 @@ test("syncMarkets stores normalized active markets in a file-backed cache", asyn
     },
     tags: ["Ethereum", "Price"],
     status: "active",
+    createdAt: null,
     effectiveDate: activeMarket.effectiveDate,
     expiryDate: activeMarket.expiryDate,
     resolvedAt: null,
@@ -249,4 +257,91 @@ test("syncUpcomingMarkets stores approved Gemini upcoming markets in a separate 
   assert.equal(stored.markets[0].marketId, upcomingMarket.id);
   assert.equal(stored.markets[0].ticker, upcomingMarket.ticker);
   assert.equal(stored.markets[0].status, "approved");
+  assert.equal(stored.markets[0].createdAt, null);
+});
+
+test("syncNewlyListedMarkets incrementally inserts only unseen events", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "newly-listed-sync-"));
+  const activeRepository = new FileMarketCacheRepository(path.join(tempDir, "active.json"));
+  const upcomingRepository = new FileMarketCacheRepository(path.join(tempDir, "upcoming.json"));
+  const syncStateRepository = new FileSyncStateRepository(path.join(tempDir, "sync-state.json"));
+
+  await activeRepository.save([
+    {
+      marketId: "gm_existing",
+      title: "Existing",
+      description: "",
+      resolution: "Existing",
+      resolutionText: "Existing",
+      closesAt: "",
+      endTime: "",
+      slug: null,
+      url: null,
+      category: null,
+      subcategory: null,
+      status: "active",
+      createdAt: "2026-03-20T00:00:00.000Z",
+      effectiveDate: null,
+      expiryDate: null,
+      resolvedAt: null,
+      termsLink: null,
+      tags: [],
+      contracts: [],
+      lastSyncedAt: "2026-03-20T00:00:00.000Z"
+    }
+  ]);
+  await syncStateRepository.setState("markets:newly-listed", {
+    lastCreatedAt: "2026-03-21T00:00:00.000Z",
+    boundaryEventIds: ["gm_existing"],
+    lastSyncedAt: "2026-03-21T00:00:00.000Z",
+    updatedAt: "2026-03-21T00:00:00.000Z"
+  });
+
+  const result = await syncNewlyListedMarkets({
+    activeRepository,
+    upcomingRepository,
+    syncStateRepository,
+    now: () => new Date("2026-03-22T00:00:00.000Z"),
+    fetchMarkets: async () => [
+      {
+        ...activeMarket,
+        id: "gm_existing",
+        createdAt: "2026-03-21T00:00:00.000Z"
+      },
+      {
+        ...upcomingMarket,
+        id: "gm_new_upcoming",
+        createdAt: "2026-03-22T00:00:00.000Z"
+      }
+    ]
+  });
+
+  assert.deepEqual(result, {
+    insertedActive: 0,
+    updatedActive: 0,
+    insertedUpcoming: 1,
+    updatedUpcoming: 0,
+    totalNewlyListed: 1
+  });
+
+  const storedUpcoming = JSON.parse(await readFile(path.join(tempDir, "upcoming.json"), "utf8"));
+  assert.equal(storedUpcoming.markets.length, 1);
+  assert.equal(storedUpcoming.markets[0].marketId, "gm_new_upcoming");
+});
+
+test("syncMarketCategories stores normalized category catalogs", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "category-sync-"));
+  const repository = new FileCategoryCatalogRepository(path.join(tempDir, "categories.json"));
+
+  const catalog = await syncMarketCategories({
+    repository,
+    scope: "active",
+    now: () => new Date("2026-03-22T00:00:00.000Z"),
+    fetchCategories: async () => ["sports", "crypto", "sports"]
+  });
+
+  assert.deepEqual(catalog, {
+    categories: ["crypto", "sports"],
+    updatedAt: "2026-03-22T00:00:00.000Z"
+  });
 });

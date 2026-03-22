@@ -3,8 +3,12 @@ const DEFAULT_PAGE_LIMIT = "500";
 
 export const DEFAULT_GEMINI_ACTIVE_MARKETS_SOURCE_URL =
   `${GEMINI_API_BASE_URL}/v1/prediction-markets/events?status=active&limit=${DEFAULT_PAGE_LIMIT}`;
+export const DEFAULT_GEMINI_NEWLY_LISTED_MARKETS_SOURCE_URL =
+  `${GEMINI_API_BASE_URL}/v1/prediction-markets/events/newly-listed?limit=${DEFAULT_PAGE_LIMIT}`;
 export const DEFAULT_GEMINI_UPCOMING_MARKETS_SOURCE_URL =
   `${GEMINI_API_BASE_URL}/v1/prediction-markets/events/upcoming?limit=${DEFAULT_PAGE_LIMIT}`;
+export const DEFAULT_GEMINI_CATEGORIES_SOURCE_URL =
+  `${GEMINI_API_BASE_URL}/v1/prediction-markets/categories`;
 
 function isFileUrl(sourceUrl) {
   return sourceUrl.startsWith("file://");
@@ -107,6 +111,13 @@ export async function fetchUpcomingMarkets(options = {}) {
   });
 }
 
+export async function fetchNewlyListedMarkets(options = {}) {
+  return fetchConfiguredMarkets({
+    ...options,
+    sourceUrl: options.sourceUrl ?? DEFAULT_GEMINI_NEWLY_LISTED_MARKETS_SOURCE_URL
+  });
+}
+
 export async function fetchPredictionMarketEventByTicker(eventTicker, { fetchImpl = fetch } = {}) {
   const response = await fetchImpl(
     `${GEMINI_API_BASE_URL}/v1/prediction-markets/events/${encodeURIComponent(eventTicker)}`
@@ -117,6 +128,63 @@ export async function fetchPredictionMarketEventByTicker(eventTicker, { fetchImp
   }
 
   return response.json();
+}
+
+export async function fetchPredictionMarketCategories({
+  status = [],
+  sourceUrl = DEFAULT_GEMINI_CATEGORIES_SOURCE_URL,
+  fetchImpl = fetch
+} = {}) {
+  const nextUrl = new URL(sourceUrl);
+
+  for (const statusValue of Array.isArray(status) ? status : []) {
+    if (typeof statusValue === "string" && statusValue.trim() !== "") {
+      nextUrl.searchParams.append("status", statusValue.trim());
+    }
+  }
+
+  const response = await fetchImpl(nextUrl.toString());
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch Gemini categories: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const payload = await response.json();
+  return Array.isArray(payload?.categories) ? payload.categories : [];
+}
+
+export async function fetchTradesForSymbol(
+  symbol,
+  { timestamp, sinceTid, limitTrades = 500, includeBreaks = false, fetchImpl = fetch } = {}
+) {
+  const nextUrl = new URL(`${GEMINI_API_BASE_URL}/v1/trades/${encodeURIComponent(symbol)}`);
+
+  if (timestamp !== undefined && timestamp !== null) {
+    nextUrl.searchParams.set("timestamp", String(timestamp));
+  }
+
+  if (sinceTid !== undefined && sinceTid !== null) {
+    nextUrl.searchParams.set("since_tid", String(sinceTid));
+  }
+
+  if (limitTrades !== undefined && limitTrades !== null) {
+    nextUrl.searchParams.set("limit_trades", String(limitTrades));
+  }
+
+  if (includeBreaks) {
+    nextUrl.searchParams.set("include_breaks", "true");
+  }
+
+  const response = await fetchImpl(nextUrl.toString());
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch Gemini trades for ${symbol}: ${response.status} ${response.statusText}`);
+  }
+
+  const payload = await response.json();
+  return Array.isArray(payload) ? payload : [];
 }
 
 export async function fetchEnrichedPredictionMarkets({

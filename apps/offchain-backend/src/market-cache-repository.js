@@ -3,6 +3,20 @@ import path from "node:path";
 
 const EMPTY_CACHE = { markets: [] };
 
+function normalizeMarkets(markets = []) {
+  const dedupedById = new Map();
+
+  for (const market of Array.isArray(markets) ? markets : []) {
+    if (!market || typeof market.marketId !== "string" || market.marketId === "") {
+      continue;
+    }
+
+    dedupedById.set(market.marketId, market);
+  }
+
+  return [...dedupedById.values()].sort((left, right) => left.marketId.localeCompare(right.marketId));
+}
+
 export class FileMarketCacheRepository {
   constructor(filePath) {
     this.filePath = filePath;
@@ -14,7 +28,7 @@ export class FileMarketCacheRepository {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
       return {
-        markets: Array.isArray(parsed.markets) ? parsed.markets : []
+        markets: normalizeMarkets(parsed.markets)
       };
     } catch (error) {
       if (error.code === "ENOENT") {
@@ -27,7 +41,11 @@ export class FileMarketCacheRepository {
 
   async save(markets) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify({ markets }, null, 2) + "\n", "utf8");
+    await writeFile(
+      this.filePath,
+      JSON.stringify({ markets: normalizeMarkets(markets) }, null, 2) + "\n",
+      "utf8"
+    );
   }
 
   async list() {
@@ -54,7 +72,6 @@ export class FileMarketCacheRepository {
         nextMarkets[marketIndex] = market;
       }
 
-      nextMarkets.sort((left, right) => left.marketId.localeCompare(right.marketId));
       await this.save(nextMarkets);
       return market;
     });

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { FileArtifactRepository } from "../artifact-repository.js";
 import { FileBackgroundJobRepository } from "../background-job-repository.js";
+import { FileCategoryCatalogRepository } from "../category-catalog-repository.js";
 import { FileClarificationRequestRepository } from "../clarification-request-repository.js";
 import { FileMarketCacheRepository } from "../market-cache-repository.js";
 import {
@@ -12,15 +13,25 @@ import {
   PostgresArtifactRepository,
   PostgresBackgroundJobRepository,
   PostgresClarificationRequestRepository,
+  PostgresCategoryCatalogRepository,
   PostgresMarketCacheRepository,
   PostgresPhase1Coordinator,
   PostgresReviewerScanRepository,
+  PostgresSyncStateRepository,
+  PostgresTradeActivityRepository,
   PostgresVerifiedPaymentRepository
 } from "../postgres-storage.js";
 import { FileReviewerScanRepository } from "../reviewer-scan-repository.js";
-import { resolvePhase2RoutesEnabled, resolveTelegramEnabled, validateProductionRuntimeConfig } from "../runtime-config.js";
+import {
+  resolveClarificationFinalityConfig,
+  resolvePhase2RoutesEnabled,
+  resolveTelegramEnabled,
+  validateProductionRuntimeConfig
+} from "../runtime-config.js";
+import { FileSyncStateRepository } from "../sync-state-repository.js";
 import { createServer } from "../server.js";
 import { registerTelegramWebhook } from "../telegram-bot-client.js";
+import { FileTradeActivityRepository } from "../trade-activity-repository.js";
 import { FileVerifiedPaymentRepository } from "../verified-payment-repository.js";
 import { loadX402PaymentConfig } from "../x402-payment-config.js";
 
@@ -84,10 +95,14 @@ async function createStorageRuntime() {
       clarificationRequestRepository,
       artifactRepository: new PostgresArtifactRepository(pool),
       backgroundJobRepository,
+      categoryCatalogRepository: new PostgresCategoryCatalogRepository(pool),
       reviewerScanRepository: new PostgresReviewerScanRepository(pool, "active"),
+      syncStateRepository: new PostgresSyncStateRepository(pool),
+      tradeActivityRepository: new PostgresTradeActivityRepository(pool),
       verifiedPaymentRepository,
       marketCacheRepository: new PostgresMarketCacheRepository(pool, "active"),
       upcomingMarketCacheRepository: new PostgresMarketCacheRepository(pool, "upcoming"),
+      upcomingCategoryCatalogRepository: new PostgresCategoryCatalogRepository(pool),
       upcomingReviewerScanRepository: new PostgresReviewerScanRepository(pool, "upcoming"),
       phase1Coordinator: new PostgresPhase1Coordinator({
         pool,
@@ -117,6 +132,15 @@ async function createStorageRuntime() {
     "REVIEWER_SCANS_PATH",
     "../../data/reviewer-scans.json"
   );
+  const syncStatePath = resolvePathFromEnv("SYNC_STATE_PATH", "../../data/sync-state.json");
+  const categoryCatalogPath = resolvePathFromEnv(
+    "CATEGORY_CATALOG_PATH",
+    "../../data/category-catalog.json"
+  );
+  const tradeActivityPath = resolvePathFromEnv(
+    "TRADE_ACTIVITY_PATH",
+    "../../data/trade-activity.json"
+  );
   const verifiedPaymentsPath = resolvePathFromEnv(
     "VERIFIED_PAYMENTS_PATH",
     "../../data/verified-payments.json"
@@ -131,10 +155,14 @@ async function createStorageRuntime() {
     clarificationRequestRepository: new FileClarificationRequestRepository(clarificationRequestsPath),
     artifactRepository: new FileArtifactRepository(artifactsPath),
     backgroundJobRepository: new FileBackgroundJobRepository(backgroundJobsPath),
+    categoryCatalogRepository: new FileCategoryCatalogRepository(categoryCatalogPath),
     reviewerScanRepository: new FileReviewerScanRepository(reviewerScansPath),
+    syncStateRepository: new FileSyncStateRepository(syncStatePath),
+    tradeActivityRepository: new FileTradeActivityRepository(tradeActivityPath),
     verifiedPaymentRepository: new FileVerifiedPaymentRepository(verifiedPaymentsPath),
     marketCacheRepository: new FileMarketCacheRepository(marketCachePath),
     upcomingMarketCacheRepository: new FileMarketCacheRepository(upcomingMarketCachePath),
+    upcomingCategoryCatalogRepository: new FileCategoryCatalogRepository(categoryCatalogPath),
     upcomingReviewerScanRepository: new FileReviewerScanRepository(upcomingReviewerScansPath),
     phase1Coordinator: null,
     readinessCheck: async () => ({
@@ -167,6 +195,7 @@ const llmRuntime = resolveLlmRuntime();
 const x402PaymentConfig = loadX402PaymentConfig();
 const enablePhase2Routes = resolvePhase2RoutesEnabled(process.env);
 const enableTelegramRoutes = resolveTelegramEnabled(process.env);
+const clarificationFinalityConfig = resolveClarificationFinalityConfig(process.env);
 const storageRuntime = await createStorageRuntime();
 
 validateProductionRuntimeConfig({
@@ -192,6 +221,7 @@ const server = createServer({
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   telegramBotApiBaseUrl: process.env.TELEGRAM_BOT_API_BASE_URL,
   x402PaymentConfig,
+  clarificationFinalityConfig,
   llmTraceability: {
     promptTemplateVersion:
       process.env.LLM_PROMPT_TEMPLATE_VERSION ?? "reviewer-offchain-prompt-v1",

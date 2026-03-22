@@ -2,6 +2,7 @@ import {
   buildDefaultInterpretation,
   generateMarketInterpretation
 } from "./llm-provider.js";
+import { buildClarificationTiming } from "./clarification-timing.js";
 
 export { buildDefaultInterpretation } from "./llm-provider.js";
 
@@ -40,8 +41,11 @@ export async function runAutomaticClarificationPipeline({
   clarificationRequestRepository,
   artifactRepository,
   marketCacheRepository,
+  tradeActivityRepository,
+  clarificationFinalityConfig,
   now,
   llmRuntime,
+  fetchTradesForSymbol,
   llmTraceability = {
     promptTemplateVersion: "reviewer-offchain-prompt-v1",
     modelId: "openrouter/auto",
@@ -64,12 +68,24 @@ export async function runAutomaticClarificationPipeline({
     llmOutput: interpretation.llmOutput,
     generatedAtUtc: completedTimestamp
   });
+  const timing = await buildClarificationTiming({
+    clarification: {
+      ...clarification,
+      llmOutput: interpretation.llmOutput
+    },
+    market,
+    tradeActivityRepository,
+    finalityConfig: clarificationFinalityConfig,
+    now,
+    fetchTrades: fetchTradesForSymbol
+  });
 
   await clarificationRequestRepository.updateByClarificationId(clarification.clarificationId, {
     status: "completed",
     updatedAt: completedTimestamp,
     llmOutput: interpretation.llmOutput,
     llmTrace,
+    timing,
     artifactCid: artifact.cid,
     artifactUrl: artifact.url,
     errorMessage: null,

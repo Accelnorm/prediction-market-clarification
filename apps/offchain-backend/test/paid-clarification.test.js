@@ -10,6 +10,7 @@ import { FileBackgroundJobRepository } from "../src/background-job-repository.js
 import { FileClarificationRequestRepository } from "../src/clarification-request-repository.js";
 import { FileMarketCacheRepository } from "../src/market-cache-repository.js";
 import { FileReviewerScanRepository } from "../src/reviewer-scan-repository.js";
+import { FileTradeActivityRepository } from "../src/trade-activity-repository.js";
 import { FileVerifiedPaymentRepository } from "../src/verified-payment-repository.js";
 
 const DEFAULT_X402_PAYMENT_CONFIG = {
@@ -130,6 +131,10 @@ async function createBackgroundJobRepository(tempDir) {
   const repository = new FileBackgroundJobRepository(path.join(tempDir, "background-jobs.json"));
   await repository.save([]);
   return repository;
+}
+
+async function createTradeActivityRepository(tempDir) {
+  return new FileTradeActivityRepository(path.join(tempDir, "trade-activity.json"));
 }
 
 async function waitFor(assertion, { attempts = 25, delayMs = 10 } = {}) {
@@ -301,6 +306,16 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
       paymentCluster: "devnet",
       paymentTransactionSignature: "sig_pay_proof_001",
       paymentVerificationSource: "test_verifier",
+      timing: {
+        processingUrgency: "normal",
+        processingUrgencyReason: "No elevated urgency signals detected.",
+        tradeContextAsOf: null,
+        finalityMode: "static",
+        finalityWindowSecs: 86400,
+        finalityReason: "Static finality window configured at 86400 seconds.",
+        marketImportanceScore: null,
+        marketImportanceSignals: {}
+      },
       createdAt: "2026-03-21T19:05:00.000Z",
       updatedAt: "2026-03-21T19:05:00.000Z",
       summary: null,
@@ -370,6 +385,128 @@ test("POST /api/clarify/:eventId accepts PAYMENT-SIGNATURE header proofs", async
     assert.equal(typeof stored.paymentProof, "string");
     assert.ok(stored.paymentProof.length > 0);
     assert.equal(stored.paymentReference.startsWith("ref_"), true);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("clarification creation stores static timing metadata and exposes it in public detail", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-timing-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir, [
+    {
+      ...VALID_MARKET,
+      status: "active",
+      volumeUsd: "2500.00",
+      liquidityUsd: "1000.00",
+      contracts: [{ instrumentSymbol: "GEMI-BTC100K-YES" }]
+    }
+  ]);
+  const tradeActivityRepository = await createTradeActivityRepository(tempDir);
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    tradeActivityRepository,
+    clarificationFinalityConfig: {
+      mode: "static",
+      staticWindowSecs: 86400,
+      processingActivityEnabled: false
+    },
+    now: () => new Date("2026-03-21T19:05:00.000Z"),
+    createClarificationId: () => "clar_timing_static_001",
+    runAutomaticClarificationPipeline: async () => {}
+  });
+
+  try {
+    const createResponse = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        requesterId: "wallet_timing",
+        question: "Should trades during maintenance count?",
+        payment: {
+          proof: "pay_proof_timing_001",
+          amount: "1.00",
+          asset: "USDC",
+          reference: "x402_ref_timing_001",
+          verified: true
+        }
+      })
+    });
+
+    assert.equal(createResponse.status, 202);
+
+    const detailResponse = await fetch(`${baseUrl}/api/clarifications/clar_timing_static_001`);
+    assert.equal(detailResponse.status, 200);
+    const payload = await detailResponse.json();
+    assert.equal(payload.clarification.timing.finalityMode, "static");
+    assert.equal(payload.clarification.timing.finalityWindowSecs, 86400);
+    assert.equal(payload.clarification.timing.processingUrgency, "normal");
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("reviewer clarification detail uses dynamic finality timing from recent trades", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-timing-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir, [
+    {
+      ...VALID_MARKET,
+      status: "active",
+      closesAt: "2026-03-21T20:00:00.000Z",
+      volumeUsd: "250000.00",
+      liquidityUsd: "60000.00",
+      contracts: [{ instrumentSymbol: "GEMI-BTC100K-YES" }]
+    }
+  ]);
+  const tradeActivityRepository = await createTradeActivityRepository(tempDir);
+  await repository.create({
+    clarificationId: "clar_timing_dynamic_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_btc_above_100k",
+    question: "Should trades during maintenance count?",
+    requesterId: "wallet_dynamic",
+    createdAt: "2026-03-21T19:00:00.000Z",
+    updatedAt: "2026-03-21T19:10:00.000Z",
+    llmOutput: {
+      ambiguity_score: 0.9
+    }
+  });
+
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    tradeActivityRepository,
+    reviewerAuthToken: "reviewer-secret",
+    clarificationFinalityConfig: {
+      mode: "dynamic",
+      staticWindowSecs: 86400,
+      processingActivityEnabled: true
+    },
+    fetchTradesForSymbol: async () => [
+      { tid: 10, amount: "6000", timestampms: Date.parse("2026-03-21T19:55:00.000Z") }
+    ],
+    now: () => new Date("2026-03-21T19:56:00.000Z")
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/reviewer/clarifications/clar_timing_dynamic_001`, {
+      headers: createReviewerHeaders()
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.clarification.timing.finalityMode, "dynamic");
+    assert.equal(payload.clarification.timing.finalityWindowSecs, 3600);
+    assert.equal(payload.clarification.timing.processingUrgency, "high");
   } finally {
     await stopTestServer(server);
   }
@@ -892,7 +1029,17 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
         eventId: "gm_btc_above_100k",
         question: "Should Gemini BTC/USD auction prints be excluded?",
         createdAt: "2026-03-21T19:27:02.000Z",
-        updatedAt: "2026-03-21T19:27:03.000Z"
+        updatedAt: "2026-03-21T19:27:03.000Z",
+        timing: {
+          processingUrgency: "normal",
+          processingUrgencyReason: "No elevated urgency signals detected.",
+          tradeContextAsOf: null,
+          finalityMode: "static",
+          finalityWindowSecs: 86400,
+          finalityReason: "Static finality window configured at 86400 seconds.",
+          marketImportanceScore: null,
+          marketImportanceSignals: {}
+        }
       }
     });
 
@@ -942,6 +1089,16 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
           modelId: "gemini-reviewer-001",
           requestedAt: "2026-03-21T19:27:03.000Z",
           processingVersion: "offchain-pipeline-2026-03-21"
+        },
+        timing: {
+          processingUrgency: "normal",
+          processingUrgencyReason: "No elevated urgency signals detected.",
+          tradeContextAsOf: null,
+          finalityMode: "static",
+          finalityWindowSecs: 86400,
+          finalityReason: "Static finality window configured at 86400 seconds.",
+          marketImportanceScore: null,
+          marketImportanceSignals: {}
         },
         market: {
           marketId: "gm_btc_above_100k",
@@ -1454,6 +1611,16 @@ test("GET /api/reviewer/clarifications/:clarificationId returns reviewer detail 
           placeholder: true,
           summary: "Off-chain placeholder until panel voting is implemented.",
           updatedAt: "2026-03-21T20:40:00.000Z"
+        },
+        timing: {
+          processingUrgency: "normal",
+          processingUrgencyReason: "No elevated urgency signals detected.",
+          tradeContextAsOf: null,
+          finalityMode: "static",
+          finalityWindowSecs: 86400,
+          finalityReason: "Static finality window configured at 86400 seconds.",
+          marketImportanceScore: null,
+          marketImportanceSignals: {}
         },
         createdAt: "2026-03-21T20:35:00.000Z",
         updatedAt: "2026-03-21T20:40:00.000Z",
@@ -2359,6 +2526,7 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
     assert.equal(queueResponse.status, 200);
     assert.deepEqual(await queueResponse.json(), {
       ok: true,
+      availableCategories: [],
       filters: [
         {
           key: "needs_scan",
@@ -2807,6 +2975,7 @@ test("GET /api/reviewer/queue supports persisted queue filters and segment metad
     assert.equal(allResponse.status, 200);
     assert.deepEqual(await allResponse.json(), {
       ok: true,
+      availableCategories: [],
       filters: [
         {
           key: "needs_scan",
@@ -2921,6 +3090,7 @@ test("GET /api/reviewer/queue supports persisted queue filters and segment metad
     assert.deepEqual(await filteredResponse.json(), {
       ok: true,
       activeFilter: "needs_scan",
+      availableCategories: [],
       filters: [
         {
           key: "needs_scan",

@@ -17,12 +17,40 @@ Telegram is not part of the default Phase 1 runtime. It remains an optional inta
 ## What Works Today
 
 - Gemini market sync into file-backed or Postgres-backed caches
+- Incremental Gemini market ingest from newly listed events with dedupe by `marketId`
+- Official Gemini category catalog sync for validation and reviewer queue metadata
 - Paid clarification API flow with durable background-job persistence
 - Crash recovery for queued and in-flight clarification jobs on server startup
+- Clarification timing with configurable static or dynamic finality windows
 - Health endpoints at `GET /health/live` and `GET /health/ready`
 - Request ID logging and rate limiting on the public clarify endpoint
 - Optional Phase 2 reviewer routes behind `ENABLE_PHASE2_REVIEWER_ROUTES=1`
 - Optional Telegram intake and outbound delivery behind `ENABLE_TELEGRAM_ROUTES=1`
+
+## Gemini API Usage
+
+This repo currently uses these Gemini API endpoints:
+
+- `GET /v1/prediction-markets/events?status=active&limit=500`
+  - authoritative full sync for active events
+  - refreshes the active market cache in file-backed or Postgres-backed storage
+- `GET /v1/prediction-markets/events/upcoming?limit=500`
+  - authoritative full sync for approved or upcoming events
+  - refreshes the upcoming market cache used by prelaunch and reviewer flows
+- `GET /v1/prediction-markets/events/newly-listed?limit=500`
+  - incremental ingest path between full syncs
+  - reduces full-cache refetching and upserts events by `marketId` so reruns stay idempotent
+- `GET /v1/prediction-markets/events/{ticker}`
+  - targeted refresh for a single event when the backend needs to rehydrate or confirm a market by ticker
+- `GET /v1/prediction-markets/categories`
+  - syncs Gemini's official category catalog
+  - used to validate cached categories and expose `availableCategories` in reviewer and prelaunch queue payloads
+- `GET /v1/trades/{instrumentSymbol}`
+  - used only for clarification lifecycle timing
+  - refreshes trade activity while the LLM clarification job is running for active markets
+  - supports dynamic finality windows after a clarification is produced
+
+No Gemini order-management endpoints are used. This project is clarification-only.
 
 ## What Is Tested
 
@@ -79,10 +107,23 @@ Useful environment variables:
 - `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_BASE_URL`
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_VERSION`
 - `PUBLIC_API_BASE_URL`
+- `SYNC_STATE_PATH`, `CATEGORY_CATALOG_PATH`, `TRADE_ACTIVITY_PATH` for file-backed Gemini sync state
+- `CLARIFICATION_FINALITY_MODE`
+- `CLARIFICATION_FINALITY_STATIC_SECS`
+- `CLARIFICATION_PROCESSING_ACTIVITY_ENABLED`
 - `X402_VERSION`, `X402_SCHEME`, `X402_PRICE_USD`, `X402_MAX_AMOUNT_REQUIRED`
 - `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`
 - `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `X402_FACILITATOR_AUTH_TOKEN`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_API_BASE_URL`
+
+Clarification timing modes:
+
+- `CLARIFICATION_FINALITY_MODE=static`
+  - every clarification uses the same finality window
+  - default fixed value comes from `CLARIFICATION_FINALITY_STATIC_SECS` and defaults to `86400`
+- `CLARIFICATION_FINALITY_MODE=dynamic`
+  - finality is shortened for more important or actively traded markets using Gemini trade history plus market metadata
+  - in-flight LLM jobs can also refresh trade activity when `CLARIFICATION_PROCESSING_ACTIVITY_ENABLED=1`
 
 ## Manual API Check
 

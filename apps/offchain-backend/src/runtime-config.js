@@ -29,6 +29,21 @@ export function resolveTelegramEnabled(env = process.env) {
   return isTruthyEnv(normalizeString(env.ENABLE_TELEGRAM_ROUTES).toLowerCase());
 }
 
+export function resolveClarificationFinalityConfig(env = process.env) {
+  const mode = normalizeString(env.CLARIFICATION_FINALITY_MODE).toLowerCase() === "dynamic"
+    ? "dynamic"
+    : "static";
+  const parsedStaticSecs = Number.parseInt(env.CLARIFICATION_FINALITY_STATIC_SECS ?? "86400", 10);
+
+  return {
+    mode,
+    staticWindowSecs: Number.isFinite(parsedStaticSecs) ? parsedStaticSecs : 86400,
+    processingActivityEnabled: isTruthyEnv(
+      normalizeString(env.CLARIFICATION_PROCESSING_ACTIVITY_ENABLED).toLowerCase()
+    )
+  };
+}
+
 export function validateProductionRuntimeConfig({
   env = process.env,
   llmRuntime,

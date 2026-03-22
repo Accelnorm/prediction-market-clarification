@@ -1,8 +1,12 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 
-import { fetchPredictionMarketEventByTicker } from "./gemini-markets-source.js";
+import {
+  fetchPredictionMarketEventByTicker,
+  fetchTradesForSymbol as fetchDefaultTradesForSymbol
+} from "./gemini-markets-source.js";
 import { runAutomaticClarificationPipeline as runDefaultAutomaticClarificationPipeline } from "./automatic-llm-pipeline.js";
+import { buildClarificationTiming } from "./clarification-timing.js";
 import { refreshReviewerMarketData } from "./reviewer-refresh-market.js";
 import { createTelegramClarificationRequest } from "./telegram-request-flow.js";
 import {
@@ -118,7 +122,7 @@ function sendReviewerAuthRequired(response) {
 }
 
 function buildPublicClarificationPayload(clarification) {
-  return {
+  const payload = {
     clarificationId: clarification.clarificationId,
     status: clarification.status,
     eventId: clarification.eventId,
@@ -126,6 +130,12 @@ function buildPublicClarificationPayload(clarification) {
     createdAt: clarification.createdAt,
     updatedAt: clarification.updatedAt ?? clarification.createdAt
   };
+
+  if (clarification?.timing && typeof clarification.timing === "object") {
+    payload.timing = clarification.timing;
+  }
+
+  return payload;
 }
 
 function formatWorkflowLabel(state) {
@@ -313,6 +323,10 @@ function buildReviewerMarketPayload(market, fallbackMarketId = null) {
     payload.status = market.status;
   }
 
+  if (typeof market?.createdAt === "string" && market.createdAt !== "") {
+    payload.createdAt = market.createdAt;
+  }
+
   if (typeof market?.effectiveDate === "string" && market.effectiveDate !== "") {
     payload.effectiveDate = market.effectiveDate;
   }
@@ -327,6 +341,14 @@ function buildReviewerMarketPayload(market, fallbackMarketId = null) {
 
   if (typeof market?.termsLink === "string" && market.termsLink !== "") {
     payload.termsLink = market.termsLink;
+  }
+
+  if (typeof market?.volumeUsd === "string" && market.volumeUsd !== "") {
+    payload.volumeUsd = market.volumeUsd;
+  }
+
+  if (typeof market?.liquidityUsd === "string" && market.liquidityUsd !== "") {
+    payload.liquidityUsd = market.liquidityUsd;
   }
 
   if (Array.isArray(market?.contracts) && market.contracts.length > 0) {
@@ -703,9 +725,12 @@ export function createServer({
   artifactRepository,
   backgroundJobRepository,
   reviewerScanRepository,
+  categoryCatalogRepository,
   marketCacheRepository,
   upcomingMarketCacheRepository,
   upcomingReviewerScanRepository,
+  upcomingCategoryCatalogRepository,
+  tradeActivityRepository,
   now,
   createRequestId,
   createClarificationId,
@@ -722,9 +747,15 @@ export function createServer({
   verifyX402Payment = verifyDefaultClarificationPayment,
   buildX402PaymentChallenge = buildX402PaymentRequiredPayload,
   fetchReviewerMarketSource,
+  fetchTradesForSymbol = fetchDefaultTradesForSymbol,
   sendTelegramMessage = sendDefaultTelegramMessage,
   runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline,
   runReviewerMarketScan = createReviewerMarketScan,
+  clarificationFinalityConfig = {
+    mode: "static",
+    staticWindowSecs: 86400,
+    processingActivityEnabled: false
+  },
   enablePhase2Routes = true,
   enableTelegramRoutes = true,
   logger = console,
@@ -746,6 +777,31 @@ export function createServer({
 
   function getReviewerScanRepositoryForStage(marketStage = "active") {
     return marketStage === "upcoming" ? upcomingReviewerScanRepository : reviewerScanRepository;
+  }
+
+  async function getAvailableCategoriesForStage(marketStage = "active") {
+    const repository =
+      marketStage === "upcoming" ? upcomingCategoryCatalogRepository : categoryCatalogRepository;
+    return (await repository?.getCatalog?.(marketStage)) ?? { categories: [], updatedAt: null };
+  }
+
+  async function buildClarificationTimingForResponse({ clarification, market }) {
+    if (clarification?.timing && typeof clarification.timing === "object") {
+      return clarification.timing;
+    }
+
+    if (!market) {
+      return null;
+    }
+
+    return buildClarificationTiming({
+      clarification,
+      market,
+      tradeActivityRepository,
+      finalityConfig: clarificationFinalityConfig,
+      now,
+      fetchTrades: fetchTradesForSymbol
+    });
   }
 
   async function markJobProcessing(job) {
@@ -782,7 +838,10 @@ export function createServer({
         clarificationRequestRepository,
         artifactRepository,
         marketCacheRepository,
+        tradeActivityRepository,
+        clarificationFinalityConfig,
         now,
+        fetchTradesForSymbol,
         llmTraceability,
         llmRuntime
       });
@@ -1096,6 +1155,18 @@ export function createServer({
         }
 
         const timestamp = now().toISOString();
+        const initialTiming = await buildClarificationTiming({
+          clarification: {
+            eventId,
+            status: "queued",
+            llmOutput: null
+          },
+          market: supportedMarket,
+          tradeActivityRepository,
+          finalityConfig: clarificationFinalityConfig,
+          now,
+          fetchTrades: fetchTradesForSymbol
+        });
         const clarificationPayload = {
           clarificationId: createClarificationId(),
           requestId: null,
@@ -1118,6 +1189,7 @@ export function createServer({
           paymentCluster: verifiedPayment.paymentCluster ?? null,
           paymentTransactionSignature: verifiedPayment.paymentTransactionSignature ?? null,
           paymentVerificationSource: verifiedPayment.verificationSource ?? null,
+          timing: initialTiming,
           createdAt: timestamp,
           updatedAt: timestamp
         };
@@ -1204,7 +1276,10 @@ export function createServer({
                 clarificationRequestRepository,
                 artifactRepository,
                 marketCacheRepository,
+                tradeActivityRepository,
+                clarificationFinalityConfig,
                 now,
+                fetchTradesForSymbol,
                 llmTraceability,
                 llmRuntime
               })
@@ -1339,12 +1414,14 @@ export function createServer({
         )
           ? queue.filter((item) => item.queueStates.includes(activeFilter))
           : queue;
+        const availableCategories = await getAvailableCategoriesForStage("active");
 
         sendJson(response, 200, {
           ok: true,
           ...(activeFilter ? { activeFilter } : {}),
           filters,
-          queue: filteredQueue
+          queue: filteredQueue,
+          availableCategories: availableCategories.categories
         });
       } catch (error) {
         sendJson(response, 500, {
@@ -1381,9 +1458,12 @@ export function createServer({
           );
         }
 
+        const availableCategories = await getAvailableCategoriesForStage("upcoming");
+
         sendJson(response, 200, {
           ok: true,
-          queue
+          queue,
+          availableCategories: availableCategories.categories
         });
       } catch (error) {
         sendJson(response, 500, {
@@ -1921,10 +2001,17 @@ export function createServer({
           market,
           now: now()
         });
+        const timing = await buildClarificationTimingForResponse({
+          clarification,
+          market
+        });
 
         sendJson(response, 200, {
           ok: true,
-          clarification: buildPublicClarificationPayload(clarification)
+          clarification: {
+            ...buildPublicClarificationPayload(clarification),
+            ...(timing ? { timing } : {})
+          }
         });
       } catch (error) {
         sendJson(response, 500, {
@@ -2401,6 +2488,10 @@ export function createServer({
           market,
           now: now()
         });
+        const timing = await buildClarificationTimingForResponse({
+          clarification,
+          market
+        });
         const relatedClarifications = clarification.eventId
           ? await clarificationRequestRepository.findByEventId(clarification.eventId)
           : [];
@@ -2408,7 +2499,7 @@ export function createServer({
         sendJson(response, 200, {
           ok: true,
           clarification: buildReviewerClarificationPayload({
-            clarification,
+            clarification: timing ? { ...clarification, timing } : clarification,
             adaptiveReviewWindow,
             market,
             relatedClarifications
