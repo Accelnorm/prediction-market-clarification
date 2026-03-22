@@ -32,6 +32,7 @@ async function readJsonBody(request) {
 
 export function createServer({
   clarificationRequestRepository,
+  marketCacheRepository,
   now,
   createRequestId,
   createClarificationId
@@ -98,6 +99,17 @@ export function createServer({
           requestUrl.pathname.replace(/^\/api\/clarify\/([^/]+)$/, "$1")
         );
         const payload = parsePaidClarificationRequest(await readJsonBody(request));
+        const supportedMarket = await marketCacheRepository?.findByMarketId(eventId);
+
+        if (!supportedMarket) {
+          const error = new Error(
+            "Event id must match an active synced market before a clarification can be created."
+          );
+          error.statusCode = 404;
+          error.code = "UNSUPPORTED_EVENT_ID";
+          throw error;
+        }
+
         const existingClarification =
           await clarificationRequestRepository.findByPaymentProof(payload.paymentProof);
 
@@ -118,6 +130,10 @@ export function createServer({
           status: "processing",
           eventId,
           question: payload.question,
+          normalizedInput: {
+            eventId,
+            question: payload.question
+          },
           requesterId: payload.requesterId,
           paymentAmount: payload.paymentAmount,
           paymentAsset: payload.paymentAsset,

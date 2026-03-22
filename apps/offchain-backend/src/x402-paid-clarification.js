@@ -7,13 +7,26 @@ function paymentRequiredError() {
   return error;
 }
 
+function validationError(code, message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  error.code = code;
+  return error;
+}
+
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeQuestion(value) {
+  return normalizeString(value).replace(/\s+/g, " ");
+}
+
+export const MAX_QUESTION_LENGTH = 500;
+
 export function parsePaidClarificationRequest(payload) {
   const requesterId = normalizeString(payload?.requesterId);
-  const question = normalizeString(payload?.question);
+  const question = normalizeQuestion(payload?.question);
   const paymentProof = normalizeString(payload?.payment?.proof);
   const paymentReference = normalizeString(payload?.payment?.reference);
   const paymentAmount = normalizeString(payload?.payment?.amount);
@@ -26,6 +39,17 @@ export function parsePaidClarificationRequest(payload) {
 
   if (paymentAmount !== "1.00" || paymentAsset !== "USDC") {
     throw paymentRequiredError();
+  }
+
+  if (!question) {
+    throw validationError("INVALID_QUESTION", "Clarification question cannot be empty.");
+  }
+
+  if (question.length > MAX_QUESTION_LENGTH) {
+    throw validationError(
+      "QUESTION_TOO_LONG",
+      `Clarification question must be ${MAX_QUESTION_LENGTH} characters or fewer.`
+    );
   }
 
   return {

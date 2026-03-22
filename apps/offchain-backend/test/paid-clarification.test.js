@@ -6,6 +6,17 @@ import { mkdtemp, readFile } from "node:fs/promises";
 
 import { createServer } from "../src/server.js";
 import { FileClarificationRequestRepository } from "../src/clarification-request-repository.js";
+import { FileMarketCacheRepository } from "../src/market-cache-repository.js";
+
+const VALID_MARKET = {
+  marketId: "gm_btc_above_100k",
+  title: "Will BTC trade above $100,000 before year end?",
+  resolution: "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC.",
+  closesAt: "2026-12-31T23:59:00.000Z",
+  slug: "btc-above-100k-2026",
+  url: "https://example.com/markets/btc-above-100k-2026",
+  lastSyncedAt: "2026-03-21T18:59:00.000Z"
+};
 
 async function startTestServer(options) {
   const server = createServer(options);
@@ -35,13 +46,21 @@ async function stopTestServer(server) {
   });
 }
 
+async function createMarketCacheRepository(tempDir, markets = [VALID_MARKET]) {
+  const repository = new FileMarketCacheRepository(path.join(tempDir, "market-cache.json"));
+  await repository.save(markets);
+  return repository;
+}
+
 test("POST /api/clarify/:eventId rejects unpaid requests", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
   const repository = new FileClarificationRequestRepository(
     path.join(tempDir, "clarification-requests.json")
   );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
   const { server, baseUrl } = await startTestServer({
     clarificationRequestRepository: repository,
+    marketCacheRepository,
     now: () => new Date("2026-03-21T19:00:00.000Z"),
     createClarificationId: () => "clar_paid_unused"
   });
@@ -85,8 +104,10 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
   const repository = new FileClarificationRequestRepository(
     path.join(tempDir, "clarification-requests.json")
   );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
   const { server, baseUrl } = await startTestServer({
     clarificationRequestRepository: repository,
+    marketCacheRepository,
     now: () => new Date("2026-03-21T19:05:00.000Z"),
     createClarificationId: () => "clar_paid_001"
   });
@@ -146,6 +167,10 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
       status: "processing",
       eventId: "gm_btc_above_100k",
       question: "Should trades during a maintenance window count?",
+      normalizedInput: {
+        eventId: "gm_btc_above_100k",
+        question: "Should trades during a maintenance window count?"
+      },
       requesterId: "wallet_123",
       paymentAmount: "1.00",
       paymentAsset: "USDC",
@@ -163,6 +188,207 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
         }
       ]
     });
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/clarify/:eventId rejects unsupported event ids", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T19:10:00.000Z"),
+    createClarificationId: () => "clar_paid_unused"
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/clarify/gm_unknown_market`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        requesterId: "wallet_unsupported",
+        question: "Does this market exist in the synced cache?",
+        payment: {
+          proof: "pay_proof_unsupported",
+          amount: "1.00",
+          asset: "USDC",
+          reference: "x402_ref_unsupported",
+          verified: true
+        }
+      })
+    });
+
+    assert.equal(response.status, 404);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      error: {
+        code: "UNSUPPORTED_EVENT_ID",
+        message: "Event id must match an active synced market before a clarification can be created."
+      }
+    });
+
+    const stored = await repository.load();
+    assert.deepEqual(stored.requests, []);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/clarify/:eventId rejects blank and overlong paid clarification questions", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T19:15:00.000Z"),
+    createClarificationId: () => "clar_paid_unused"
+  });
+
+  try {
+    const blankResponse = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        requesterId: "wallet_blank",
+        question: "    ",
+        payment: {
+          proof: "pay_proof_blank",
+          amount: "1.00",
+          asset: "USDC",
+          reference: "x402_ref_blank",
+          verified: true
+        }
+      })
+    });
+
+    assert.equal(blankResponse.status, 400);
+    assert.deepEqual(await blankResponse.json(), {
+      ok: false,
+      error: {
+        code: "INVALID_QUESTION",
+        message: "Clarification question cannot be empty."
+      }
+    });
+
+    const overlongResponse = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        requesterId: "wallet_long",
+        question: "a".repeat(501),
+        payment: {
+          proof: "pay_proof_long",
+          amount: "1.00",
+          asset: "USDC",
+          reference: "x402_ref_long",
+          verified: true
+        }
+      })
+    });
+
+    assert.equal(overlongResponse.status, 400);
+    assert.deepEqual(await overlongResponse.json(), {
+      ok: false,
+      error: {
+        code: "QUESTION_TOO_LONG",
+        message: "Clarification question must be 500 characters or fewer."
+      }
+    });
+
+    const stored = await repository.load();
+    assert.deepEqual(stored.requests, []);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/clarify/:eventId stores normalized paid request input for comparable duplicates", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  let nextClarification = 1;
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T19:20:00.000Z"),
+    createClarificationId: () => `clar_paid_norm_${String(nextClarification++).padStart(3, "0")}`
+  });
+
+  try {
+    const firstPayload = {
+      requesterId: "wallet_norm_1",
+      question: "  Should   Gemini auction   prints count?  ",
+      payment: {
+        proof: "pay_proof_norm_1",
+        amount: "1.00",
+        asset: "USDC",
+        reference: "x402_ref_norm_1",
+        verified: true
+      }
+    };
+    const secondPayload = {
+      requesterId: "wallet_norm_2",
+      question: "Should Gemini auction prints count?",
+      payment: {
+        proof: "pay_proof_norm_2",
+        amount: "1.00",
+        asset: "USDC",
+        reference: "x402_ref_norm_2",
+        verified: true
+      }
+    };
+
+    const firstResponse = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(firstPayload)
+    });
+    const secondResponse = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(secondPayload)
+    });
+
+    assert.equal(firstResponse.status, 202);
+    assert.equal(secondResponse.status, 202);
+
+    const stored = JSON.parse(
+      await readFile(path.join(tempDir, "clarification-requests.json"), "utf8")
+    );
+
+    assert.equal(stored.requests.length, 2);
+    assert.equal(stored.requests[0].question, "Should Gemini auction prints count?");
+    assert.equal(stored.requests[1].question, "Should Gemini auction prints count?");
+    assert.deepEqual(stored.requests.map((request) => request.normalizedInput), [
+      {
+        eventId: "gm_btc_above_100k",
+        question: "Should Gemini auction prints count?"
+      },
+      {
+        eventId: "gm_btc_above_100k",
+        question: "Should Gemini auction prints count?"
+      }
+    ]);
   } finally {
     await stopTestServer(server);
   }
