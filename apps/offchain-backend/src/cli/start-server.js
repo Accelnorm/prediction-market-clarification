@@ -4,7 +4,21 @@ import { FileArtifactRepository } from "../artifact-repository.js";
 import { FileBackgroundJobRepository } from "../background-job-repository.js";
 import { FileClarificationRequestRepository } from "../clarification-request-repository.js";
 import { FileMarketCacheRepository } from "../market-cache-repository.js";
+import {
+  checkPostgresReadiness,
+  createPostgresPool,
+  initializePostgresSchema,
+  loadPostgresRuntimeConfig,
+  PostgresArtifactRepository,
+  PostgresBackgroundJobRepository,
+  PostgresClarificationRequestRepository,
+  PostgresMarketCacheRepository,
+  PostgresPhase1Coordinator,
+  PostgresReviewerScanRepository,
+  PostgresVerifiedPaymentRepository
+} from "../postgres-storage.js";
 import { FileReviewerScanRepository } from "../reviewer-scan-repository.js";
+import { resolvePhase2RoutesEnabled, resolveTelegramEnabled, validateProductionRuntimeConfig } from "../runtime-config.js";
 import { createServer } from "../server.js";
 import { registerTelegramWebhook } from "../telegram-bot-client.js";
 import { FileVerifiedPaymentRepository } from "../verified-payment-repository.js";
@@ -54,67 +68,86 @@ function resolveLlmRuntime() {
   throw new Error(`Unsupported LLM_PROVIDER: ${provider}`);
 }
 
-const clarificationRequestsPath = resolvePathFromEnv(
-  "CLARIFICATION_REQUESTS_PATH",
-  "../../data/clarification-requests.json"
-);
-const artifactsPath = resolvePathFromEnv("ARTIFACTS_PATH", "../../data/artifacts.json");
-const backgroundJobsPath = resolvePathFromEnv(
-  "BACKGROUND_JOBS_PATH",
-  "../../data/background-jobs.json"
-);
-const marketCachePath = resolvePathFromEnv("MARKET_CACHE_PATH", "../../data/market-cache.json");
-const upcomingMarketCachePath = resolvePathFromEnv(
-  "UPCOMING_MARKET_CACHE_PATH",
-  "../../data/upcoming-market-cache.json"
-);
-const reviewerScansPath = resolvePathFromEnv(
-  "REVIEWER_SCANS_PATH",
-  "../../data/reviewer-scans.json"
-);
-const verifiedPaymentsPath = resolvePathFromEnv(
-  "VERIFIED_PAYMENTS_PATH",
-  "../../data/verified-payments.json"
-);
-const upcomingReviewerScansPath = resolvePathFromEnv(
-  "UPCOMING_REVIEWER_SCANS_PATH",
-  "../../data/upcoming-reviewer-scans.json"
-);
+async function createStorageRuntime() {
+  const postgresConfig = loadPostgresRuntimeConfig();
 
-const host = process.env.HOST ?? "0.0.0.0";
-const port = Number.parseInt(process.env.PORT ?? "3000", 10);
-const llmRuntime = resolveLlmRuntime();
+  if (postgresConfig.connectionString) {
+    const pool = createPostgresPool(postgresConfig.connectionString);
+    await initializePostgresSchema(pool);
 
-const server = createServer({
-  clarificationRequestRepository: new FileClarificationRequestRepository(
-    clarificationRequestsPath
-  ),
-  artifactRepository: new FileArtifactRepository(artifactsPath),
-  backgroundJobRepository: new FileBackgroundJobRepository(backgroundJobsPath),
-  reviewerScanRepository: new FileReviewerScanRepository(reviewerScansPath),
-  verifiedPaymentRepository: new FileVerifiedPaymentRepository(verifiedPaymentsPath),
-  marketCacheRepository: new FileMarketCacheRepository(marketCachePath),
-  upcomingMarketCacheRepository: new FileMarketCacheRepository(upcomingMarketCachePath),
-  upcomingReviewerScanRepository: new FileReviewerScanRepository(upcomingReviewerScansPath),
-  now: () => new Date(),
-  createClarificationId: () => createId("clar"),
-  createBackgroundJobId: () => createId("job"),
-  reviewerAuthToken: process.env.REVIEWER_AUTH_TOKEN,
-  llmRuntime,
-  telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET,
-  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
-  telegramBotApiBaseUrl: process.env.TELEGRAM_BOT_API_BASE_URL,
-  x402PaymentConfig: loadX402PaymentConfig(),
-  llmTraceability: {
-    promptTemplateVersion:
-      process.env.LLM_PROMPT_TEMPLATE_VERSION ?? "reviewer-offchain-prompt-v1",
-    modelId: process.env.LLM_MODEL_ID ?? llmRuntime.model,
-    processingVersion: process.env.LLM_PROCESSING_VERSION ?? "offchain-llm-pipeline-v1"
+    const clarificationRequestRepository = new PostgresClarificationRequestRepository(pool);
+    const verifiedPaymentRepository = new PostgresVerifiedPaymentRepository(pool);
+    const backgroundJobRepository = new PostgresBackgroundJobRepository(pool);
+
+    return {
+      pool,
+      clarificationRequestRepository,
+      artifactRepository: new PostgresArtifactRepository(pool),
+      backgroundJobRepository,
+      reviewerScanRepository: new PostgresReviewerScanRepository(pool, "active"),
+      verifiedPaymentRepository,
+      marketCacheRepository: new PostgresMarketCacheRepository(pool, "active"),
+      upcomingMarketCacheRepository: new PostgresMarketCacheRepository(pool, "upcoming"),
+      upcomingReviewerScanRepository: new PostgresReviewerScanRepository(pool, "upcoming"),
+      phase1Coordinator: new PostgresPhase1Coordinator({
+        pool,
+        clarificationRequestRepository,
+        verifiedPaymentRepository,
+        backgroundJobRepository
+      }),
+      readinessCheck: () => checkPostgresReadiness(pool)
+    };
   }
-});
 
-async function maybeRegisterTelegramWebhook() {
-  if (!process.env.TELEGRAM_WEBHOOK_URL) {
+  const clarificationRequestsPath = resolvePathFromEnv(
+    "CLARIFICATION_REQUESTS_PATH",
+    "../../data/clarification-requests.json"
+  );
+  const artifactsPath = resolvePathFromEnv("ARTIFACTS_PATH", "../../data/artifacts.json");
+  const backgroundJobsPath = resolvePathFromEnv(
+    "BACKGROUND_JOBS_PATH",
+    "../../data/background-jobs.json"
+  );
+  const marketCachePath = resolvePathFromEnv("MARKET_CACHE_PATH", "../../data/market-cache.json");
+  const upcomingMarketCachePath = resolvePathFromEnv(
+    "UPCOMING_MARKET_CACHE_PATH",
+    "../../data/upcoming-market-cache.json"
+  );
+  const reviewerScansPath = resolvePathFromEnv(
+    "REVIEWER_SCANS_PATH",
+    "../../data/reviewer-scans.json"
+  );
+  const verifiedPaymentsPath = resolvePathFromEnv(
+    "VERIFIED_PAYMENTS_PATH",
+    "../../data/verified-payments.json"
+  );
+  const upcomingReviewerScansPath = resolvePathFromEnv(
+    "UPCOMING_REVIEWER_SCANS_PATH",
+    "../../data/upcoming-reviewer-scans.json"
+  );
+
+  return {
+    pool: null,
+    clarificationRequestRepository: new FileClarificationRequestRepository(clarificationRequestsPath),
+    artifactRepository: new FileArtifactRepository(artifactsPath),
+    backgroundJobRepository: new FileBackgroundJobRepository(backgroundJobsPath),
+    reviewerScanRepository: new FileReviewerScanRepository(reviewerScansPath),
+    verifiedPaymentRepository: new FileVerifiedPaymentRepository(verifiedPaymentsPath),
+    marketCacheRepository: new FileMarketCacheRepository(marketCachePath),
+    upcomingMarketCacheRepository: new FileMarketCacheRepository(upcomingMarketCachePath),
+    upcomingReviewerScanRepository: new FileReviewerScanRepository(upcomingReviewerScansPath),
+    phase1Coordinator: null,
+    readinessCheck: async () => ({
+      ok: true,
+      checks: {
+        storage: "file"
+      }
+    })
+  };
+}
+
+async function maybeRegisterTelegramWebhook({ enabled, logger }) {
+  if (!enabled) {
     return;
   }
 
@@ -125,26 +158,75 @@ async function maybeRegisterTelegramWebhook() {
     apiBaseUrl: process.env.TELEGRAM_BOT_API_BASE_URL
   });
 
-  console.log(`telegram webhook registered: ${result.webhookUrl}`);
+  logger.info(JSON.stringify({ level: "info", message: "telegram.webhook.registered", webhookUrl: result.webhookUrl }));
 }
 
-await maybeRegisterTelegramWebhook();
+const host = process.env.HOST ?? "0.0.0.0";
+const port = Number.parseInt(process.env.PORT ?? "3000", 10);
+const llmRuntime = resolveLlmRuntime();
+const x402PaymentConfig = loadX402PaymentConfig();
+const enablePhase2Routes = resolvePhase2RoutesEnabled(process.env);
+const enableTelegramRoutes = resolveTelegramEnabled(process.env);
+const storageRuntime = await createStorageRuntime();
 
-server.listen(port, host, () => {
-  const address = server.address();
-  const resolvedPort =
-    typeof address === "object" && address !== null ? address.port : port;
-
-  console.log(`offchain-backend listening on http://${host}:${resolvedPort}`);
-  console.log(`market cache: ${marketCachePath}`);
-  console.log(`clarification store: ${clarificationRequestsPath}`);
-  console.log(`verified payment store: ${verifiedPaymentsPath}`);
+validateProductionRuntimeConfig({
+  env: process.env,
+  llmRuntime,
+  x402PaymentConfig,
+  telegramEnabled: enableTelegramRoutes,
+  hasDatabase: Boolean(storageRuntime.pool)
 });
 
+const server = createServer({
+  ...storageRuntime,
+  now: () => new Date(),
+  createClarificationId: () => createId("clar"),
+  createBackgroundJobId: () => createId("job"),
+  reviewerAuthToken: process.env.REVIEWER_AUTH_TOKEN,
+  llmRuntime: {
+    ...llmRuntime,
+    requireConfiguredProvider:
+      process.env.APP_ENV === "production" || process.env.NODE_ENV === "production"
+  },
+  telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET,
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
+  telegramBotApiBaseUrl: process.env.TELEGRAM_BOT_API_BASE_URL,
+  x402PaymentConfig,
+  llmTraceability: {
+    promptTemplateVersion:
+      process.env.LLM_PROMPT_TEMPLATE_VERSION ?? "reviewer-offchain-prompt-v1",
+    modelId: process.env.LLM_MODEL_ID ?? llmRuntime.model,
+    processingVersion: process.env.LLM_PROCESSING_VERSION ?? "offchain-llm-pipeline-v1"
+  },
+  enablePhase2Routes,
+  enableTelegramRoutes,
+  readinessCheck: storageRuntime.readinessCheck
+});
+
+await maybeRegisterTelegramWebhook({
+  enabled: enableTelegramRoutes,
+  logger: console
+});
+
+await new Promise((resolve) => {
+  server.listen(port, host, resolve);
+});
+
+await server.resumeRecoverableBackgroundJobs();
+
+const address = server.address();
+const resolvedPort = typeof address === "object" && address !== null ? address.port : port;
+console.log(JSON.stringify({ level: "info", message: "server.started", url: `http://${host}:${resolvedPort}` }));
+
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => {
-    server.close(() => {
-      process.exit(0);
+  process.on(signal, async () => {
+    server.markShuttingDown();
+
+    await new Promise((resolve) => {
+      server.close(() => resolve());
     });
+
+    await storageRuntime.pool?.end?.();
+    process.exit(0);
   });
 }

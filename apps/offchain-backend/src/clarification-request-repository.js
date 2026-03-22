@@ -6,6 +6,7 @@ const EMPTY_STORE = { requests: [] };
 export class FileClarificationRequestRepository {
   constructor(filePath) {
     this.filePath = filePath;
+    this.writeChain = Promise.resolve();
   }
 
   async load() {
@@ -31,33 +32,35 @@ export class FileClarificationRequestRepository {
   }
 
   async create(request) {
-    const store = await this.load();
-    const requests = [
-      ...store.requests,
-      {
-        ...request,
-        updatedAt: request.updatedAt ?? request.createdAt,
-        clarificationId: request.clarificationId ?? null,
-        summary: request.summary ?? null,
-        errorMessage: request.errorMessage ?? null,
-        retryable: request.retryable ?? false,
-        llmOutput: request.llmOutput ?? null,
-        llmTrace: request.llmTrace ?? null,
-        artifactCid: request.artifactCid ?? null,
-        artifactUrl: request.artifactUrl ?? null,
-        reviewerWorkflowStatus: request.reviewerWorkflowStatus ?? null,
-        finalEditedText: request.finalEditedText ?? null,
-        finalNote: request.finalNote ?? null,
-        finalizedAt: request.finalizedAt ?? null,
-        finalizedBy: request.finalizedBy ?? null,
-        reviewerActions: Array.isArray(request.reviewerActions) ? request.reviewerActions : [],
-        statusHistory: Array.isArray(request.statusHistory)
-          ? request.statusHistory
-          : [{ status: request.status, timestamp: request.updatedAt ?? request.createdAt }]
-      }
-    ];
-    await this.save(requests);
-    return requests.at(-1);
+    return this.withWriteLock(async () => {
+      const store = await this.load();
+      const requests = [
+        ...store.requests,
+        {
+          ...request,
+          updatedAt: request.updatedAt ?? request.createdAt,
+          clarificationId: request.clarificationId ?? null,
+          summary: request.summary ?? null,
+          errorMessage: request.errorMessage ?? null,
+          retryable: request.retryable ?? false,
+          llmOutput: request.llmOutput ?? null,
+          llmTrace: request.llmTrace ?? null,
+          artifactCid: request.artifactCid ?? null,
+          artifactUrl: request.artifactUrl ?? null,
+          reviewerWorkflowStatus: request.reviewerWorkflowStatus ?? null,
+          finalEditedText: request.finalEditedText ?? null,
+          finalNote: request.finalNote ?? null,
+          finalizedAt: request.finalizedAt ?? null,
+          finalizedBy: request.finalizedBy ?? null,
+          reviewerActions: Array.isArray(request.reviewerActions) ? request.reviewerActions : [],
+          statusHistory: Array.isArray(request.statusHistory)
+            ? request.statusHistory
+            : [{ status: request.status, timestamp: request.updatedAt ?? request.createdAt }]
+        }
+      ];
+      await this.save(requests);
+      return requests.at(-1);
+    });
   }
 
   async findByTelegramIdentifiers({ telegramChatId, telegramUserId }) {
@@ -108,116 +111,126 @@ export class FileClarificationRequestRepository {
   }
 
   async updateStatus(requestId, updates) {
-    const store = await this.load();
-    const requestIndex = store.requests.findIndex((request) => request.requestId === requestId);
+    return this.withWriteLock(async () => {
+      const store = await this.load();
+      const requestIndex = store.requests.findIndex((request) => request.requestId === requestId);
 
-    if (requestIndex === -1) {
-      return null;
-    }
+      if (requestIndex === -1) {
+        return null;
+      }
 
-    const existingRequest = store.requests[requestIndex];
-    const nextRequest = {
-      ...existingRequest,
-      status: updates.status,
-      updatedAt: updates.updatedAt,
-      clarificationId: updates.clarificationId ?? existingRequest.clarificationId ?? null,
-      summary: updates.summary ?? existingRequest.summary ?? null,
-      errorMessage: updates.errorMessage ?? existingRequest.errorMessage ?? null,
-      statusHistory: [
-        ...(Array.isArray(existingRequest.statusHistory) ? existingRequest.statusHistory : []),
-        {
-          status: updates.status,
-          timestamp: updates.updatedAt
-        }
-      ]
-    };
-    const requests = [...store.requests];
-    requests[requestIndex] = nextRequest;
-    await this.save(requests);
-    return nextRequest;
+      const existingRequest = store.requests[requestIndex];
+      const nextRequest = {
+        ...existingRequest,
+        status: updates.status,
+        updatedAt: updates.updatedAt,
+        clarificationId: updates.clarificationId ?? existingRequest.clarificationId ?? null,
+        summary: updates.summary ?? existingRequest.summary ?? null,
+        errorMessage: updates.errorMessage ?? existingRequest.errorMessage ?? null,
+        statusHistory: [
+          ...(Array.isArray(existingRequest.statusHistory) ? existingRequest.statusHistory : []),
+          {
+            status: updates.status,
+            timestamp: updates.updatedAt
+          }
+        ]
+      };
+      const requests = [...store.requests];
+      requests[requestIndex] = nextRequest;
+      await this.save(requests);
+      return nextRequest;
+    });
   }
 
   async updateByClarificationId(clarificationId, updates) {
-    const store = await this.load();
-    const requestIndex = store.requests.findIndex(
-      (request) => request.clarificationId === clarificationId
-    );
+    return this.withWriteLock(async () => {
+      const store = await this.load();
+      const requestIndex = store.requests.findIndex(
+        (request) => request.clarificationId === clarificationId
+      );
 
-    if (requestIndex === -1) {
-      return null;
-    }
+      if (requestIndex === -1) {
+        return null;
+      }
 
-    const existingRequest = store.requests[requestIndex];
-    const nextStatus = updates.status ?? existingRequest.status;
-    const nextUpdatedAt = updates.updatedAt ?? existingRequest.updatedAt;
-    const shouldAppendStatusHistory =
-      typeof updates.status === "string" && updates.status !== existingRequest.status;
-    const nextRequest = {
-      ...existingRequest,
-      ...updates,
-      status: nextStatus,
-      updatedAt: nextUpdatedAt,
-      errorMessage:
-        Object.prototype.hasOwnProperty.call(updates, "errorMessage")
-          ? updates.errorMessage
-          : existingRequest.errorMessage ?? null,
-      retryable:
-        Object.prototype.hasOwnProperty.call(updates, "retryable")
-          ? updates.retryable
-          : existingRequest.retryable ?? false,
-      llmOutput:
-        Object.prototype.hasOwnProperty.call(updates, "llmOutput")
-          ? updates.llmOutput
-          : existingRequest.llmOutput ?? null,
-      llmTrace:
-        Object.prototype.hasOwnProperty.call(updates, "llmTrace")
-          ? updates.llmTrace
-          : existingRequest.llmTrace ?? null,
-      artifactCid:
-        Object.prototype.hasOwnProperty.call(updates, "artifactCid")
-          ? updates.artifactCid
-          : existingRequest.artifactCid ?? null,
-      artifactUrl:
-        Object.prototype.hasOwnProperty.call(updates, "artifactUrl")
-          ? updates.artifactUrl
-          : existingRequest.artifactUrl ?? null,
-      reviewerWorkflowStatus:
-        Object.prototype.hasOwnProperty.call(updates, "reviewerWorkflowStatus")
-          ? updates.reviewerWorkflowStatus
-          : existingRequest.reviewerWorkflowStatus ?? null,
-      finalEditedText:
-        Object.prototype.hasOwnProperty.call(updates, "finalEditedText")
-          ? updates.finalEditedText
-          : existingRequest.finalEditedText ?? null,
-      finalNote:
-        Object.prototype.hasOwnProperty.call(updates, "finalNote")
-          ? updates.finalNote
-          : existingRequest.finalNote ?? null,
-      finalizedAt:
-        Object.prototype.hasOwnProperty.call(updates, "finalizedAt")
-          ? updates.finalizedAt
-          : existingRequest.finalizedAt ?? null,
-      finalizedBy:
-        Object.prototype.hasOwnProperty.call(updates, "finalizedBy")
-          ? updates.finalizedBy
-          : existingRequest.finalizedBy ?? null,
-      reviewerActions:
-        Object.prototype.hasOwnProperty.call(updates, "reviewerActions")
-          ? updates.reviewerActions
-          : existingRequest.reviewerActions ?? [],
-      statusHistory: shouldAppendStatusHistory
-        ? [
-            ...(Array.isArray(existingRequest.statusHistory) ? existingRequest.statusHistory : []),
-            {
-              status: updates.status,
-              timestamp: nextUpdatedAt
-            }
-          ]
-        : existingRequest.statusHistory
-    };
-    const requests = [...store.requests];
-    requests[requestIndex] = nextRequest;
-    await this.save(requests);
-    return nextRequest;
+      const existingRequest = store.requests[requestIndex];
+      const nextStatus = updates.status ?? existingRequest.status;
+      const nextUpdatedAt = updates.updatedAt ?? existingRequest.updatedAt;
+      const shouldAppendStatusHistory =
+        typeof updates.status === "string" && updates.status !== existingRequest.status;
+      const nextRequest = {
+        ...existingRequest,
+        ...updates,
+        status: nextStatus,
+        updatedAt: nextUpdatedAt,
+        errorMessage:
+          Object.prototype.hasOwnProperty.call(updates, "errorMessage")
+            ? updates.errorMessage
+            : existingRequest.errorMessage ?? null,
+        retryable:
+          Object.prototype.hasOwnProperty.call(updates, "retryable")
+            ? updates.retryable
+            : existingRequest.retryable ?? false,
+        llmOutput:
+          Object.prototype.hasOwnProperty.call(updates, "llmOutput")
+            ? updates.llmOutput
+            : existingRequest.llmOutput ?? null,
+        llmTrace:
+          Object.prototype.hasOwnProperty.call(updates, "llmTrace")
+            ? updates.llmTrace
+            : existingRequest.llmTrace ?? null,
+        artifactCid:
+          Object.prototype.hasOwnProperty.call(updates, "artifactCid")
+            ? updates.artifactCid
+            : existingRequest.artifactCid ?? null,
+        artifactUrl:
+          Object.prototype.hasOwnProperty.call(updates, "artifactUrl")
+            ? updates.artifactUrl
+            : existingRequest.artifactUrl ?? null,
+        reviewerWorkflowStatus:
+          Object.prototype.hasOwnProperty.call(updates, "reviewerWorkflowStatus")
+            ? updates.reviewerWorkflowStatus
+            : existingRequest.reviewerWorkflowStatus ?? null,
+        finalEditedText:
+          Object.prototype.hasOwnProperty.call(updates, "finalEditedText")
+            ? updates.finalEditedText
+            : existingRequest.finalEditedText ?? null,
+        finalNote:
+          Object.prototype.hasOwnProperty.call(updates, "finalNote")
+            ? updates.finalNote
+            : existingRequest.finalNote ?? null,
+        finalizedAt:
+          Object.prototype.hasOwnProperty.call(updates, "finalizedAt")
+            ? updates.finalizedAt
+            : existingRequest.finalizedAt ?? null,
+        finalizedBy:
+          Object.prototype.hasOwnProperty.call(updates, "finalizedBy")
+            ? updates.finalizedBy
+            : existingRequest.finalizedBy ?? null,
+        reviewerActions:
+          Object.prototype.hasOwnProperty.call(updates, "reviewerActions")
+            ? updates.reviewerActions
+            : existingRequest.reviewerActions ?? [],
+        statusHistory: shouldAppendStatusHistory
+          ? [
+              ...(Array.isArray(existingRequest.statusHistory) ? existingRequest.statusHistory : []),
+              {
+                status: updates.status,
+                timestamp: nextUpdatedAt
+              }
+            ]
+          : existingRequest.statusHistory
+      };
+      const requests = [...store.requests];
+      requests[requestIndex] = nextRequest;
+      await this.save(requests);
+      return nextRequest;
+    });
+  }
+
+  async withWriteLock(work) {
+    const nextOperation = this.writeChain.then(work);
+    this.writeChain = nextOperation.catch(() => {});
+    return nextOperation;
   }
 }

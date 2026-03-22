@@ -1,16 +1,30 @@
 # Oracle's Wake-Up Call
 
-This repo currently centers on the off-chain backend for clarification intake, reviewer workflows, market sync, and Telegram-facing request ingestion.
+This repo currently centers on an API-first off-chain clarification service for prediction markets. Phase 1 is the paid clarification primitive itself: x402-gated request creation, asynchronous LLM processing, public status lookup, market sync, and optional Telegram intake.
+
+## Phase 1 Scope
+
+Phase 1 is:
+
+- paid off-chain clarification via API
+- real x402 payment verification
+- asynchronous LLM processing with public status lookup
+
+The public web UI is not required for this cutoff. If Gemini adopts the idea, the requester-facing experience would likely live inside Gemini's own product surface, while external agents can call this API directly.
+
+Telegram is not part of the default Phase 1 runtime. It remains an optional intake and status-delivery channel, gated behind `ENABLE_TELEGRAM_ROUTES=1`, and it does not perform x402 payment natively.
 
 ## What Works Today
 
-- Gemini market sync into local file-backed caches
-- Paid clarification API flow with background-job persistence
-- Reviewer queue, scans, funding, audit, and finalization endpoints
-- Telegram webhook intake for `/clarify <market_id> <question>`
-- Telegram request lookup and status-payload generation
+- Gemini market sync into file-backed or Postgres-backed caches
+- Paid clarification API flow with durable background-job persistence
+- Crash recovery for queued and in-flight clarification jobs on server startup
+- Health endpoints at `GET /health/live` and `GET /health/ready`
+- Request ID logging and rate limiting on the public clarify endpoint
+- Optional Phase 2 reviewer routes behind `ENABLE_PHASE2_REVIEWER_ROUTES=1`
+- Optional Telegram intake and outbound delivery behind `ENABLE_TELEGRAM_ROUTES=1`
 
-## What Is Actually Tested
+## What Is Tested
 
 The backend test suite passes locally:
 
@@ -20,18 +34,20 @@ npm install
 npm test
 ```
 
-Current automated coverage includes:
+Automated coverage includes:
 
 - Gemini market sync normalization
-- Paid clarification creation and deduplication
-- Reviewer queue, scan, funding, audit, and finalization routes
+- Paid clarification creation, deduplication, and retry behavior
+- Health endpoints and route gating for disabled Phase 2 / Telegram routes
+- Reviewer routes when explicitly enabled
 - Telegram webhook parsing, persistence, lookup, and status update payloads
+- Production config validation
 
-Important limitation: the Telegram coverage is HTTP-level only. The code is tested for receiving Telegram-style webhook payloads and producing status messages, but it is not yet tested end-to-end against the live Telegram Bot API.
+Important limitation: Telegram coverage is still HTTP-level only. The code is tested for receiving Telegram-style webhook payloads and producing status messages, but not end-to-end against the live Telegram Bot API.
 
-## Run The API Locally
+## Local Run
 
-Start by syncing market data:
+Sync market data:
 
 ```bash
 cd apps/offchain-backend
@@ -40,38 +56,37 @@ UPCOMING_MARKET_CACHE_PATH="$PWD/data/upcoming-market-cache.json" \
 npm run sync:markets
 ```
 
-Then start the API:
+Start the API locally:
 
 ```bash
 cd apps/offchain-backend
-REVIEWER_AUTH_TOKEN="reviewer-secret" \
 PORT=3000 \
 npm run start
 ```
 
+Without `DATABASE_URL`, the backend stores state in JSON files under `apps/offchain-backend/data`. With `DATABASE_URL`, the API and market sync CLIs bootstrap the Postgres schema automatically and use Postgres-backed repositories.
+
 Useful environment variables:
 
-- `PORT` and `HOST` control the HTTP listener
-- `REVIEWER_AUTH_TOKEN` protects reviewer-only routes
-- `TELEGRAM_WEBHOOK_SECRET` validates Telegram webhook requests
-- `TELEGRAM_BOT_TOKEN` enables live outbound Telegram delivery
-- `TELEGRAM_WEBHOOK_URL` auto-registers the webhook on startup when set
-- `TELEGRAM_BOT_API_BASE_URL` overrides the Telegram API base URL when needed
-- `LLM_PROVIDER` defaults to `openrouter` and also supports `openai-compatible` and `anthropic-compatible`
-- `LLM_MODEL` selects the model sent to the provider
+- `PORT`, `HOST`
+- `DATABASE_URL`
+- `APP_ENV` or `NODE_ENV`
+- `ENABLE_PHASE2_REVIEWER_ROUTES`
+- `ENABLE_TELEGRAM_ROUTES`
+- `REVIEWER_AUTH_TOKEN` when Phase 2 routes are enabled
+- `LLM_PROVIDER`, `LLM_MODEL`
 - `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`
 - `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_BASE_URL`
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_VERSION`
-- `MARKET_CACHE_PATH`, `UPCOMING_MARKET_CACHE_PATH`
-- `CLARIFICATION_REQUESTS_PATH`, `BACKGROUND_JOBS_PATH`
-- `ARTIFACTS_PATH`, `REVIEWER_SCANS_PATH`, `UPCOMING_REVIEWER_SCANS_PATH`
+- `PUBLIC_API_BASE_URL`
+- `X402_VERSION`, `X402_SCHEME`, `X402_PRICE_USD`, `X402_MAX_AMOUNT_REQUIRED`
+- `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`
+- `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `X402_FACILITATOR_AUTH_TOKEN`
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_API_BASE_URL`
 
-By default the backend stores state in JSON files under `apps/offchain-backend/data`.
+## Manual API Check
 
-## Test The API Manually
-
-1. Sync markets and start the API.
-2. Request the x402 payment challenge:
+1. Request the x402 payment challenge:
 
 ```bash
 curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
@@ -82,7 +97,7 @@ curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
   }'
 ```
 
-3. Retry with a paid proof in `PAYMENT-SIGNATURE`:
+2. Retry with a paid proof in `PAYMENT-SIGNATURE`:
 
 ```bash
 curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
@@ -94,87 +109,60 @@ curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
   }'
 ```
 
-4. Read reviewer data:
+3. Poll clarification status:
 
 ```bash
-curl http://127.0.0.1:3000/api/reviewer/queue \
-  -H 'x-reviewer-token: reviewer-secret'
+curl http://127.0.0.1:3000/api/clarifications/<CLARIFICATION_ID>
 ```
 
-## Deploy The API
+## Hackathon Demo Path
 
-The backend is now runnable as a plain Node process:
+For a hackathon demo, the easiest deployment path is:
+
+1. One Node service running `apps/offchain-backend`
+2. One Postgres database
+3. Phase 2 routes disabled: `ENABLE_PHASE2_REVIEWER_ROUTES=0`
+4. Telegram disabled unless you actively want it in the demo: `ENABLE_TELEGRAM_ROUTES=0`
+5. A startup job or manual step running `npm run sync:markets`
+6. Demo traffic hitting:
+   - `POST /api/clarify/:eventId`
+   - `GET /api/clarifications/:clarificationId`
+
+Minimal demo env:
 
 ```bash
-cd apps/offchain-backend
-npm install
-MARKET_CACHE_PATH="$PWD/data/market-cache.json" \
-UPCOMING_MARKET_CACHE_PATH="$PWD/data/upcoming-market-cache.json" \
-REVIEWER_AUTH_TOKEN="replace-me" \
-LLM_PROVIDER="openrouter" \
-OPENROUTER_API_KEY="replace-me" \
-LLM_MODEL="openrouter/auto" \
-TELEGRAM_WEBHOOK_URL="https://<YOUR_DOMAIN>/api/telegram/webhook" \
-TELEGRAM_WEBHOOK_SECRET="replace-me" \
-TELEGRAM_BOT_TOKEN="replace-me" \
-PORT=3000 \
-npm run start
+DATABASE_URL="postgres://<USER>:<PASS>@<HOST>:5432/<DB>"
+APP_ENV="production"
+ENABLE_PHASE2_REVIEWER_ROUTES="0"
+ENABLE_TELEGRAM_ROUTES="0"
+LLM_PROVIDER="openrouter"
+OPENROUTER_API_KEY="replace-me"
+LLM_MODEL="openrouter/auto"
+X402_RECIPIENT_ADDRESS="<YOUR_SOLANA_USDC_RECIPIENT>"
+X402_FACILITATOR_AUTH_TOKEN="replace-me"
+PORT="3000"
 ```
 
-For deployment behind a public URL:
+That is enough for a hackathon demo as long as:
 
-1. Provision a host that can run Node 20+ and keep local JSON files on persistent disk.
-2. Run `npm install`.
-3. Run `npm run sync:markets` on deploy, then on a schedule.
-4. Start `npm run start` under a process manager or container runtime.
-5. Put the service behind HTTPS.
-6. Keep `REVIEWER_AUTH_TOKEN` out of source control.
+- market sync has run successfully
+- the x402 facilitator token is valid
+- the LLM provider key is valid
+- your deployment points to a working Postgres instance
 
-## Deploy And Test Telegram
+## Telegram
 
-The current integration point is the webhook receiver at `POST /api/telegram/webhook`.
-
-1. Create a bot with BotFather and get the bot token.
-2. Deploy the API to a public HTTPS URL.
-3. Set these env vars on the API before startup:
+Telegram is optional and off by default. If you want it for a demo, explicitly enable it and provide the full webhook config:
 
 ```bash
+ENABLE_TELEGRAM_ROUTES="1"
 TELEGRAM_BOT_TOKEN="<TELEGRAM_BOT_TOKEN>"
 TELEGRAM_WEBHOOK_URL="https://<YOUR_DOMAIN>/api/telegram/webhook"
 TELEGRAM_WEBHOOK_SECRET="<TELEGRAM_WEBHOOK_SECRET>"
 ```
 
-The server will register the webhook with Telegram automatically on boot.
+When Telegram is enabled, the server registers the webhook on boot. Telegram remains an intake and status-delivery channel only; it does not perform x402 payment natively.
 
-4. In Telegram, send your bot a message in this format:
+## Status
 
-```text
-/clarify gm_btc_above_100k Should auction prints count?
-```
-
-5. Confirm the request was stored:
-
-```bash
-curl "https://<YOUR_DOMAIN>/api/telegram/requests?chat_id=<CHAT_ID>&user_id=<USER_ID>"
-```
-
-6. Simulate downstream status updates:
-
-```bash
-curl -X POST "https://<YOUR_DOMAIN>/api/telegram/requests/<REQUEST_ID>/status" \
-  -H 'content-type: application/json' \
-  -d '{
-    "status": "completed",
-    "clarificationId": "clar_001",
-    "summary": "Gemini auction and spot prints both count toward resolution."
-  }'
-```
-
-Current expectation: if `TELEGRAM_WEBHOOK_SECRET` and `TELEGRAM_WEBHOOK_URL` are set and the process starts cleanly, the server will register the webhook on boot. With `TELEGRAM_BOT_TOKEN` configured, inbound webhook intake and outbound status delivery should both work.
-
-## In Progress / Missing Pieces
-
-- The LLM integration now supports real provider calls, but it falls back to the deterministic local stub when no provider API key is configured.
-- Persistence is file-backed JSON, not a production database.
-- There is no deployment packaging yet for Docker, systemd, or managed platforms.
-- Reviewer auth is a single shared token and still needs hardening.
+This backend is ready for a hackathon demo if you deploy it with Postgres, production-mode env vars, and Phase 2 routes disabled. It is not yet packaged into a one-command demo deployment like Docker or a platform template, so the main remaining gap is deployment ergonomics rather than core API functionality.

@@ -50,6 +50,11 @@ export class FileBackgroundJobRepository {
     return store.jobs.find((job) => job.jobId === jobId) ?? null;
   }
 
+  async listRecoverable() {
+    const store = await this.load();
+    return store.jobs.filter((job) => ["queued", "processing"].includes(job.status));
+  }
+
   async updateByJobId(jobId, updates) {
     return this.withWriteLock(async () => {
       const store = await this.load();

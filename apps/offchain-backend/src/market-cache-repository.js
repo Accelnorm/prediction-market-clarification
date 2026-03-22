@@ -6,6 +6,7 @@ const EMPTY_CACHE = { markets: [] };
 export class FileMarketCacheRepository {
   constructor(filePath) {
     this.filePath = filePath;
+    this.writeChain = Promise.resolve();
   }
 
   async load() {
@@ -40,20 +41,28 @@ export class FileMarketCacheRepository {
   }
 
   async upsert(market) {
-    const cache = await this.load();
-    const marketIndex = cache.markets.findIndex(
-      (existingMarket) => existingMarket.marketId === market.marketId
-    );
-    const nextMarkets = [...cache.markets];
+    return this.withWriteLock(async () => {
+      const cache = await this.load();
+      const marketIndex = cache.markets.findIndex(
+        (existingMarket) => existingMarket.marketId === market.marketId
+      );
+      const nextMarkets = [...cache.markets];
 
-    if (marketIndex === -1) {
-      nextMarkets.push(market);
-    } else {
-      nextMarkets[marketIndex] = market;
-    }
+      if (marketIndex === -1) {
+        nextMarkets.push(market);
+      } else {
+        nextMarkets[marketIndex] = market;
+      }
 
-    nextMarkets.sort((left, right) => left.marketId.localeCompare(right.marketId));
-    await this.save(nextMarkets);
-    return market;
+      nextMarkets.sort((left, right) => left.marketId.localeCompare(right.marketId));
+      await this.save(nextMarkets);
+      return market;
+    });
+  }
+
+  async withWriteLock(work) {
+    const nextOperation = this.writeChain.then(work);
+    this.writeChain = nextOperation.catch(() => {});
+    return nextOperation;
   }
 }

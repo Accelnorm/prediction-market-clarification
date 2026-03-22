@@ -31,6 +31,74 @@ function sendJson(response, statusCode, payload, headers = {}) {
   response.end(JSON.stringify(payload));
 }
 
+function sendNotFound(response) {
+  sendJson(response, 404, {
+    ok: false,
+    error: {
+      code: "NOT_FOUND",
+      message: "Route not found."
+    }
+  });
+}
+
+function buildLogger(logger = console) {
+  return {
+    info(message, fields = {}) {
+      (logger.info ?? logger.log).call(logger, JSON.stringify({ level: "info", message, ...fields }));
+    },
+    warn(message, fields = {}) {
+      (logger.warn ?? logger.log).call(logger, JSON.stringify({ level: "warn", message, ...fields }));
+    },
+    error(message, fields = {}) {
+      (logger.error ?? logger.log).call(logger, JSON.stringify({ level: "error", message, ...fields }));
+    }
+  };
+}
+
+function buildRequestContext(request) {
+  const forwardedFor = request.headers["x-forwarded-for"];
+  const forwardedClient =
+    typeof forwardedFor === "string" && forwardedFor.trim() !== ""
+      ? forwardedFor.split(",")[0].trim()
+      : null;
+
+  return {
+    requestId: randomUUID().replace(/-/g, "").slice(0, 16),
+    clientAddress: forwardedClient ?? request.socket.remoteAddress ?? "unknown"
+  };
+}
+
+function createInMemoryRateLimiter({
+  windowMs = 60_000,
+  maxRequests = 30
+} = {}) {
+  const buckets = new Map();
+
+  return {
+    check(key, now = Date.now()) {
+      const existingBucket = buckets.get(key);
+
+      if (!existingBucket || existingBucket.resetAt <= now) {
+        buckets.set(key, {
+          count: 1,
+          resetAt: now + windowMs
+        });
+        return { allowed: true };
+      }
+
+      if (existingBucket.count >= maxRequests) {
+        return {
+          allowed: false,
+          retryAfterSeconds: Math.max(1, Math.ceil((existingBucket.resetAt - now) / 1000))
+        };
+      }
+
+      existingBucket.count += 1;
+      return { allowed: true };
+    }
+  };
+}
+
 function hasReviewerAccess(request, reviewerAuthToken) {
   if (!reviewerAuthToken) {
     return false;
@@ -650,13 +718,28 @@ export function createServer({
   telegramBotApiBaseUrl,
   x402PaymentConfig = loadX402PaymentConfig(),
   verifiedPaymentRepository,
+  phase1Coordinator = null,
   verifyX402Payment = verifyDefaultClarificationPayment,
   buildX402PaymentChallenge = buildX402PaymentRequiredPayload,
   fetchReviewerMarketSource,
   sendTelegramMessage = sendDefaultTelegramMessage,
   runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline,
-  runReviewerMarketScan = createReviewerMarketScan
+  runReviewerMarketScan = createReviewerMarketScan,
+  enablePhase2Routes = true,
+  enableTelegramRoutes = true,
+  logger = console,
+  clarifyRateLimiter = null,
+  readinessCheck = async () => ({
+    ok: true,
+    checks: {
+      runtime: "ok"
+    }
+  })
 }) {
+  const log = buildLogger(logger);
+  const rateLimiter = clarifyRateLimiter ?? createInMemoryRateLimiter();
+  let isShuttingDown = false;
+
   function getMarketRepositoryForStage(marketStage = "active") {
     return marketStage === "upcoming" ? upcomingMarketCacheRepository : marketCacheRepository;
   }
@@ -792,7 +875,19 @@ export function createServer({
     return processingJob;
   }
 
-  return http.createServer(async (request, response) => {
+  async function resumeRecoverableBackgroundJobs() {
+    const recoverableJobs = (await backgroundJobRepository?.listRecoverable?.()) ?? [];
+
+    for (const job of recoverableJobs) {
+      await startBackgroundJob(job);
+    }
+
+    return recoverableJobs.length;
+  }
+
+  const server = http.createServer(async (request, response) => {
+    const requestContext = buildRequestContext(request);
+    const startedAt = Date.now();
     const forwardedProto = request.headers["x-forwarded-proto"];
     const requestProtocol =
       typeof forwardedProto === "string" && forwardedProto.trim() !== ""
@@ -803,6 +898,66 @@ export function createServer({
         ? request.headers.host
         : "127.0.0.1";
     const requestUrl = new URL(request.url, `${requestProtocol}://${requestHost}`);
+    response.setHeader("x-request-id", requestContext.requestId);
+
+    response.on("finish", () => {
+      log.info("request.completed", {
+        requestId: requestContext.requestId,
+        method: request.method,
+        path: requestUrl.pathname,
+        statusCode: response.statusCode,
+        durationMs: Date.now() - startedAt,
+        clientAddress: requestContext.clientAddress
+      });
+    });
+
+    if (request.method === "GET" && requestUrl.pathname === "/health/live") {
+      sendJson(response, 200, {
+        ok: true
+      });
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/health/ready") {
+      try {
+        const readiness = await readinessCheck();
+        sendJson(response, readiness.ok && !isShuttingDown ? 200 : 503, {
+          ok: readiness.ok && !isShuttingDown,
+          checks: {
+            ...(readiness.checks ?? {}),
+            shuttingDown: isShuttingDown ? "draining" : "ok"
+          }
+        });
+      } catch (error) {
+        log.error("readiness.failed", {
+          requestId: requestContext.requestId,
+          errorMessage: error.message
+        });
+        sendJson(response, 503, {
+          ok: false,
+          checks: {
+            runtime: "error",
+            shuttingDown: isShuttingDown ? "draining" : "ok"
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (!enableTelegramRoutes && requestUrl.pathname.startsWith("/api/telegram/")) {
+      sendNotFound(response);
+      return;
+    }
+
+    if (
+      !enablePhase2Routes &&
+      (requestUrl.pathname.startsWith("/api/reviewer/") ||
+        requestUrl.pathname.startsWith("/api/artifacts/"))
+    ) {
+      sendNotFound(response);
+      return;
+    }
 
     if (request.method === "POST" && request.url === "/api/telegram/webhook") {
       try {
@@ -860,6 +1015,28 @@ export function createServer({
       /^\/api\/clarify\/[^/]+$/.test(requestUrl.pathname)
     ) {
       try {
+        const rateLimitResult = rateLimiter.check(
+          `${requestContext.clientAddress}:${requestUrl.pathname}`
+        );
+
+        if (!rateLimitResult.allowed) {
+          sendJson(
+            response,
+            429,
+            {
+              ok: false,
+              error: {
+                code: "RATE_LIMITED",
+                message: "Too many clarification requests. Retry later."
+              }
+            },
+            {
+              "retry-after": String(rateLimitResult.retryAfterSeconds ?? 60)
+            }
+          );
+          return;
+        }
+
         const eventId = decodeURIComponent(
           requestUrl.pathname.replace(/^\/api\/clarify\/([^/]+)$/, "$1")
         );
@@ -919,18 +1096,7 @@ export function createServer({
         }
 
         const timestamp = now().toISOString();
-        const existingVerifiedPayment =
-          (await verifiedPaymentRepository?.findByPaymentProof?.(verifiedPayment.paymentProof)) ?? null;
-
-        if (!existingVerifiedPayment) {
-          await verifiedPaymentRepository?.create?.({
-            ...verifiedPayment,
-            createdAt: timestamp,
-            updatedAt: timestamp
-          });
-        }
-
-        const clarification = await clarificationRequestRepository.create({
+        const clarificationPayload = {
           clarificationId: createClarificationId(),
           requestId: null,
           source: "paid_api",
@@ -954,29 +1120,69 @@ export function createServer({
           paymentVerificationSource: verifiedPayment.verificationSource ?? null,
           createdAt: timestamp,
           updatedAt: timestamp
-        });
-        await verifiedPaymentRepository?.updateByPaymentProof?.(verifiedPayment.paymentProof, {
-          clarificationId: clarification.clarificationId,
-          updatedAt: timestamp
-        });
-
+        };
         const jobTimestamp = now().toISOString();
-        const queuedJob =
-          (await backgroundJobRepository?.create?.({
-            jobId: createBackgroundJobId(),
-            kind: "clarification_pipeline",
-            status: "queued",
-            createdAt: jobTimestamp,
-            updatedAt: jobTimestamp,
-            attempts: 0,
-            retryable: false,
-            target: {
-              clarificationId: clarification.clarificationId,
-              eventId
+        const queuedJobPayload = {
+          jobId: createBackgroundJobId(),
+          kind: "clarification_pipeline",
+          status: "queued",
+          createdAt: jobTimestamp,
+          updatedAt: jobTimestamp,
+          attempts: 0,
+          retryable: false,
+          target: {
+            clarificationId: clarificationPayload.clarificationId,
+            eventId
+          },
+          errorMessage: null,
+          result: null
+        };
+        let clarification = null;
+        let queuedJob = null;
+
+        if (phase1Coordinator) {
+          const coordinatedResult = await phase1Coordinator.createPaidClarification({
+            clarification: clarificationPayload,
+            verifiedPayment: {
+              ...verifiedPayment,
+              createdAt: timestamp,
+              updatedAt: timestamp
             },
-            errorMessage: null,
-            result: null
-          })) ?? null;
+            backgroundJob: queuedJobPayload
+          });
+
+          if (!coordinatedResult.created) {
+            sendJson(response, 200, {
+              ok: true,
+              clarificationId: coordinatedResult.clarification.clarificationId,
+              status: coordinatedResult.clarification.status
+            });
+            return;
+          }
+
+          clarification = coordinatedResult.clarification;
+          queuedJob = coordinatedResult.job;
+        } else {
+          const existingVerifiedPayment =
+            (await verifiedPaymentRepository?.findByPaymentProof?.(verifiedPayment.paymentProof)) ??
+            null;
+
+          if (!existingVerifiedPayment) {
+            await verifiedPaymentRepository?.create?.({
+              ...verifiedPayment,
+              createdAt: timestamp,
+              updatedAt: timestamp
+            });
+          }
+
+          clarification = await clarificationRequestRepository.create(clarificationPayload);
+          await verifiedPaymentRepository?.updateByPaymentProof?.(verifiedPayment.paymentProof, {
+            clarificationId: clarification.clarificationId,
+            updatedAt: timestamp
+          });
+          queuedJob = (await backgroundJobRepository?.create?.(queuedJobPayload)) ?? null;
+        }
+
         const processingJob = queuedJob ? await startBackgroundJob(queuedJob) : null;
 
         await clarificationRequestRepository.updateByClarificationId(clarification.clarificationId, {
@@ -2402,12 +2608,13 @@ export function createServer({
       return;
     }
 
-    sendJson(response, 404, {
-      ok: false,
-      error: {
-        code: "NOT_FOUND",
-        message: "Route not found."
-      }
-    });
+    sendNotFound(response);
   });
+
+  server.resumeRecoverableBackgroundJobs = resumeRecoverableBackgroundJobs;
+  server.markShuttingDown = () => {
+    isShuttingDown = true;
+  };
+
+  return server;
 }

@@ -4,7 +4,7 @@ import path from "node:path";
 
 const EMPTY_STORE = { artifacts: [] };
 
-function createArtifactCid(artifact) {
+export function createArtifactCid(artifact) {
   const digest = createHash("sha256").update(JSON.stringify(artifact)).digest("hex");
   return `bafy${digest.slice(0, 32)}`;
 }
@@ -12,6 +12,7 @@ function createArtifactCid(artifact) {
 export class FileArtifactRepository {
   constructor(filePath) {
     this.filePath = filePath;
+    this.writeChain = Promise.resolve();
   }
 
   async load() {
@@ -37,26 +38,34 @@ export class FileArtifactRepository {
   }
 
   async createArtifact(input) {
-    const store = await this.load();
-    const cid = createArtifactCid(input);
-    const existingArtifact = store.artifacts.find((artifact) => artifact.cid === cid);
+    return this.withWriteLock(async () => {
+      const store = await this.load();
+      const cid = createArtifactCid(input);
+      const existingArtifact = store.artifacts.find((artifact) => artifact.cid === cid);
 
-    if (existingArtifact) {
-      return existingArtifact;
-    }
+      if (existingArtifact) {
+        return existingArtifact;
+      }
 
-    const artifact = {
-      ...input,
-      cid,
-      url: `ipfs://${cid}`
-    };
-    const artifacts = [...store.artifacts, artifact];
-    await this.save(artifacts);
-    return artifact;
+      const artifact = {
+        ...input,
+        cid,
+        url: `ipfs://${cid}`
+      };
+      const artifacts = [...store.artifacts, artifact];
+      await this.save(artifacts);
+      return artifact;
+    });
   }
 
   async findByCid(cid) {
     const store = await this.load();
     return store.artifacts.find((artifact) => artifact.cid === cid) ?? null;
+  }
+
+  async withWriteLock(work) {
+    const nextOperation = this.writeChain.then(work);
+    this.writeChain = nextOperation.catch(() => {});
+    return nextOperation;
   }
 }

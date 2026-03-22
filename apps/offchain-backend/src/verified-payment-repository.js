@@ -6,6 +6,7 @@ const EMPTY_STORE = { payments: [] };
 export class FileVerifiedPaymentRepository {
   constructor(filePath) {
     this.filePath = filePath;
+    this.writeChain = Promise.resolve();
   }
 
   async load() {
@@ -31,18 +32,20 @@ export class FileVerifiedPaymentRepository {
   }
 
   async create(payment) {
-    const store = await this.load();
-    const payments = [
-      ...store.payments,
-      {
-        ...payment,
-        clarificationId: payment.clarificationId ?? null,
-        createdAt: payment.createdAt ?? payment.paymentVerifiedAt ?? null,
-        updatedAt: payment.updatedAt ?? payment.paymentVerifiedAt ?? null
-      }
-    ];
-    await this.save(payments);
-    return payments.at(-1);
+    return this.withWriteLock(async () => {
+      const store = await this.load();
+      const payments = [
+        ...store.payments,
+        {
+          ...payment,
+          clarificationId: payment.clarificationId ?? null,
+          createdAt: payment.createdAt ?? payment.paymentVerifiedAt ?? null,
+          updatedAt: payment.updatedAt ?? payment.paymentVerifiedAt ?? null
+        }
+      ];
+      await this.save(payments);
+      return payments.at(-1);
+    });
   }
 
   async findByPaymentProof(paymentProof) {
@@ -67,29 +70,37 @@ export class FileVerifiedPaymentRepository {
   }
 
   async updateByPaymentProof(paymentProof, updates) {
-    const store = await this.load();
-    const paymentIndex = store.payments.findIndex(
-      (payment) => payment.paymentProof === paymentProof
-    );
+    return this.withWriteLock(async () => {
+      const store = await this.load();
+      const paymentIndex = store.payments.findIndex(
+        (payment) => payment.paymentProof === paymentProof
+      );
 
-    if (paymentIndex === -1) {
-      return null;
-    }
+      if (paymentIndex === -1) {
+        return null;
+      }
 
-    const existingPayment = store.payments[paymentIndex];
-    const nextPayment = {
-      ...existingPayment,
-      ...updates,
-      updatedAt: updates.updatedAt ?? existingPayment.updatedAt
-    };
-    const payments = [...store.payments];
-    payments[paymentIndex] = nextPayment;
-    await this.save(payments);
-    return nextPayment;
+      const existingPayment = store.payments[paymentIndex];
+      const nextPayment = {
+        ...existingPayment,
+        ...updates,
+        updatedAt: updates.updatedAt ?? existingPayment.updatedAt
+      };
+      const payments = [...store.payments];
+      payments[paymentIndex] = nextPayment;
+      await this.save(payments);
+      return nextPayment;
+    });
   }
 
   async list() {
     const store = await this.load();
     return store.payments;
+  }
+
+  async withWriteLock(work) {
+    const nextOperation = this.writeChain.then(work);
+    this.writeChain = nextOperation.catch(() => {});
+    return nextOperation;
   }
 }

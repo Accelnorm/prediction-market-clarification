@@ -331,6 +331,14 @@ export async function generateMarketInterpretation({
   const runtime = resolveRuntime(llmRuntime);
 
   if (!runtime.apiKey) {
+    if (llmRuntime?.requireConfiguredProvider) {
+      throw validationError(
+        "LLM_PROVIDER_REQUIRED",
+        "A configured LLM provider is required for this runtime.",
+        503
+      );
+    }
+
     return {
       llmOutput: buildDefaultInterpretation({ market }),
       providerUsed: "stub",
