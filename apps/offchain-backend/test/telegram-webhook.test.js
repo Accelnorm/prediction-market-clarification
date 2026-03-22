@@ -98,6 +98,8 @@ test("POST /api/telegram/webhook stores a pending clarification request and retu
       retryable: false,
       llmOutput: null,
       llmTrace: null,
+      artifactCid: null,
+      artifactUrl: null,
       statusHistory: [
         {
           status: "pending",

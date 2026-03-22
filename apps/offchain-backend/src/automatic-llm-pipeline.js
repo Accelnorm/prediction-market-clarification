@@ -24,9 +24,31 @@ function buildLlmTrace({ llmTraceability, requestedAt }) {
   };
 }
 
+async function publishInterpretationArtifact({
+  artifactRepository,
+  clarification,
+  market,
+  llmOutput,
+  generatedAtUtc
+}) {
+  if (!artifactRepository) {
+    return { cid: null, url: null };
+  }
+
+  return artifactRepository.createArtifact({
+    clarificationId: clarification.clarificationId,
+    eventId: clarification.eventId,
+    marketText: market.resolution,
+    suggestedEditedMarketText: llmOutput.suggested_market_text,
+    clarificationNote: llmOutput.suggested_note,
+    generatedAtUtc
+  });
+}
+
 export async function runAutomaticClarificationPipeline({
   clarification,
   clarificationRequestRepository,
+  artifactRepository,
   marketCacheRepository,
   now,
   llmTraceability = {
@@ -40,15 +62,24 @@ export async function runAutomaticClarificationPipeline({
   const requestedAt = now().toISOString();
   const completedTimestamp = now().toISOString();
   const llmTrace = buildLlmTrace({ llmTraceability, requestedAt });
+  const artifact = await publishInterpretationArtifact({
+    artifactRepository,
+    clarification,
+    market,
+    llmOutput,
+    generatedAtUtc: completedTimestamp
+  });
 
   await clarificationRequestRepository.updateByClarificationId(clarification.clarificationId, {
     status: "completed",
     updatedAt: completedTimestamp,
     llmOutput,
     llmTrace,
+    artifactCid: artifact.cid,
+    artifactUrl: artifact.url,
     errorMessage: null,
     retryable: false
   });
 
-  return { llmOutput, llmTrace };
+  return { llmOutput, llmTrace, artifact };
 }

@@ -5,6 +5,7 @@ import path from "node:path";
 import { mkdtemp, readFile } from "node:fs/promises";
 
 import { createServer } from "../src/server.js";
+import { FileArtifactRepository } from "../src/artifact-repository.js";
 import { FileClarificationRequestRepository } from "../src/clarification-request-repository.js";
 import { FileMarketCacheRepository } from "../src/market-cache-repository.js";
 
@@ -203,6 +204,8 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
       retryable: false,
       llmOutput: null,
       llmTrace: null,
+      artifactCid: null,
+      artifactUrl: null,
       statusHistory: [
         {
           status: "queued",
@@ -497,6 +500,82 @@ test("POST /api/clarify/:eventId automatically runs the interpretation pipeline 
         "Use Gemini's primary BTC/USD spot exchange feed and count the first eligible trade print above $100,000 before expiry."
     });
     assert.equal(storedRequest.errorMessage, null);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("successful clarifications automatically publish an artifact and store a fetchable IPFS reference", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const artifactRepository = new FileArtifactRepository(path.join(tempDir, "artifacts.json"));
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    artifactRepository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T19:26:00.000Z"),
+    createClarificationId: () => "clar_paid_artifact_001"
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        requesterId: "wallet_artifact",
+        question: "Should the primary Gemini feed be the only source for resolution?",
+        payment: {
+          proof: "pay_proof_artifact_001",
+          amount: "1.00",
+          asset: "USDC",
+          reference: "x402_ref_artifact_001",
+          verified: true
+        }
+      })
+    });
+
+    assert.equal(response.status, 202);
+
+    await waitFor(async () => {
+      const storedRequest = await repository.findByClarificationId("clar_paid_artifact_001");
+      assert.ok(storedRequest);
+      assert.equal(storedRequest.status, "completed");
+      assert.match(storedRequest.artifactCid ?? "", /^bafy[a-z0-9]+$/);
+      assert.equal(storedRequest.artifactUrl, `ipfs://${storedRequest.artifactCid}`);
+    });
+
+    const storedRequest = await repository.findByClarificationId("clar_paid_artifact_001");
+    const artifactResponse = await fetch(
+      `${baseUrl}/api/artifacts/${encodeURIComponent(storedRequest.artifactCid)}`
+    );
+
+    assert.equal(artifactResponse.status, 200);
+    assert.deepEqual(await artifactResponse.json(), {
+      ok: true,
+      artifact: {
+        cid: storedRequest.artifactCid,
+        url: storedRequest.artifactUrl,
+        clarificationId: "clar_paid_artifact_001",
+        eventId: "gm_btc_above_100k",
+        marketText: VALID_MARKET.resolution,
+        suggestedEditedMarketText: storedRequest.llmOutput.suggested_market_text,
+        clarificationNote: storedRequest.llmOutput.suggested_note,
+        generatedAtUtc: "2026-03-21T19:26:00.000Z"
+      }
+    });
+
+    const detailResponse = await fetch(`${baseUrl}/api/clarifications/clar_paid_artifact_001`);
+    assert.equal(detailResponse.status, 200);
+    const detailPayload = await detailResponse.json();
+    assert.deepEqual(detailPayload.clarification.artifact, {
+      cid: storedRequest.artifactCid,
+      url: storedRequest.artifactUrl
+    });
   } finally {
     await stopTestServer(server);
   }

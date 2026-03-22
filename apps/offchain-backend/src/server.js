@@ -33,6 +33,7 @@ async function readJsonBody(request) {
 
 export function createServer({
   clarificationRequestRepository,
+  artifactRepository,
   marketCacheRepository,
   now,
   createRequestId,
@@ -158,6 +159,7 @@ export function createServer({
             runAutomaticClarificationPipeline({
               clarification: processingClarification,
               clarificationRequestRepository,
+              artifactRepository,
               marketCacheRepository,
               now,
               llmTraceability
@@ -238,18 +240,65 @@ export function createServer({
           return;
         }
 
+        const clarificationPayload = {
+          clarificationId: clarification.clarificationId,
+          status: clarification.status,
+          eventId: clarification.eventId,
+          question: clarification.question,
+          llmOutput: clarification.llmOutput ?? null,
+          llmTrace: clarification.llmTrace ?? null,
+          createdAt: clarification.createdAt,
+          updatedAt: clarification.updatedAt ?? clarification.createdAt
+        };
+
+        if (clarification.artifactCid && clarification.artifactUrl) {
+          clarificationPayload.artifact = {
+            cid: clarification.artifactCid,
+            url: clarification.artifactUrl
+          };
+        }
+
         sendJson(response, 200, {
           ok: true,
-          clarification: {
-            clarificationId: clarification.clarificationId,
-            status: clarification.status,
-            eventId: clarification.eventId,
-            question: clarification.question,
-            llmOutput: clarification.llmOutput ?? null,
-            llmTrace: clarification.llmTrace ?? null,
-            createdAt: clarification.createdAt,
-            updatedAt: clarification.updatedAt ?? clarification.createdAt
+          clarification: clarificationPayload
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
           }
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      /^\/api\/artifacts\/[^/]+$/.test(requestUrl.pathname)
+    ) {
+      try {
+        const cid = decodeURIComponent(
+          requestUrl.pathname.replace(/^\/api\/artifacts\/([^/]+)$/, "$1")
+        );
+        const artifact = await artifactRepository?.findByCid(cid);
+
+        if (!artifact) {
+          sendJson(response, 404, {
+            ok: false,
+            error: {
+              code: "ARTIFACT_NOT_FOUND",
+              message: "Artifact not found."
+            }
+          });
+          return;
+        }
+
+        sendJson(response, 200, {
+          ok: true,
+          artifact
         });
       } catch (error) {
         sendJson(response, 500, {
