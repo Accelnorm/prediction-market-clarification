@@ -219,6 +219,12 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
       llmTrace: null,
       artifactCid: null,
       artifactUrl: null,
+      reviewerWorkflowStatus: null,
+      finalEditedText: null,
+      finalNote: null,
+      finalizedAt: null,
+      finalizedBy: null,
+      reviewerActions: [],
       statusHistory: [
         {
           status: "queued",
@@ -748,6 +754,35 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
           requestedAt: "2026-03-21T19:27:02.000Z",
           processingVersion: "offchain-pipeline-2026-03-21"
         },
+        market: {
+          marketId: "gm_btc_above_100k",
+          title: VALID_MARKET.title,
+          resolutionText: VALID_MARKET.resolution,
+          endTime: VALID_MARKET.closesAt,
+          slug: VALID_MARKET.slug,
+          url: VALID_MARKET.url
+        },
+        funding: {
+          raisedAmount: "1.00",
+          targetAmount: "1.00",
+          contributorCount: 1,
+          fundingState: "funded",
+          history: [
+            {
+              contributor: "wallet_trace_1",
+              amount: "1.00",
+              timestamp: "2026-03-21T19:27:00.000Z",
+              reference: "x402_ref_trace_001"
+            }
+          ]
+        },
+        vote: {
+          status: "not_started",
+          label: "Not Started",
+          placeholder: true,
+          summary: "Off-chain placeholder until panel voting is implemented.",
+          updatedAt: "2026-03-21T19:27:03.000Z"
+        },
         createdAt: "2026-03-21T19:27:00.000Z",
         updatedAt: "2026-03-21T19:27:03.000Z",
         review_window_secs: 86400,
@@ -1101,6 +1136,286 @@ test("clarification detail responses include adaptive review windows bounded bet
   }
 });
 
+test("GET /api/reviewer/clarifications/:clarificationId returns reviewer detail fields for market text, funding history, artifact references, and vote placeholders", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-detail-ui-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+
+  await clarificationRequestRepository.create({
+    clarificationId: "clar_detail_seed_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_btc_above_100k",
+    question: "Do auction prints count for funding history?",
+    requesterId: "wallet_seed_001",
+    paymentAmount: "1.00",
+    paymentAsset: "USDC",
+    paymentReference: "x402_ref_seed_001",
+    paymentProof: "pay_proof_seed_001",
+    paymentVerifiedAt: "2026-03-21T20:31:00.000Z",
+    createdAt: "2026-03-21T20:31:00.000Z",
+    updatedAt: "2026-03-21T20:31:00.000Z"
+  });
+  await clarificationRequestRepository.create({
+    clarificationId: "clar_detail_target_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    reviewerWorkflowStatus: "awaiting_panel_vote",
+    eventId: "gm_btc_above_100k",
+    question: "Should only Gemini BTC/USD spot trades count?",
+    requesterId: "wallet_target_001",
+    paymentAmount: "1.00",
+    paymentAsset: "USDC",
+    paymentReference: "x402_ref_target_001",
+    paymentProof: "pay_proof_target_001",
+    paymentVerifiedAt: "2026-03-21T20:35:00.000Z",
+    llmOutput: {
+      verdict: "needs_clarification",
+      llm_status: "completed",
+      reasoning: "The resolution text names Gemini but not the exact qualifying feed.",
+      cited_clause: VALID_MARKET.resolution,
+      ambiguity_score: 0.79,
+      ambiguity_summary: "The qualifying Gemini price source is not explicit.",
+      suggested_market_text:
+        "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC?",
+      suggested_note:
+        "Use Gemini's primary BTC/USD spot exchange feed and ignore non-spot auction references."
+    },
+    artifactCid: "bafydetailartifact001",
+    artifactUrl: "ipfs://bafydetailartifact001",
+    createdAt: "2026-03-21T20:35:00.000Z",
+    updatedAt: "2026-03-21T20:40:00.000Z"
+  });
+
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T20:40:00.000Z"),
+    reviewerAuthToken: "reviewer-secret"
+  });
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_detail_target_001`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      clarification: {
+        clarificationId: "clar_detail_target_001",
+        status: "completed",
+        eventId: "gm_btc_above_100k",
+        question: "Should only Gemini BTC/USD spot trades count?",
+        llmOutput: {
+          verdict: "needs_clarification",
+          llm_status: "completed",
+          reasoning: "The resolution text names Gemini but not the exact qualifying feed.",
+          cited_clause: VALID_MARKET.resolution,
+          ambiguity_score: 0.79,
+          ambiguity_summary: "The qualifying Gemini price source is not explicit.",
+          suggested_market_text:
+            "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC?",
+          suggested_note:
+            "Use Gemini's primary BTC/USD spot exchange feed and ignore non-spot auction references."
+        },
+        llmTrace: null,
+        artifact: {
+          cid: "bafydetailartifact001",
+          url: "ipfs://bafydetailartifact001"
+        },
+        market: {
+          marketId: "gm_btc_above_100k",
+          title: VALID_MARKET.title,
+          resolutionText: VALID_MARKET.resolution,
+          endTime: VALID_MARKET.closesAt,
+          slug: VALID_MARKET.slug,
+          url: VALID_MARKET.url
+        },
+        funding: {
+          raisedAmount: "2.00",
+          targetAmount: "1.00",
+          contributorCount: 2,
+          fundingState: "funded",
+          history: [
+            {
+              contributor: "wallet_target_001",
+              amount: "1.00",
+              timestamp: "2026-03-21T20:35:00.000Z",
+              reference: "x402_ref_target_001"
+            },
+            {
+              contributor: "wallet_seed_001",
+              amount: "1.00",
+              timestamp: "2026-03-21T20:31:00.000Z",
+              reference: "x402_ref_seed_001"
+            }
+          ]
+        },
+        vote: {
+          status: "awaiting_panel_vote",
+          label: "Awaiting Panel Vote",
+          placeholder: true,
+          summary: "Off-chain placeholder until panel voting is implemented.",
+          updatedAt: "2026-03-21T20:40:00.000Z"
+        },
+        createdAt: "2026-03-21T20:35:00.000Z",
+        updatedAt: "2026-03-21T20:40:00.000Z",
+        review_window_secs: 86400,
+        review_window_reason:
+          "Base window set from gt_72h time-to-end bucket. Final window 86400 seconds within 3600-86400 second policy bounds.",
+        time_to_end_bucket: "gt_72h",
+        activity_signal: "normal",
+        ambiguity_score: 0.79
+      }
+    });
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/reviewer/clarifications/:clarificationId/finalize stores off-chain finalization data and exposes finalized reviewer detail", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-finalization-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  await clarificationRequestRepository.create({
+    clarificationId: "clar_finalize_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_btc_above_100k",
+    question: "Should Gemini BTC/USD auction prints count toward resolution?",
+    requesterId: "wallet_finalize_001",
+    paymentAmount: "1.00",
+    paymentAsset: "USDC",
+    paymentReference: "x402_ref_finalize_001",
+    paymentProof: "pay_proof_finalize_001",
+    paymentVerifiedAt: "2026-03-21T21:00:00.000Z",
+    reviewerWorkflowStatus: "awaiting_panel_vote",
+    llmOutput: {
+      verdict: "needs_clarification",
+      llm_status: "completed",
+      reasoning: "The market text does not specify whether Gemini auction prints qualify.",
+      cited_clause: VALID_MARKET.resolution,
+      ambiguity_score: 0.81,
+      ambiguity_summary: "Gemini price source handling is ambiguous.",
+      suggested_market_text:
+        "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC?",
+      suggested_note:
+        "Use Gemini's primary BTC/USD spot exchange feed and exclude auction-only prints."
+    },
+    createdAt: "2026-03-21T21:00:00.000Z",
+    updatedAt: "2026-03-21T21:05:00.000Z"
+  });
+
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T21:10:00.000Z"),
+    reviewerAuthToken: "reviewer-secret"
+  });
+
+  try {
+    const finalizeResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_finalize_001/finalize`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...createReviewerHeaders()
+        },
+        body: JSON.stringify({
+          finalEditedText:
+            "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?",
+          finalNote:
+            "Resolve only from Gemini's primary BTC/USD spot feed; do not count auction prints.",
+          reviewerId: "reviewer.alex"
+        })
+      }
+    );
+
+    assert.equal(finalizeResponse.status, 200);
+    assert.deepEqual(await finalizeResponse.json(), {
+      ok: true,
+      clarification: {
+        clarificationId: "clar_finalize_001",
+        reviewerWorkflowStatus: "finalized",
+        finalization: {
+          finalEditedText:
+            "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?",
+          finalNote:
+            "Resolve only from Gemini's primary BTC/USD spot feed; do not count auction prints.",
+          finalizedAt: "2026-03-21T21:10:00.000Z",
+          finalizedBy: "reviewer.alex"
+        }
+      }
+    });
+
+    const storedClarification =
+      await clarificationRequestRepository.findByClarificationId("clar_finalize_001");
+    assert.equal(storedClarification.reviewerWorkflowStatus, "finalized");
+    assert.equal(
+      storedClarification.finalEditedText,
+      "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?"
+    );
+    assert.equal(
+      storedClarification.finalNote,
+      "Resolve only from Gemini's primary BTC/USD spot feed; do not count auction prints."
+    );
+    assert.equal(storedClarification.finalizedAt, "2026-03-21T21:10:00.000Z");
+    assert.equal(storedClarification.finalizedBy, "reviewer.alex");
+    assert.equal(
+      storedClarification.llmOutput.suggested_market_text,
+      "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC?"
+    );
+    assert.deepEqual(storedClarification.reviewerActions, [
+      {
+        type: "finalized",
+        actor: "reviewer.alex",
+        timestamp: "2026-03-21T21:10:00.000Z",
+        previousReviewerWorkflowStatus: "awaiting_panel_vote",
+        finalEditedText:
+          "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?",
+        finalNote:
+          "Resolve only from Gemini's primary BTC/USD spot feed; do not count auction prints."
+      }
+    ]);
+
+    const reviewerDetailResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_finalize_001`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+
+    assert.equal(reviewerDetailResponse.status, 200);
+    assert.deepEqual((await reviewerDetailResponse.json()).clarification.finalization, {
+      finalEditedText:
+        "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?",
+      finalNote:
+        "Resolve only from Gemini's primary BTC/USD spot feed; do not count auction prints.",
+      finalizedAt: "2026-03-21T21:10:00.000Z",
+      finalizedBy: "reviewer.alex"
+    });
+    assert.equal(
+      (await clarificationRequestRepository.findByClarificationId("clar_finalize_001"))
+        .llmOutput.suggested_note,
+      "Use Gemini's primary BTC/USD spot exchange feed and exclude auction-only prints."
+    );
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test("POST /api/clarify/:eventId marks automatic interpretation failures as retryable", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
   const repository = new FileClarificationRequestRepository(
@@ -1247,9 +1562,42 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
     assert.equal(queueResponse.status, 200);
     assert.deepEqual(await queueResponse.json(), {
       ok: true,
+      filters: [
+        {
+          key: "needs_scan",
+          label: "Needs Scan",
+          count: 1
+        },
+        {
+          key: "high_ambiguity",
+          label: "High Ambiguity",
+          count: 1
+        },
+        {
+          key: "funded",
+          label: "Funded",
+          count: 0
+        },
+        {
+          key: "near_expiry",
+          label: "Near Expiry",
+          count: 1
+        },
+        {
+          key: "awaiting_panel_vote",
+          label: "Awaiting Panel Vote",
+          count: 0
+        },
+        {
+          key: "finalized",
+          label: "Finalized",
+          count: 0
+        }
+      ],
       queue: [
         {
           eventId: "gm_btc_above_100k",
+          latestClarificationId: null,
           marketTitle: VALID_MARKET.title,
           endTime: VALID_MARKET.closesAt,
           ambiguityScore: 0.72,
@@ -1267,10 +1615,12 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
             activity_signal: "normal",
             ambiguity_score: 0.72
           },
-          voteStatus: "not_started"
+          voteStatus: "not_started",
+          queueStates: ["high_ambiguity"]
         },
         {
           eventId: "gm_eth_above_5000",
+          latestClarificationId: null,
           marketTitle: "Will ETH trade above $5,000 before year end?",
           endTime: "2026-03-21T23:00:00.000Z",
           ambiguityScore: null,
@@ -1288,7 +1638,8 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
             activity_signal: "high",
             ambiguity_score: 0
           },
-          voteStatus: "not_started"
+          voteStatus: "not_started",
+          queueStates: ["needs_scan", "near_expiry"]
         }
       ]
     });
@@ -1451,6 +1802,301 @@ test("GET /api/reviewer/scans lists historical reviewer scan records and rejects
             activity_signal: "normal",
             ambiguity_score: 0.72
           }
+        }
+      ]
+    });
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("GET /api/reviewer/queue supports persisted queue filters and segment metadata", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-queue-filters-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const reviewerScanRepository = await createReviewerScanRepository(tempDir);
+  const marketCacheRepository = await createMarketCacheRepository(tempDir, [
+    VALID_MARKET,
+    {
+      marketId: "gm_eth_above_5000",
+      title: "Will ETH trade above $5,000 before year end?",
+      resolution:
+        "Resolves YES if Gemini ETH/USD prints above $5,000 before December 31 2026 23:59 UTC.",
+      closesAt: "2026-03-21T23:00:00.000Z",
+      slug: "eth-above-5000-2026",
+      url: "https://example.com/markets/eth-above-5000-2026",
+      lastSyncedAt: "2026-03-21T18:59:00.000Z",
+      activitySignal: "high"
+    },
+    {
+      marketId: "gm_sol_above_300",
+      title: "Will SOL trade above $300 before year end?",
+      resolution:
+        "Resolves YES if Gemini SOL/USD prints above $300 before December 31 2026 23:59 UTC.",
+      closesAt: "2026-05-01T12:00:00.000Z",
+      slug: "sol-above-300-2026",
+      url: "https://example.com/markets/sol-above-300-2026",
+      lastSyncedAt: "2026-03-21T18:59:00.000Z",
+      activitySignal: "normal"
+    }
+  ]);
+
+  await clarificationRequestRepository.create({
+    clarificationId: "clar_funded_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    reviewerWorkflowStatus: "awaiting_panel_vote",
+    eventId: "gm_btc_above_100k",
+    question: "Should auction prints count?",
+    requesterId: "wallet_001",
+    paymentAmount: "1.00",
+    paymentAsset: "USDC",
+    paymentReference: "x402_ref_funded_001",
+    paymentProof: "pay_proof_funded_001",
+    paymentVerifiedAt: "2026-03-21T20:00:00.000Z",
+    createdAt: "2026-03-21T20:00:00.000Z",
+    updatedAt: "2026-03-21T20:15:00.000Z"
+  });
+  await clarificationRequestRepository.create({
+    clarificationId: "clar_finalized_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    reviewerWorkflowStatus: "finalized",
+    eventId: "gm_sol_above_300",
+    question: "Which SOL/USD feed resolves this?",
+    requesterId: "wallet_002",
+    paymentAmount: "1.00",
+    paymentAsset: "USDC",
+    paymentReference: "x402_ref_finalized_001",
+    paymentProof: "pay_proof_finalized_001",
+    paymentVerifiedAt: "2026-03-21T20:05:00.000Z",
+    createdAt: "2026-03-21T20:05:00.000Z",
+    updatedAt: "2026-03-21T20:20:00.000Z"
+  });
+
+  await reviewerScanRepository.create({
+    scanId: "scan_gm_btc_above_100k_2026-03-21T20:10:00.000Z",
+    eventId: "gm_btc_above_100k",
+    createdAt: "2026-03-21T20:10:00.000Z",
+    ambiguity_score: 0.85,
+    recommendation: "review",
+    flagged_clauses: [VALID_MARKET.resolution],
+    suggested_market_text: "Clarified BTC text",
+    suggested_note: "Clarified BTC note",
+    review_window: {
+      review_window_secs: 86400,
+      review_window_reason: "Test review window.",
+      time_to_end_bucket: "gt_72h",
+      activity_signal: "normal",
+      ambiguity_score: 0.85
+    }
+  });
+  await reviewerScanRepository.create({
+    scanId: "scan_gm_sol_above_300_2026-03-21T20:11:00.000Z",
+    eventId: "gm_sol_above_300",
+    createdAt: "2026-03-21T20:11:00.000Z",
+    ambiguity_score: 0.41,
+    recommendation: "monitor",
+    flagged_clauses: ["Solana clause"],
+    suggested_market_text: "Clarified SOL text",
+    suggested_note: "Clarified SOL note",
+    review_window: {
+      review_window_secs: 21600,
+      review_window_reason: "Test review window.",
+      time_to_end_bucket: "lt_24h",
+      activity_signal: "normal",
+      ambiguity_score: 0.41
+    }
+  });
+
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
+    reviewerScanRepository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T20:30:00.000Z"),
+    reviewerAuthToken: "reviewer-secret"
+  });
+
+  try {
+    const allResponse = await fetch(`${baseUrl}/api/reviewer/queue`, {
+      headers: createReviewerHeaders()
+    });
+
+    assert.equal(allResponse.status, 200);
+    assert.deepEqual(await allResponse.json(), {
+      ok: true,
+      filters: [
+        {
+          key: "needs_scan",
+          label: "Needs Scan",
+          count: 1
+        },
+        {
+          key: "high_ambiguity",
+          label: "High Ambiguity",
+          count: 1
+        },
+        {
+          key: "funded",
+          label: "Funded",
+          count: 2
+        },
+        {
+          key: "near_expiry",
+          label: "Near Expiry",
+          count: 2
+        },
+        {
+          key: "awaiting_panel_vote",
+          label: "Awaiting Panel Vote",
+          count: 1
+        },
+        {
+          key: "finalized",
+          label: "Finalized",
+          count: 1
+        }
+      ],
+      queue: [
+        {
+          eventId: "gm_btc_above_100k",
+          latestClarificationId: "clar_funded_001",
+          marketTitle: VALID_MARKET.title,
+          endTime: VALID_MARKET.closesAt,
+          ambiguityScore: 0.85,
+          fundingProgress: {
+            raisedAmount: "1.00",
+            targetAmount: "1.00",
+            contributorCount: 1,
+            fundingState: "funded"
+          },
+          reviewWindow: {
+            review_window_secs: 86400,
+            review_window_reason: "Test review window.",
+            time_to_end_bucket: "gt_72h",
+            activity_signal: "normal",
+            ambiguity_score: 0.85
+          },
+          voteStatus: "awaiting_panel_vote",
+          queueStates: ["high_ambiguity", "funded", "awaiting_panel_vote"]
+        },
+        {
+          eventId: "gm_eth_above_5000",
+          latestClarificationId: null,
+          marketTitle: "Will ETH trade above $5,000 before year end?",
+          endTime: "2026-03-21T23:00:00.000Z",
+          ambiguityScore: null,
+          fundingProgress: {
+            raisedAmount: "0.00",
+            targetAmount: "1.00",
+            contributorCount: 0,
+            fundingState: "unfunded"
+          },
+          reviewWindow: {
+            review_window_secs: 3600,
+            review_window_reason:
+              "Base window set from lt_6h time-to-end bucket. High activity reduced the review window by one policy step. Final window 3600 seconds within 3600-86400 second policy bounds.",
+            time_to_end_bucket: "lt_6h",
+            activity_signal: "high",
+            ambiguity_score: 0
+          },
+          voteStatus: "not_started",
+          queueStates: ["needs_scan", "near_expiry"]
+        },
+        {
+          eventId: "gm_sol_above_300",
+          latestClarificationId: "clar_finalized_001",
+          marketTitle: "Will SOL trade above $300 before year end?",
+          endTime: "2026-05-01T12:00:00.000Z",
+          ambiguityScore: 0.41,
+          fundingProgress: {
+            raisedAmount: "1.00",
+            targetAmount: "1.00",
+            contributorCount: 1,
+            fundingState: "funded"
+          },
+          reviewWindow: {
+            review_window_secs: 21600,
+            review_window_reason: "Test review window.",
+            time_to_end_bucket: "lt_24h",
+            activity_signal: "normal",
+            ambiguity_score: 0.41
+          },
+          voteStatus: "finalized",
+          queueStates: ["funded", "near_expiry", "finalized"]
+        }
+      ]
+    });
+
+    const filteredResponse = await fetch(
+      `${baseUrl}/api/reviewer/queue?filter=needs_scan`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+
+    assert.equal(filteredResponse.status, 200);
+    assert.deepEqual(await filteredResponse.json(), {
+      ok: true,
+      activeFilter: "needs_scan",
+      filters: [
+        {
+          key: "needs_scan",
+          label: "Needs Scan",
+          count: 1
+        },
+        {
+          key: "high_ambiguity",
+          label: "High Ambiguity",
+          count: 1
+        },
+        {
+          key: "funded",
+          label: "Funded",
+          count: 2
+        },
+        {
+          key: "near_expiry",
+          label: "Near Expiry",
+          count: 2
+        },
+        {
+          key: "awaiting_panel_vote",
+          label: "Awaiting Panel Vote",
+          count: 1
+        },
+        {
+          key: "finalized",
+          label: "Finalized",
+          count: 1
+        }
+      ],
+      queue: [
+        {
+          eventId: "gm_eth_above_5000",
+          latestClarificationId: null,
+          marketTitle: "Will ETH trade above $5,000 before year end?",
+          endTime: "2026-03-21T23:00:00.000Z",
+          ambiguityScore: null,
+          fundingProgress: {
+            raisedAmount: "0.00",
+            targetAmount: "1.00",
+            contributorCount: 0,
+            fundingState: "unfunded"
+          },
+          reviewWindow: {
+            review_window_secs: 3600,
+            review_window_reason:
+              "Base window set from lt_6h time-to-end bucket. High activity reduced the review window by one policy step. Final window 3600 seconds within 3600-86400 second policy bounds.",
+            time_to_end_bucket: "lt_6h",
+            activity_signal: "high",
+            ambiguity_score: 0
+          },
+          voteStatus: "not_started",
+          queueStates: ["needs_scan", "near_expiry"]
         }
       ]
     });

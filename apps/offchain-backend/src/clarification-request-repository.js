@@ -45,6 +45,12 @@ export class FileClarificationRequestRepository {
         llmTrace: request.llmTrace ?? null,
         artifactCid: request.artifactCid ?? null,
         artifactUrl: request.artifactUrl ?? null,
+        reviewerWorkflowStatus: request.reviewerWorkflowStatus ?? null,
+        finalEditedText: request.finalEditedText ?? null,
+        finalNote: request.finalNote ?? null,
+        finalizedAt: request.finalizedAt ?? null,
+        finalizedBy: request.finalizedBy ?? null,
+        reviewerActions: Array.isArray(request.reviewerActions) ? request.reviewerActions : [],
         statusHistory: Array.isArray(request.statusHistory)
           ? request.statusHistory
           : [{ status: request.status, timestamp: request.updatedAt ?? request.createdAt }]
@@ -89,6 +95,16 @@ export class FileClarificationRequestRepository {
         (request) => typeof request.paymentProof === "string" && request.paymentProof === paymentProof
       ) ?? null
     );
+  }
+
+  async list() {
+    const store = await this.load();
+    return store.requests;
+  }
+
+  async findByEventId(eventId) {
+    const store = await this.load();
+    return store.requests.filter((request) => request.eventId === eventId);
   }
 
   async updateStatus(requestId, updates) {
@@ -165,6 +181,30 @@ export class FileClarificationRequestRepository {
         Object.prototype.hasOwnProperty.call(updates, "artifactUrl")
           ? updates.artifactUrl
           : existingRequest.artifactUrl ?? null,
+      reviewerWorkflowStatus:
+        Object.prototype.hasOwnProperty.call(updates, "reviewerWorkflowStatus")
+          ? updates.reviewerWorkflowStatus
+          : existingRequest.reviewerWorkflowStatus ?? null,
+      finalEditedText:
+        Object.prototype.hasOwnProperty.call(updates, "finalEditedText")
+          ? updates.finalEditedText
+          : existingRequest.finalEditedText ?? null,
+      finalNote:
+        Object.prototype.hasOwnProperty.call(updates, "finalNote")
+          ? updates.finalNote
+          : existingRequest.finalNote ?? null,
+      finalizedAt:
+        Object.prototype.hasOwnProperty.call(updates, "finalizedAt")
+          ? updates.finalizedAt
+          : existingRequest.finalizedAt ?? null,
+      finalizedBy:
+        Object.prototype.hasOwnProperty.call(updates, "finalizedBy")
+          ? updates.finalizedBy
+          : existingRequest.finalizedBy ?? null,
+      reviewerActions:
+        Object.prototype.hasOwnProperty.call(updates, "reviewerActions")
+          ? updates.reviewerActions
+          : existingRequest.reviewerActions ?? [],
       statusHistory: shouldAppendStatusHistory
         ? [
             ...(Array.isArray(existingRequest.statusHistory) ? existingRequest.statusHistory : []),

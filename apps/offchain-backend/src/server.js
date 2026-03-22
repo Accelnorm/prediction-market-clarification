@@ -47,16 +47,77 @@ function buildPublicClarificationPayload(clarification) {
   };
 }
 
+function formatWorkflowLabel(state) {
+  return state
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function buildFundingDetails(clarifications = []) {
+  const fundingProgress = buildFundingProgress(clarifications);
+  const history = clarifications
+    .filter(
+      (clarification) =>
+        typeof clarification.paymentAmount === "string" && clarification.paymentAmount !== ""
+    )
+    .map((clarification) => ({
+      contributor: clarification.requesterId ?? clarification.paymentReference ?? "unknown",
+      amount: clarification.paymentAmount,
+      timestamp: clarification.paymentVerifiedAt ?? clarification.createdAt,
+      reference: clarification.paymentReference ?? null
+    }))
+    .sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+
+  return {
+    ...fundingProgress,
+    history
+  };
+}
+
+function buildReviewerVotePayload(clarification) {
+  const status = clarification.reviewerWorkflowStatus ?? "not_started";
+
+  return {
+    status,
+    label: formatWorkflowLabel(status),
+    placeholder: true,
+    summary: "Off-chain placeholder until panel voting is implemented.",
+    updatedAt: clarification.finalizedAt ?? clarification.updatedAt ?? clarification.createdAt
+  };
+}
+
 function buildReviewerClarificationPayload({
   clarification,
-  adaptiveReviewWindow
+  adaptiveReviewWindow,
+  market,
+  relatedClarifications
 }) {
   const clarificationPayload = {
     ...buildPublicClarificationPayload(clarification),
     llmOutput: clarification.llmOutput ?? null,
     llmTrace: clarification.llmTrace ?? null,
+    market: {
+      marketId: clarification.eventId ?? null,
+      title: market?.title ?? null,
+      resolutionText: market?.resolution ?? null,
+      endTime: market?.closesAt ?? null,
+      slug: market?.slug ?? null,
+      url: market?.url ?? null
+    },
+    funding: buildFundingDetails(relatedClarifications),
+    vote: buildReviewerVotePayload(clarification),
     ...adaptiveReviewWindow
   };
+
+  if (clarification.finalEditedText || clarification.finalNote || clarification.finalizedAt) {
+    clarificationPayload.finalization = {
+      finalEditedText: clarification.finalEditedText ?? null,
+      finalNote: clarification.finalNote ?? null,
+      finalizedAt: clarification.finalizedAt ?? null,
+      finalizedBy: clarification.finalizedBy ?? null
+    };
+  }
 
   if (clarification.artifactCid && clarification.artifactUrl) {
     clarificationPayload.artifact = {
@@ -68,13 +129,87 @@ function buildReviewerClarificationPayload({
   return clarificationPayload;
 }
 
-function buildFundingProgress() {
+const REVIEWER_QUEUE_FILTERS = [
+  { key: "needs_scan", label: "Needs Scan" },
+  { key: "high_ambiguity", label: "High Ambiguity" },
+  { key: "funded", label: "Funded" },
+  { key: "near_expiry", label: "Near Expiry" },
+  { key: "awaiting_panel_vote", label: "Awaiting Panel Vote" },
+  { key: "finalized", label: "Finalized" }
+];
+
+function buildFundingProgress(clarifications = []) {
+  const fundedClarifications = clarifications.filter(
+    (clarification) =>
+      typeof clarification.paymentAmount === "string" && clarification.paymentAmount !== ""
+  );
+
+  if (fundedClarifications.length === 0) {
+    return {
+      raisedAmount: "0.00",
+      targetAmount: "1.00",
+      contributorCount: 0,
+      fundingState: "unfunded"
+    };
+  }
+
+  const raisedAmount = fundedClarifications
+    .reduce((total, clarification) => {
+      const parsedAmount = Number.parseFloat(clarification.paymentAmount);
+      return total + (Number.isFinite(parsedAmount) ? parsedAmount : 0);
+    }, 0)
+    .toFixed(2);
+  const contributorCount = new Set(
+    fundedClarifications.map(
+      (clarification) => clarification.requesterId ?? clarification.paymentReference
+    )
+  ).size;
+  const fundingState =
+    Number.parseFloat(raisedAmount) >= 1 ? "funded" : "funding_in_progress";
+
   return {
-    raisedAmount: "0.00",
+    raisedAmount,
     targetAmount: "1.00",
-    contributorCount: 0,
-    fundingState: "unfunded"
+    contributorCount,
+    fundingState
   };
+}
+
+function buildQueueStates({ latestScan, fundingProgress, reviewWindow, voteStatus }) {
+  const queueStates = [];
+
+  if (!latestScan) {
+    queueStates.push("needs_scan");
+  }
+
+  if ((latestScan?.ambiguity_score ?? 0) >= 0.7) {
+    queueStates.push("high_ambiguity");
+  }
+
+  if (fundingProgress.fundingState !== "unfunded") {
+    queueStates.push("funded");
+  }
+
+  if (["lt_6h", "lt_24h"].includes(reviewWindow.time_to_end_bucket)) {
+    queueStates.push("near_expiry");
+  }
+
+  if (voteStatus === "awaiting_panel_vote") {
+    queueStates.push("awaiting_panel_vote");
+  }
+
+  if (voteStatus === "finalized") {
+    queueStates.push("finalized");
+  }
+
+  return queueStates;
+}
+
+function buildReviewerQueueFilters(queue) {
+  return REVIEWER_QUEUE_FILTERS.map((filter) => ({
+    ...filter,
+    count: queue.filter((item) => item.queueStates.includes(filter.key)).length
+  }));
 }
 
 function buildReviewerScanListItem(scan) {
@@ -85,6 +220,39 @@ function buildReviewerScanListItem(scan) {
     ambiguityScore: scan.ambiguity_score,
     recommendation: scan.recommendation,
     reviewWindow: scan.review_window
+  };
+}
+
+function parseReviewerFinalizationPayload(payload) {
+  const finalEditedText = String(payload?.finalEditedText ?? "").trim();
+  const finalNote = String(payload?.finalNote ?? "").trim();
+  const reviewerId = String(payload?.reviewerId ?? "system").trim();
+
+  if (!finalEditedText) {
+    const error = new Error("Final edited text is required.");
+    error.statusCode = 400;
+    error.code = "INVALID_FINAL_EDITED_TEXT";
+    throw error;
+  }
+
+  if (!finalNote) {
+    const error = new Error("Final note is required.");
+    error.statusCode = 400;
+    error.code = "INVALID_FINAL_NOTE";
+    throw error;
+  }
+
+  if (!reviewerId) {
+    const error = new Error("Reviewer identity is required.");
+    error.statusCode = 400;
+    error.code = "INVALID_REVIEWER_ID";
+    throw error;
+  }
+
+  return {
+    finalEditedText,
+    finalNote,
+    reviewerId
   };
 }
 
@@ -302,11 +470,20 @@ export function createServer({
 
       try {
         const markets = (await marketCacheRepository?.list?.()) ?? [];
+        const clarifications = (await clarificationRequestRepository?.list?.()) ?? [];
         const queue = [];
 
         for (const market of markets) {
           const latestScan =
             (await reviewerScanRepository?.findLatestByEventId?.(market.marketId)) ?? null;
+          const eventClarifications = clarifications.filter(
+            (clarification) => clarification.eventId === market.marketId
+          );
+          const latestClarification =
+            eventClarifications
+              .slice()
+              .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+              .at(0) ?? null;
           const reviewWindow =
             latestScan?.review_window ??
             buildAdaptiveReviewWindow({
@@ -318,21 +495,41 @@ export function createServer({
               market,
               now: now()
             });
+          const fundingProgress = buildFundingProgress(eventClarifications);
+          const voteStatus = latestClarification?.reviewerWorkflowStatus ?? "not_started";
+          const queueStates = buildQueueStates({
+            latestScan,
+            fundingProgress,
+            reviewWindow,
+            voteStatus
+          });
 
           queue.push({
             eventId: market.marketId,
+            latestClarificationId: latestClarification?.clarificationId ?? null,
             marketTitle: market.title,
             endTime: market.closesAt,
             ambiguityScore: latestScan?.ambiguity_score ?? null,
-            fundingProgress: buildFundingProgress(),
+            fundingProgress,
             reviewWindow,
-            voteStatus: "not_started"
+            voteStatus,
+            queueStates
           });
         }
 
+        const filters = buildReviewerQueueFilters(queue);
+        const activeFilter = requestUrl.searchParams.get("filter");
+        const filteredQueue = REVIEWER_QUEUE_FILTERS.some(
+          (filter) => filter.key === activeFilter
+        )
+          ? queue.filter((item) => item.queueStates.includes(activeFilter))
+          : queue;
+
         sendJson(response, 200, {
           ok: true,
-          queue
+          ...(activeFilter ? { activeFilter } : {}),
+          filters,
+          queue: filteredQueue
         });
       } catch (error) {
         sendJson(response, 500, {
@@ -558,6 +755,120 @@ export function createServer({
     }
 
     if (
+      request.method === "POST" &&
+      /^\/api\/reviewer\/clarifications\/[^/]+\/finalize$/.test(requestUrl.pathname)
+    ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const clarificationId = decodeURIComponent(
+          requestUrl.pathname.replace(
+            /^\/api\/reviewer\/clarifications\/([^/]+)\/finalize$/,
+            "$1"
+          )
+        );
+        const clarification =
+          await clarificationRequestRepository.findByClarificationId(clarificationId);
+
+        if (!clarification) {
+          sendJson(response, 404, {
+            ok: false,
+            error: {
+              code: "CLARIFICATION_NOT_FOUND",
+              message: "Clarification not found."
+            }
+          });
+          return;
+        }
+
+        if (clarification.status !== "completed") {
+          sendJson(response, 409, {
+            ok: false,
+            error: {
+              code: "CLARIFICATION_NOT_READY",
+              message: "Only completed clarifications can be finalized off-chain."
+            }
+          });
+          return;
+        }
+
+        const payload = parseReviewerFinalizationPayload(await readJsonBody(request));
+        const finalizedAt = now().toISOString();
+        const reviewerActions = [
+          ...(Array.isArray(clarification.reviewerActions) ? clarification.reviewerActions : []),
+          {
+            type: "finalized",
+            actor: payload.reviewerId,
+            timestamp: finalizedAt,
+            previousReviewerWorkflowStatus:
+              clarification.reviewerWorkflowStatus ?? "not_started",
+            finalEditedText: payload.finalEditedText,
+            finalNote: payload.finalNote
+          }
+        ];
+        const finalizedClarification =
+          await clarificationRequestRepository.updateByClarificationId(clarificationId, {
+            reviewerWorkflowStatus: "finalized",
+            finalEditedText: payload.finalEditedText,
+            finalNote: payload.finalNote,
+            finalizedAt,
+            finalizedBy: payload.reviewerId,
+            reviewerActions,
+            updatedAt: finalizedAt
+          });
+
+        sendJson(response, 200, {
+          ok: true,
+          clarification: {
+            clarificationId: finalizedClarification.clarificationId,
+            reviewerWorkflowStatus: finalizedClarification.reviewerWorkflowStatus,
+            finalization: {
+              finalEditedText: finalizedClarification.finalEditedText,
+              finalNote: finalizedClarification.finalNote,
+              finalizedAt: finalizedClarification.finalizedAt,
+              finalizedBy: finalizedClarification.finalizedBy
+            }
+          }
+        });
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          sendJson(response, 400, {
+            ok: false,
+            error: {
+              code: "INVALID_JSON",
+              message: "Request body must be valid JSON."
+            }
+          });
+          return;
+        }
+
+        if (error.statusCode) {
+          sendJson(response, error.statusCode, {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message
+            }
+          });
+          return;
+        }
+
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (
       request.method === "GET" &&
       /^\/api\/reviewer\/clarifications\/[^/]+$/.test(requestUrl.pathname)
     ) {
@@ -592,12 +903,17 @@ export function createServer({
           market,
           now: now()
         });
+        const relatedClarifications = clarification.eventId
+          ? await clarificationRequestRepository.findByEventId(clarification.eventId)
+          : [];
 
         sendJson(response, 200, {
           ok: true,
           clarification: buildReviewerClarificationPayload({
             clarification,
-            adaptiveReviewWindow
+            adaptiveReviewWindow,
+            market,
+            relatedClarifications
           })
         });
       } catch (error) {
