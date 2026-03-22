@@ -8,6 +8,49 @@ type ReviewerQueueFilter = {
   count: number;
 };
 
+type ReviewerSurface = "active" | "prelaunch";
+
+type ReviewerMarketContract = {
+  id: string | null;
+  label: string | null;
+  abbreviatedName: string | null;
+  description: string | null;
+  status: string | null;
+  ticker: string | null;
+  instrumentSymbol: string | null;
+  marketState: string | null;
+  effectiveDate: string | null;
+  expiryDate: string | null;
+  termsAndConditionsUrl: string | null;
+  prices: Record<string, unknown> | null;
+  sortOrder: number | null;
+};
+
+type ReviewerMarketPayload = {
+  marketId: string | null;
+  ticker?: string;
+  title: string | null;
+  description?: string;
+  resolutionText: string | null;
+  endTime: string | null;
+  slug: string | null;
+  url: string | null;
+  category?: string;
+  subcategory?: {
+    id: string | null;
+    slug: string | null;
+    name: string | null;
+    path: string[];
+  } | null;
+  tags?: string[];
+  status?: string;
+  effectiveDate?: string;
+  expiryDate?: string;
+  resolvedAt?: string;
+  termsLink?: string;
+  contracts?: ReviewerMarketContract[];
+};
+
 type ReviewerQueueItem = {
   eventId: string;
   latestClarificationId: string | null;
@@ -61,14 +104,7 @@ type ReviewerClarificationDetail = {
     requestedAt: string;
     processingVersion: string;
   } | null;
-  market: {
-    marketId: string | null;
-    title: string | null;
-    resolutionText: string | null;
-    endTime: string | null;
-    slug: string | null;
-    url: string | null;
-  };
+  market: ReviewerMarketPayload;
   funding: {
     raisedAmount: string;
     targetAmount: string;
@@ -102,6 +138,51 @@ type ReviewerClarificationDetail = {
 type ReviewerClarificationDetailResponse = {
   ok: true;
   clarification: ReviewerClarificationDetail;
+};
+
+type PrelaunchQueueItem = {
+  eventId: string;
+  marketTitle: string;
+  ticker: string | null;
+  category: string | null;
+  status: string | null;
+  startsAt: string | null;
+  endTime: string;
+  ambiguityScore: number | null;
+  needsScan: boolean;
+  latestScanId: string | null;
+  reviewWindow: {
+    review_window_secs: number;
+    review_window_reason: string;
+    time_to_end_bucket: string;
+    activity_signal: string;
+    ambiguity_score: number;
+  };
+  contracts: ReviewerMarketContract[];
+};
+
+type PrelaunchQueueResponse = {
+  ok: true;
+  queue: PrelaunchQueueItem[];
+};
+
+type PrelaunchMarketDetailResponse = {
+  ok: true;
+  market: ReviewerMarketPayload;
+  latestScan: {
+    scanId: string;
+    eventId: string;
+    createdAt: string;
+    ambiguityScore: number | null;
+    recommendation: string;
+    reviewWindow: {
+      review_window_secs: number;
+      review_window_reason: string;
+      time_to_end_bucket: string;
+      activity_signal: string;
+      ambiguity_score: number;
+    };
+  } | null;
 };
 
 type ReviewerArtifactRecord = {
@@ -203,6 +284,25 @@ function formatCurrency(amount: string) {
   return `${amount} USDC`;
 }
 
+function formatOptionalTimestamp(timestamp?: string | null) {
+  return timestamp ? formatTimestamp(timestamp) : "Unavailable";
+}
+
+function formatContractPriceSummary(prices: Record<string, unknown> | null) {
+  if (!prices || typeof prices !== "object") {
+    return "No price snapshot";
+  }
+
+  const priceEntries = Object.entries(prices)
+    .filter(([, value]) => value !== null && value !== undefined)
+    .slice(0, 3)
+    .map(([key, value]) =>
+      typeof value === "object" ? `${key}: ${JSON.stringify(value)}` : `${key}: ${value}`
+    );
+
+  return priceEntries.length > 0 ? priceEntries.join(" • ") : "No price snapshot";
+}
+
 function ReviewerConsole() {
   const initialSession = useMemo(() => loadReviewerSession(), []);
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(
@@ -212,30 +312,57 @@ function ReviewerConsole() {
     initialSession.reviewerToken
   );
   const [session, setSession] = useState(initialSession);
+  const [reviewerSurface, setReviewerSurface] =
+    useState<ReviewerSurface>("active");
   const [activeFilter, setActiveFilter] = useState<string>("all");
   const [queueResponse, setQueueResponse] =
     useState<ReviewerQueueResponse | null>(null);
+  const [prelaunchQueueResponse, setPrelaunchQueueResponse] =
+    useState<PrelaunchQueueResponse | null>(null);
   const [selectedClarificationId, setSelectedClarificationId] = useState<
+    string | null
+  >(null);
+  const [selectedPrelaunchEventId, setSelectedPrelaunchEventId] = useState<
     string | null
   >(null);
   const [detailResponse, setDetailResponse] =
     useState<ReviewerClarificationDetailResponse | null>(null);
+  const [prelaunchDetailResponse, setPrelaunchDetailResponse] =
+    useState<PrelaunchMarketDetailResponse | null>(null);
   const [artifactPreview, setArtifactPreview] =
     useState<ReviewerArtifactRecord | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [prelaunchErrorMessage, setPrelaunchErrorMessage] = useState<
+    string | null
+  >(null);
   const [detailErrorMessage, setDetailErrorMessage] = useState<string | null>(
     null
   );
+  const [prelaunchDetailErrorMessage, setPrelaunchDetailErrorMessage] =
+    useState<string | null>(null);
   const [artifactPreviewError, setArtifactPreviewError] = useState<
     string | null
   >(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isPrelaunchLoading, setIsPrelaunchLoading] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [isPrelaunchDetailLoading, setIsPrelaunchDetailLoading] =
+    useState(false);
   const [isArtifactPreviewLoading, setIsArtifactPreviewLoading] =
     useState(false);
+  const [prelaunchScanTargetId, setPrelaunchScanTargetId] = useState<
+    string | null
+  >(null);
+  const [isPrelaunchScanAllRunning, setIsPrelaunchScanAllRunning] =
+    useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   useEffect(() => {
-    if (!session.apiBaseUrl || !session.reviewerToken) {
+    if (
+      reviewerSurface !== "active" ||
+      !session.apiBaseUrl ||
+      !session.reviewerToken
+    ) {
       setQueueResponse(null);
       return;
     }
@@ -291,10 +418,69 @@ function ReviewerConsole() {
     return () => {
       cancelled = true;
     };
-  }, [activeFilter, session]);
+  }, [activeFilter, refreshNonce, reviewerSurface, session]);
 
   useEffect(() => {
     if (
+      reviewerSurface !== "prelaunch" ||
+      !session.apiBaseUrl ||
+      !session.reviewerToken
+    ) {
+      setPrelaunchQueueResponse(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadPrelaunchQueue() {
+      setIsPrelaunchLoading(true);
+      setPrelaunchErrorMessage(null);
+
+      try {
+        const endpoint = new URL("/api/reviewer/prelaunch/queue", session.apiBaseUrl);
+        const response = await fetch(endpoint, {
+          headers: {
+            "x-reviewer-token": session.reviewerToken,
+          },
+        });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            payload?.error?.message ??
+              "Prelaunch reviewer queue could not be loaded with the current session."
+          );
+        }
+
+        if (!cancelled) {
+          setPrelaunchQueueResponse(payload);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPrelaunchQueueResponse(null);
+          setPrelaunchErrorMessage(
+            error instanceof Error
+              ? error.message
+              : "Prelaunch reviewer queue could not be loaded with the current session."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsPrelaunchLoading(false);
+        }
+      }
+    }
+
+    void loadPrelaunchQueue();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshNonce, reviewerSurface, session]);
+
+  useEffect(() => {
+    if (
+      reviewerSurface !== "active" ||
       !session.apiBaseUrl ||
       !session.reviewerToken ||
       !selectedClarificationId
@@ -355,10 +541,78 @@ function ReviewerConsole() {
     return () => {
       cancelled = true;
     };
-  }, [selectedClarificationId, session]);
+  }, [reviewerSurface, selectedClarificationId, session]);
+
+  useEffect(() => {
+    if (
+      reviewerSurface !== "prelaunch" ||
+      !session.apiBaseUrl ||
+      !session.reviewerToken ||
+      !selectedPrelaunchEventId
+    ) {
+      setPrelaunchDetailResponse(null);
+      setPrelaunchDetailErrorMessage(null);
+      setIsPrelaunchDetailLoading(false);
+      return;
+    }
+
+    const eventId = selectedPrelaunchEventId;
+    let cancelled = false;
+
+    async function loadPrelaunchDetail() {
+      setIsPrelaunchDetailLoading(true);
+      setPrelaunchDetailErrorMessage(null);
+
+      try {
+        const endpoint = new URL(
+          `/api/reviewer/prelaunch/markets/${encodeURIComponent(eventId)}`,
+          session.apiBaseUrl
+        );
+        const response = await fetch(endpoint, {
+          headers: {
+            "x-reviewer-token": session.reviewerToken,
+          },
+        });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            payload?.error?.message ??
+              "Prelaunch market detail could not be loaded with the current session."
+          );
+        }
+
+        if (!cancelled) {
+          setPrelaunchDetailResponse(payload);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPrelaunchDetailResponse(null);
+          setPrelaunchDetailErrorMessage(
+            error instanceof Error
+              ? error.message
+              : "Prelaunch market detail could not be loaded with the current session."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsPrelaunchDetailLoading(false);
+        }
+      }
+    }
+
+    void loadPrelaunchDetail();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshNonce, reviewerSurface, selectedPrelaunchEventId, session]);
 
   const filters = queueResponse?.filters ?? [];
   const detail = detailResponse?.clarification ?? null;
+  const prelaunchQueue = prelaunchQueueResponse?.queue ?? [];
+  const prelaunchDetail = prelaunchDetailResponse?.market ?? null;
+  const prelaunchLatestScan = prelaunchDetailResponse?.latestScan ?? null;
   const selectedArtifactCid = detail?.artifact?.cid ?? null;
   const selectedArtifactHref = buildArtifactLinkHref(detail?.artifact?.url);
 
@@ -443,13 +697,93 @@ function ReviewerConsole() {
       reviewerToken: "",
     });
     setQueueResponse(null);
+    setPrelaunchQueueResponse(null);
     setErrorMessage(null);
+    setPrelaunchErrorMessage(null);
     setDetailResponse(null);
+    setPrelaunchDetailResponse(null);
     setDetailErrorMessage(null);
+    setPrelaunchDetailErrorMessage(null);
     setArtifactPreview(null);
     setArtifactPreviewError(null);
     setSelectedClarificationId(null);
+    setSelectedPrelaunchEventId(null);
     setActiveFilter("all");
+  }
+
+  function refreshReviewerData() {
+    setRefreshNonce((value) => value + 1);
+  }
+
+  async function handleRunPrelaunchScan(eventId: string) {
+    if (!session.apiBaseUrl || !session.reviewerToken) {
+      return;
+    }
+
+    setPrelaunchScanTargetId(eventId);
+    setPrelaunchDetailErrorMessage(null);
+
+    try {
+      const endpoint = new URL(
+        `/api/reviewer/prelaunch/scan/${encodeURIComponent(eventId)}`,
+        session.apiBaseUrl
+      );
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "x-reviewer-token": session.reviewerToken,
+        },
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error?.message ?? "Prelaunch scan could not be started.");
+      }
+
+      refreshReviewerData();
+    } catch (error) {
+      setPrelaunchDetailErrorMessage(
+        error instanceof Error ? error.message : "Prelaunch scan could not be started."
+      );
+    } finally {
+      setPrelaunchScanTargetId(null);
+    }
+  }
+
+  async function handleRunPrelaunchScanAll() {
+    if (!session.apiBaseUrl || !session.reviewerToken) {
+      return;
+    }
+
+    setIsPrelaunchScanAllRunning(true);
+    setPrelaunchErrorMessage(null);
+
+    try {
+      const endpoint = new URL("/api/reviewer/prelaunch/scan-all", session.apiBaseUrl);
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "x-reviewer-token": session.reviewerToken,
+        },
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.error?.message ?? "Prelaunch scan-all could not be started."
+        );
+      }
+
+      refreshReviewerData();
+    } catch (error) {
+      setPrelaunchErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Prelaunch scan-all could not be started."
+      );
+    } finally {
+      setIsPrelaunchScanAllRunning(false);
+    }
   }
 
   return (
@@ -541,65 +875,118 @@ function ReviewerConsole() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-sm uppercase tracking-[0.16em] text-muted">
-                    Queue segments
+                    Reviewer surface
                   </p>
                   <p className="text-sm text-muted">
-                    Refresh the queue against persisted backend state.
+                    Switch between active paid clarifications and upcoming prelaunch review.
                   </p>
                 </div>
-                {session.apiBaseUrl ? (
+                <div className="flex flex-wrap gap-2">
                   <button
-                    className="inline-flex items-center rounded-lg border border-border-low bg-cream px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5"
-                    onClick={() => setSession({ ...session })}
+                    className={`inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                      reviewerSurface === "active"
+                        ? "border-foreground bg-foreground text-background"
+                        : "border-border-low bg-cream"
+                    }`}
+                    onClick={() => {
+                      setReviewerSurface("active");
+                      setSelectedPrelaunchEventId(null);
+                    }}
                     type="button"
                   >
-                    Refresh queue
+                    Active queue
                   </button>
-                ) : null}
+                  <button
+                    className={`inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                      reviewerSurface === "prelaunch"
+                        ? "border-foreground bg-foreground text-background"
+                        : "border-border-low bg-cream"
+                    }`}
+                    onClick={() => {
+                      setReviewerSurface("prelaunch");
+                      setSelectedClarificationId(null);
+                    }}
+                    type="button"
+                  >
+                    Prelaunch queue
+                  </button>
+                  {session.apiBaseUrl ? (
+                    <button
+                      className="inline-flex items-center rounded-lg border border-border-low bg-cream px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5"
+                      onClick={refreshReviewerData}
+                      type="button"
+                    >
+                      Refresh
+                    </button>
+                  ) : null}
+                  {session.apiBaseUrl && reviewerSurface === "prelaunch" ? (
+                    <button
+                      className="inline-flex items-center rounded-lg border border-border-low bg-card px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60"
+                      disabled={isPrelaunchScanAllRunning}
+                      onClick={handleRunPrelaunchScanAll}
+                      type="button"
+                    >
+                      {isPrelaunchScanAllRunning ? "Scanning upcoming…" : "Scan all upcoming"}
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
-              <div
-                className="flex flex-wrap gap-2"
-                data-testid="reviewer-filter-list"
-              >
-                <button
-                  data-testid="filter-all"
-                  className={`rounded-full border px-3 py-2 text-sm transition ${
-                    activeFilter === "all"
-                      ? "border-foreground bg-foreground text-background"
-                      : "border-border-low bg-bg1 text-foreground"
-                  }`}
-                  onClick={() => setActiveFilter("all")}
-                  type="button"
+              {reviewerSurface === "active" ? (
+                <div
+                  className="flex flex-wrap gap-2"
+                  data-testid="reviewer-filter-list"
                 >
-                  All markets
-                </button>
-                {filters.map((filter) => (
                   <button
-                    data-testid={`filter-${filter.key}`}
+                    data-testid="filter-all"
                     className={`rounded-full border px-3 py-2 text-sm transition ${
-                      activeFilter === filter.key
+                      activeFilter === "all"
                         ? "border-foreground bg-foreground text-background"
                         : "border-border-low bg-bg1 text-foreground"
                     }`}
-                    key={filter.key}
-                    onClick={() => setActiveFilter(filter.key)}
+                    onClick={() => setActiveFilter("all")}
                     type="button"
                   >
-                    {filter.label}{" "}
-                    <span className="opacity-70">({filter.count})</span>
+                    All markets
                   </button>
-                ))}
-              </div>
+                  {filters.map((filter) => (
+                    <button
+                      data-testid={`filter-${filter.key}`}
+                      className={`rounded-full border px-3 py-2 text-sm transition ${
+                        activeFilter === filter.key
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-border-low bg-bg1 text-foreground"
+                      }`}
+                      key={filter.key}
+                      onClick={() => setActiveFilter(filter.key)}
+                      type="button"
+                    >
+                      {filter.label}{" "}
+                      <span className="opacity-70">({filter.count})</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm leading-6 text-muted">
+                  Upcoming Gemini markets live here before they can receive paid clarification requests.
+                  Use this queue to proactively scan contracts, category context, and launch timing.
+                </p>
+              )}
             </div>
 
-            {isLoading ? (
+            {reviewerSurface === "active" && isLoading ? (
               <div className="py-10 text-sm text-muted">
                 Loading reviewer queue…
               </div>
             ) : null}
 
-            {!isLoading && errorMessage ? (
+            {reviewerSurface === "prelaunch" && isPrelaunchLoading ? (
+              <div className="py-10 text-sm text-muted">
+                Loading prelaunch queue…
+              </div>
+            ) : null}
+
+            {reviewerSurface === "active" && !isLoading && errorMessage ? (
               <div
                 className="mt-4 rounded-2xl border border-border-low bg-bg1 p-4 text-sm text-muted"
                 data-testid="reviewer-queue-error"
@@ -608,7 +995,18 @@ function ReviewerConsole() {
               </div>
             ) : null}
 
-            {!isLoading && !errorMessage && !session.apiBaseUrl ? (
+            {reviewerSurface === "prelaunch" &&
+            !isPrelaunchLoading &&
+            prelaunchErrorMessage ? (
+              <div className="mt-4 rounded-2xl border border-border-low bg-bg1 p-4 text-sm text-muted">
+                {prelaunchErrorMessage}
+              </div>
+            ) : null}
+
+            {reviewerSurface === "active" &&
+            !isLoading &&
+            !errorMessage &&
+            !session.apiBaseUrl ? (
               <div
                 className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1 p-6 text-sm leading-6 text-muted"
                 data-testid="reviewer-session-blocked"
@@ -618,7 +1016,17 @@ function ReviewerConsole() {
               </div>
             ) : null}
 
-            {!isLoading &&
+            {reviewerSurface === "prelaunch" &&
+            !isPrelaunchLoading &&
+            !prelaunchErrorMessage &&
+            !session.apiBaseUrl ? (
+              <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1 p-6 text-sm leading-6 text-muted">
+                Enter reviewer credentials to unlock the prelaunch queue.
+              </div>
+            ) : null}
+
+            {reviewerSurface === "active" &&
+            !isLoading &&
             !errorMessage &&
             session.apiBaseUrl &&
             queueResponse &&
@@ -632,7 +1040,19 @@ function ReviewerConsole() {
               </div>
             ) : null}
 
-            {!isLoading &&
+            {reviewerSurface === "prelaunch" &&
+            !isPrelaunchLoading &&
+            !prelaunchErrorMessage &&
+            session.apiBaseUrl &&
+            prelaunchQueueResponse &&
+            prelaunchQueue.length === 0 ? (
+              <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1 p-6 text-sm leading-6 text-muted">
+                No upcoming Gemini markets are queued for proactive review right now.
+              </div>
+            ) : null}
+
+            {reviewerSurface === "active" &&
+            !isLoading &&
             !errorMessage &&
             queueResponse &&
             queueResponse.queue.length > 0 ? (
@@ -773,30 +1193,154 @@ function ReviewerConsole() {
               </div>
             ) : null}
 
+            {reviewerSurface === "prelaunch" &&
+            !isPrelaunchLoading &&
+            !prelaunchErrorMessage &&
+            prelaunchQueue.length > 0 ? (
+              <div className="mt-5 grid gap-4">
+                {prelaunchQueue.map((item) => (
+                  <article
+                    className={`rounded-[1.5rem] border bg-bg1 p-5 transition ${
+                      selectedPrelaunchEventId === item.eventId
+                        ? "border-foreground shadow-[0_24px_70px_-50px_rgba(0,0,0,0.5)]"
+                        : "border-border-low"
+                    }`}
+                    key={item.eventId}
+                  >
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="space-y-3">
+                        <div className="space-y-1">
+                          <p className="text-xs uppercase tracking-[0.18em] text-muted">
+                            {item.eventId} {item.ticker ? `• ${item.ticker}` : ""}
+                          </p>
+                          <h3 className="text-xl font-semibold tracking-tight">
+                            {item.marketTitle}
+                          </h3>
+                          <p className="text-sm text-muted">
+                            {item.category ?? "Uncategorized"} • {item.contracts.length} contract
+                            {item.contracts.length === 1 ? "" : "s"}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <span className="rounded-full border border-border-low bg-card px-3 py-1 text-xs uppercase tracking-[0.12em] text-muted">
+                            {item.status ?? "upcoming"}
+                          </span>
+                          {item.needsScan ? (
+                            <span className="rounded-full border border-border-low bg-card px-3 py-1 text-xs uppercase tracking-[0.12em] text-muted">
+                              Needs scan
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <dl className="grid min-w-[16rem] grid-cols-2 gap-3 text-sm">
+                        <div className="rounded-xl border border-border-low bg-card p-3">
+                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
+                            Ambiguity
+                          </dt>
+                          <dd className="mt-1 text-lg font-semibold">
+                            {formatAmbiguityScore(item.ambiguityScore)}
+                          </dd>
+                        </div>
+                        <div className="rounded-xl border border-border-low bg-card p-3">
+                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
+                            Review window
+                          </dt>
+                          <dd className="mt-1 text-lg font-semibold">
+                            {Math.round(item.reviewWindow.review_window_secs / 3600)}h
+                          </dd>
+                        </div>
+                        <div className="rounded-xl border border-border-low bg-card p-3">
+                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
+                            Starts
+                          </dt>
+                          <dd className="mt-1 text-sm font-semibold">
+                            {formatOptionalTimestamp(item.startsAt)}
+                          </dd>
+                        </div>
+                        <div className="rounded-xl border border-border-low bg-card p-3">
+                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
+                            Expires
+                          </dt>
+                          <dd className="mt-1 text-sm font-semibold">
+                            {formatTimestamp(item.endTime)}
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
+
+                    <p className="mt-4 text-sm leading-6 text-muted">
+                      {item.reviewWindow.review_window_reason}
+                    </p>
+
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border-low pt-4">
+                      <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                        {item.latestScanId
+                          ? `Latest scan ${item.latestScanId}`
+                          : "No prelaunch scan recorded yet"}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          className="inline-flex items-center rounded-full border border-border-low bg-card px-4 py-2 text-sm font-medium transition hover:-translate-y-0.5"
+                          onClick={() => setSelectedPrelaunchEventId(item.eventId)}
+                          type="button"
+                        >
+                          Open prelaunch detail
+                        </button>
+                        <button
+                          className="inline-flex items-center rounded-full border border-border-low bg-cream px-4 py-2 text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60"
+                          disabled={prelaunchScanTargetId === item.eventId}
+                          onClick={() => void handleRunPrelaunchScan(item.eventId)}
+                          type="button"
+                        >
+                          {prelaunchScanTargetId === item.eventId ? "Scanning…" : "Run scan"}
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : null}
+
             <section className="mt-6 rounded-[1.75rem] border border-border-low bg-bg1 p-6">
               <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border-low pb-4">
                 <div className="space-y-1">
                   <p className="text-sm uppercase tracking-[0.16em] text-muted">
-                    Clarification detail
+                    {reviewerSurface === "active"
+                      ? "Clarification detail"
+                      : "Prelaunch detail"}
                   </p>
                   <h3 className="text-2xl font-semibold tracking-tight">
-                    Review the latest off-chain interpretation record
+                    {reviewerSurface === "active"
+                      ? "Review the latest off-chain interpretation record"
+                      : "Inspect upcoming Gemini markets before they go live"}
                   </h3>
                 </div>
-                {selectedClarificationId ? (
+                {reviewerSurface === "active" && selectedClarificationId ? (
                   <span className="rounded-full border border-border-low bg-card px-3 py-1 text-xs uppercase tracking-[0.14em] text-muted">
                     {selectedClarificationId}
                   </span>
                 ) : null}
+                {reviewerSurface === "prelaunch" && selectedPrelaunchEventId ? (
+                  <span className="rounded-full border border-border-low bg-card px-3 py-1 text-xs uppercase tracking-[0.14em] text-muted">
+                    {selectedPrelaunchEventId}
+                  </span>
+                ) : null}
               </div>
 
-              {isDetailLoading ? (
+              {reviewerSurface === "active" && isDetailLoading ? (
                 <div className="py-10 text-sm text-muted">
                   Loading clarification detail…
                 </div>
               ) : null}
 
-              {!isDetailLoading && detailErrorMessage ? (
+              {reviewerSurface === "prelaunch" && isPrelaunchDetailLoading ? (
+                <div className="py-10 text-sm text-muted">
+                  Loading prelaunch detail…
+                </div>
+              ) : null}
+
+              {reviewerSurface === "active" && !isDetailLoading && detailErrorMessage ? (
                 <div
                   className="mt-4 rounded-2xl border border-border-low bg-card p-4 text-sm text-muted"
                   data-testid="reviewer-detail-error"
@@ -805,7 +1349,16 @@ function ReviewerConsole() {
                 </div>
               ) : null}
 
-              {!isDetailLoading &&
+              {reviewerSurface === "prelaunch" &&
+              !isPrelaunchDetailLoading &&
+              prelaunchDetailErrorMessage ? (
+                <div className="mt-4 rounded-2xl border border-border-low bg-card p-4 text-sm text-muted">
+                  {prelaunchDetailErrorMessage}
+                </div>
+              ) : null}
+
+              {reviewerSurface === "active" &&
+              !isDetailLoading &&
               !detailErrorMessage &&
               !selectedClarificationId ? (
                 <div
@@ -818,7 +1371,17 @@ function ReviewerConsole() {
                 </div>
               ) : null}
 
-              {!isDetailLoading && !detailErrorMessage && detail ? (
+              {reviewerSurface === "prelaunch" &&
+              !isPrelaunchDetailLoading &&
+              !prelaunchDetailErrorMessage &&
+              !selectedPrelaunchEventId ? (
+                <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-card p-6 text-sm leading-6 text-muted">
+                  Select an upcoming market to inspect category context, contract structure,
+                  terms links, and the latest proactive ambiguity scan.
+                </div>
+              ) : null}
+
+              {reviewerSurface === "active" && !isDetailLoading && !detailErrorMessage && detail ? (
                 <div
                   className="mt-5 grid gap-5"
                   data-testid="reviewer-detail-panel"
@@ -865,6 +1428,60 @@ function ReviewerConsole() {
                           </p>
                         </div>
                       </div>
+                      {detail.market.category || detail.market.ticker ? (
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          <div className="rounded-xl border border-border-low bg-bg1 p-3">
+                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
+                              Category
+                            </p>
+                            <p className="mt-2 text-sm text-foreground">
+                              {detail.market.category ?? "Unavailable"}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-border-low bg-bg1 p-3">
+                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
+                              Gemini ticker
+                            </p>
+                            <p className="mt-2 text-sm text-foreground">
+                              {detail.market.ticker ?? "Unavailable"}
+                            </p>
+                          </div>
+                        </div>
+                      ) : null}
+                      {detail.market.tags && detail.market.tags.length > 0 ? (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {detail.market.tags.map((tag) => (
+                            <span
+                              className="rounded-full border border-border-low bg-bg1 px-3 py-1 text-xs uppercase tracking-[0.12em] text-muted"
+                              key={tag}
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      {detail.market.contracts && detail.market.contracts.length > 0 ? (
+                        <div className="mt-4 rounded-xl border border-border-low bg-bg1 p-4">
+                          <p className="text-xs uppercase tracking-[0.12em] text-muted">
+                            Cached contracts
+                          </p>
+                          <div className="mt-3 grid gap-3">
+                            {detail.market.contracts.slice(0, 3).map((contract) => (
+                              <div
+                                className="rounded-xl border border-border-low bg-card p-3"
+                                key={contract.id ?? contract.ticker ?? contract.label ?? "contract"}
+                              >
+                                <p className="text-sm font-semibold text-foreground">
+                                  {contract.label ?? "Unnamed contract"}
+                                </p>
+                                <p className="mt-1 text-xs uppercase tracking-[0.12em] text-muted">
+                                  {contract.instrumentSymbol ?? contract.ticker ?? "No Gemini symbol"}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                       {detail.market.url ? (
                         <a
                           className="mt-4 inline-flex text-sm font-medium underline underline-offset-4"
@@ -1240,6 +1857,229 @@ function ReviewerConsole() {
                         </div>
                       )}
                     </article>
+                  </section>
+                </div>
+              ) : null}
+
+              {reviewerSurface === "prelaunch" &&
+              !isPrelaunchDetailLoading &&
+              !prelaunchDetailErrorMessage &&
+              prelaunchDetail ? (
+                <div className="mt-5 grid gap-5">
+                  <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+                    <article className="rounded-[1.5rem] border border-border-low bg-card p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted">
+                            Upcoming market
+                          </p>
+                          <h4 className="text-xl font-semibold tracking-tight">
+                            {prelaunchDetail.title ?? selectedPrelaunchEventId}
+                          </h4>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {prelaunchDetail.status ? (
+                            <span className="rounded-full border border-border-low bg-bg1 px-3 py-1 text-xs uppercase tracking-[0.14em] text-muted">
+                              {prelaunchDetail.status}
+                            </span>
+                          ) : null}
+                          {prelaunchDetail.ticker ? (
+                            <span className="rounded-full border border-border-low bg-bg1 px-3 py-1 text-xs uppercase tracking-[0.14em] text-muted">
+                              {prelaunchDetail.ticker}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                      <p className="mt-4 text-sm leading-7 text-muted">
+                        {prelaunchDetail.description ??
+                          prelaunchDetail.resolutionText ??
+                          "No market text cached for this upcoming market."}
+                      </p>
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
+                          <p className="text-xs uppercase tracking-[0.12em] text-muted">
+                            Category
+                          </p>
+                          <p className="mt-2 text-sm text-foreground">
+                            {prelaunchDetail.category ?? "Uncategorized"}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
+                          <p className="text-xs uppercase tracking-[0.12em] text-muted">
+                            Timing
+                          </p>
+                          <p className="mt-2 text-sm text-foreground">
+                            Starts {formatOptionalTimestamp(prelaunchDetail.effectiveDate)}
+                          </p>
+                          <p className="mt-1 text-sm text-foreground">
+                            Expires {formatOptionalTimestamp(prelaunchDetail.expiryDate ?? prelaunchDetail.endTime)}
+                          </p>
+                        </div>
+                      </div>
+                      {prelaunchDetail.tags && prelaunchDetail.tags.length > 0 ? (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {prelaunchDetail.tags.map((tag) => (
+                            <span
+                              className="rounded-full border border-border-low bg-bg1 px-3 py-1 text-xs uppercase tracking-[0.12em] text-muted"
+                              key={tag}
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="mt-4 flex flex-wrap gap-3">
+                        {prelaunchDetail.url ? (
+                          <a
+                            className="inline-flex text-sm font-medium underline underline-offset-4"
+                            href={prelaunchDetail.url}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            Open Gemini market page
+                          </a>
+                        ) : null}
+                        {prelaunchDetail.termsLink ? (
+                          <a
+                            className="inline-flex text-sm font-medium underline underline-offset-4"
+                            href={prelaunchDetail.termsLink}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            Open event terms
+                          </a>
+                        ) : null}
+                      </div>
+                    </article>
+
+                    <article className="rounded-[1.5rem] border border-border-low bg-card p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted">
+                            Proactive scan
+                          </p>
+                          <h4 className="text-xl font-semibold tracking-tight">
+                            {prelaunchLatestScan
+                              ? formatQueueStateLabel(prelaunchLatestScan.recommendation)
+                              : "No scan recorded"}
+                          </h4>
+                        </div>
+                        <button
+                          className="inline-flex items-center rounded-full border border-border-low bg-cream px-4 py-2 text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60"
+                          disabled={prelaunchScanTargetId === selectedPrelaunchEventId}
+                          onClick={() =>
+                            selectedPrelaunchEventId
+                              ? void handleRunPrelaunchScan(selectedPrelaunchEventId)
+                              : undefined
+                          }
+                          type="button"
+                        >
+                          {prelaunchScanTargetId === selectedPrelaunchEventId
+                            ? "Scanning…"
+                            : "Run scan"}
+                        </button>
+                      </div>
+                      {prelaunchLatestScan ? (
+                        <div className="mt-5 grid gap-3 text-sm">
+                          <div className="rounded-xl border border-border-low bg-bg1 p-3">
+                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
+                              Ambiguity
+                            </p>
+                            <p className="mt-2 text-lg font-semibold text-foreground">
+                              {formatAmbiguityScore(prelaunchLatestScan.ambiguityScore)}
+                            </p>
+                          </div>
+                          <div className="rounded-xl border border-border-low bg-bg1 p-3">
+                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
+                              Review window
+                            </p>
+                            <p className="mt-2 text-sm text-foreground">
+                              {prelaunchLatestScan.reviewWindow.review_window_reason}
+                            </p>
+                          </div>
+                          <p className="text-xs uppercase tracking-[0.12em] text-muted">
+                            Last scanned {formatTimestamp(prelaunchLatestScan.createdAt)}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
+                          No proactive ambiguity scan has been stored for this upcoming market yet.
+                        </div>
+                      )}
+                    </article>
+                  </section>
+
+                  <section className="rounded-[1.5rem] border border-border-low bg-card p-5">
+                    <div className="space-y-1">
+                      <p className="text-xs uppercase tracking-[0.16em] text-muted">
+                        Contracts
+                      </p>
+                      <h4 className="text-xl font-semibold tracking-tight">
+                        {prelaunchDetail.contracts?.length ?? 0} contract
+                        {(prelaunchDetail.contracts?.length ?? 0) === 1 ? "" : "s"}
+                      </h4>
+                    </div>
+                    {prelaunchDetail.contracts && prelaunchDetail.contracts.length > 0 ? (
+                      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                        {prelaunchDetail.contracts.map((contract) => (
+                          <article
+                            className="rounded-[1.25rem] border border-border-low bg-bg1 p-4"
+                            key={contract.id ?? contract.ticker ?? contract.label ?? "contract"}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <p className="text-sm font-semibold text-foreground">
+                                  {contract.label ?? "Unnamed contract"}
+                                </p>
+                                <p className="text-xs uppercase tracking-[0.12em] text-muted">
+                                  {contract.instrumentSymbol ?? contract.ticker ?? "No Gemini symbol"}
+                                </p>
+                              </div>
+                              {contract.marketState ? (
+                                <span className="rounded-full border border-border-low bg-card px-3 py-1 text-xs uppercase tracking-[0.12em] text-muted">
+                                  {contract.marketState}
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="mt-3 text-sm leading-6 text-muted">
+                              {contract.description ?? "No contract description cached."}
+                            </p>
+                            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                              <div className="rounded-xl border border-border-low bg-card p-3">
+                                <p className="text-xs uppercase tracking-[0.12em] text-muted">
+                                  Timing
+                                </p>
+                                <p className="mt-2 text-sm text-foreground">
+                                  {formatOptionalTimestamp(contract.expiryDate)}
+                                </p>
+                              </div>
+                              <div className="rounded-xl border border-border-low bg-card p-3">
+                                <p className="text-xs uppercase tracking-[0.12em] text-muted">
+                                  Price snapshot
+                                </p>
+                                <p className="mt-2 text-sm text-foreground">
+                                  {formatContractPriceSummary(contract.prices)}
+                                </p>
+                              </div>
+                            </div>
+                            {contract.termsAndConditionsUrl ? (
+                              <a
+                                className="mt-4 inline-flex text-sm font-medium underline underline-offset-4"
+                                href={contract.termsAndConditionsUrl}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                Open contract terms
+                              </a>
+                            ) : null}
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
+                        No contracts were cached for this upcoming market.
+                      </div>
+                    )}
                   </section>
                 </div>
               ) : null}
