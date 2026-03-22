@@ -202,6 +202,7 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
       errorMessage: null,
       retryable: false,
       llmOutput: null,
+      llmTrace: null,
       statusHistory: [
         {
           status: "queued",
@@ -498,6 +499,179 @@ test("POST /api/clarify/:eventId automatically runs the interpretation pipeline 
     assert.equal(storedRequest.errorMessage, null);
   } finally {
     await stopTestServer(server);
+  }
+});
+
+test("completed clarifications store immutable LLM trace metadata and expose it through detail reads", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  let firstNowCallCount = 0;
+  const firstTimeline = [
+    "2026-03-21T19:27:00.000Z",
+    "2026-03-21T19:27:01.000Z",
+    "2026-03-21T19:27:02.000Z",
+    "2026-03-21T19:27:03.000Z"
+  ];
+  const firstServerState = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    now: () =>
+      new Date(firstTimeline[Math.min(firstNowCallCount++, firstTimeline.length - 1)]),
+    createClarificationId: () => "clar_paid_trace_001",
+    llmTraceability: {
+      promptTemplateVersion: "prompt-v1",
+      modelId: "gemini-reviewer-001",
+      processingVersion: "offchain-pipeline-2026-03-21"
+    }
+  });
+  let secondServerState = null;
+
+  try {
+    const firstResponse = await fetch(
+      `${firstServerState.baseUrl}/api/clarify/gm_btc_above_100k`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          requesterId: "wallet_trace_1",
+          question: "Should Gemini BTC/USD auction prints be excluded?",
+          payment: {
+            proof: "pay_proof_trace_001",
+            amount: "1.00",
+            asset: "USDC",
+            reference: "x402_ref_trace_001",
+            verified: true
+          }
+        })
+      }
+    );
+
+    assert.equal(firstResponse.status, 202);
+
+    await waitFor(async () => {
+      const storedRequest = await repository.findByClarificationId("clar_paid_trace_001");
+      assert.ok(storedRequest);
+      assert.equal(storedRequest.status, "completed");
+      assert.deepEqual(storedRequest.llmTrace, {
+        promptTemplateVersion: "prompt-v1",
+        modelId: "gemini-reviewer-001",
+        requestedAt: "2026-03-21T19:27:02.000Z",
+        processingVersion: "offchain-pipeline-2026-03-21"
+      });
+    });
+
+    const detailResponse = await fetch(
+      `${firstServerState.baseUrl}/api/clarifications/clar_paid_trace_001`
+    );
+    assert.equal(detailResponse.status, 200);
+    assert.deepEqual(await detailResponse.json(), {
+      ok: true,
+      clarification: {
+        clarificationId: "clar_paid_trace_001",
+        status: "completed",
+        eventId: "gm_btc_above_100k",
+        question: "Should Gemini BTC/USD auction prints be excluded?",
+        llmOutput: {
+          verdict: "needs_clarification",
+          llm_status: "completed",
+          reasoning:
+            "The market text depends on Gemini BTC/USD spot prints but leaves room for ambiguity around which Gemini price feed or session record is authoritative.",
+          cited_clause:
+            "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC.",
+          ambiguity_score: 0.72,
+          ambiguity_summary:
+            "The resolution source is named at a high level, but the exact qualifying Gemini print is not explicit.",
+          suggested_market_text:
+            "Will Gemini BTC/USD spot trade above $100,000 on the primary Gemini exchange feed before December 31 2026 23:59 UTC?",
+          suggested_note:
+            "Use Gemini's primary BTC/USD spot exchange feed and count the first eligible trade print above $100,000 before expiry."
+        },
+        llmTrace: {
+          promptTemplateVersion: "prompt-v1",
+          modelId: "gemini-reviewer-001",
+          requestedAt: "2026-03-21T19:27:02.000Z",
+          processingVersion: "offchain-pipeline-2026-03-21"
+        },
+        createdAt: "2026-03-21T19:27:00.000Z",
+        updatedAt: "2026-03-21T19:27:03.000Z"
+      }
+    });
+
+    await stopTestServer(firstServerState.server);
+
+    let secondNowCallCount = 0;
+    const secondTimeline = [
+      "2026-03-21T19:28:00.000Z",
+      "2026-03-21T19:28:01.000Z",
+      "2026-03-21T19:28:02.000Z",
+      "2026-03-21T19:28:03.000Z"
+    ];
+    secondServerState = await startTestServer({
+      clarificationRequestRepository: repository,
+      marketCacheRepository,
+      now: () =>
+        new Date(secondTimeline[Math.min(secondNowCallCount++, secondTimeline.length - 1)]),
+      createClarificationId: () => "clar_paid_trace_002",
+      llmTraceability: {
+        promptTemplateVersion: "prompt-v2",
+        modelId: "gemini-reviewer-001",
+        processingVersion: "offchain-pipeline-2026-03-22"
+      }
+    });
+
+    const secondResponse = await fetch(
+      `${secondServerState.baseUrl}/api/clarify/gm_btc_above_100k`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          requesterId: "wallet_trace_2",
+          question: "Should only continuous spot prints count?",
+          payment: {
+            proof: "pay_proof_trace_002",
+            amount: "1.00",
+            asset: "USDC",
+            reference: "x402_ref_trace_002",
+            verified: true
+          }
+        })
+      }
+    );
+
+    assert.equal(secondResponse.status, 202);
+
+    await waitFor(async () => {
+      const secondStoredRequest = await repository.findByClarificationId("clar_paid_trace_002");
+      assert.ok(secondStoredRequest);
+      assert.equal(secondStoredRequest.status, "completed");
+      assert.deepEqual(secondStoredRequest.llmTrace, {
+        promptTemplateVersion: "prompt-v2",
+        modelId: "gemini-reviewer-001",
+        requestedAt: "2026-03-21T19:28:02.000Z",
+        processingVersion: "offchain-pipeline-2026-03-22"
+      });
+    });
+
+    const firstStoredRequest = await repository.findByClarificationId("clar_paid_trace_001");
+    assert.deepEqual(firstStoredRequest.llmTrace, {
+      promptTemplateVersion: "prompt-v1",
+      modelId: "gemini-reviewer-001",
+      requestedAt: "2026-03-21T19:27:02.000Z",
+      processingVersion: "offchain-pipeline-2026-03-21"
+    });
+  } finally {
+    if (secondServerState) {
+      await stopTestServer(secondServerState.server);
+    } else {
+      await stopTestServer(firstServerState.server);
+    }
   }
 });
 

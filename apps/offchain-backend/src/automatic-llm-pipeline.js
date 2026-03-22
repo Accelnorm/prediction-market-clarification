@@ -15,23 +15,40 @@ function buildDefaultInterpretation({ market }) {
   };
 }
 
+function buildLlmTrace({ llmTraceability, requestedAt }) {
+  return {
+    promptTemplateVersion: llmTraceability.promptTemplateVersion,
+    modelId: llmTraceability.modelId,
+    requestedAt,
+    processingVersion: llmTraceability.processingVersion
+  };
+}
+
 export async function runAutomaticClarificationPipeline({
   clarification,
   clarificationRequestRepository,
   marketCacheRepository,
-  now
+  now,
+  llmTraceability = {
+    promptTemplateVersion: "reviewer-offchain-prompt-v1",
+    modelId: "gemini-reviewer-default",
+    processingVersion: "offchain-llm-pipeline-v1"
+  }
 }) {
   const market = await marketCacheRepository.findByMarketId(clarification.eventId);
   const llmOutput = buildDefaultInterpretation({ market });
+  const requestedAt = now().toISOString();
   const completedTimestamp = now().toISOString();
+  const llmTrace = buildLlmTrace({ llmTraceability, requestedAt });
 
   await clarificationRequestRepository.updateByClarificationId(clarification.clarificationId, {
     status: "completed",
     updatedAt: completedTimestamp,
     llmOutput,
+    llmTrace,
     errorMessage: null,
     retryable: false
   });
 
-  return llmOutput;
+  return { llmOutput, llmTrace };
 }

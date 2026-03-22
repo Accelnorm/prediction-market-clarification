@@ -42,6 +42,7 @@ export class FileClarificationRequestRepository {
         errorMessage: request.errorMessage ?? null,
         retryable: request.retryable ?? false,
         llmOutput: request.llmOutput ?? null,
+        llmTrace: request.llmTrace ?? null,
         statusHistory: Array.isArray(request.statusHistory)
           ? request.statusHistory
           : [{ status: request.status, timestamp: request.updatedAt ?? request.createdAt }]
@@ -150,6 +151,10 @@ export class FileClarificationRequestRepository {
         Object.prototype.hasOwnProperty.call(updates, "llmOutput")
           ? updates.llmOutput
           : existingRequest.llmOutput ?? null,
+      llmTrace:
+        Object.prototype.hasOwnProperty.call(updates, "llmTrace")
+          ? updates.llmTrace
+          : existingRequest.llmTrace ?? null,
       statusHistory: shouldAppendStatusHistory
         ? [
             ...(Array.isArray(existingRequest.statusHistory) ? existingRequest.statusHistory : []),

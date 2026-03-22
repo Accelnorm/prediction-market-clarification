@@ -37,6 +37,7 @@ export function createServer({
   now,
   createRequestId,
   createClarificationId,
+  llmTraceability,
   runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline
 }) {
   return http.createServer(async (request, response) => {
@@ -158,7 +159,8 @@ export function createServer({
               clarification: processingClarification,
               clarificationRequestRepository,
               marketCacheRepository,
-              now
+              now,
+              llmTraceability
             })
           )
           .catch(async (pipelineError) => {
@@ -202,6 +204,54 @@ export function createServer({
           return;
         }
 
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      /^\/api\/clarifications\/[^/]+$/.test(requestUrl.pathname)
+    ) {
+      try {
+        const clarificationId = decodeURIComponent(
+          requestUrl.pathname.replace(/^\/api\/clarifications\/([^/]+)$/, "$1")
+        );
+        const clarification =
+          await clarificationRequestRepository.findByClarificationId(clarificationId);
+
+        if (!clarification) {
+          sendJson(response, 404, {
+            ok: false,
+            error: {
+              code: "CLARIFICATION_NOT_FOUND",
+              message: "Clarification not found."
+            }
+          });
+          return;
+        }
+
+        sendJson(response, 200, {
+          ok: true,
+          clarification: {
+            clarificationId: clarification.clarificationId,
+            status: clarification.status,
+            eventId: clarification.eventId,
+            question: clarification.question,
+            llmOutput: clarification.llmOutput ?? null,
+            llmTrace: clarification.llmTrace ?? null,
+            createdAt: clarification.createdAt,
+            updatedAt: clarification.updatedAt ?? clarification.createdAt
+          }
+        });
+      } catch (error) {
         sendJson(response, 500, {
           ok: false,
           error: {
