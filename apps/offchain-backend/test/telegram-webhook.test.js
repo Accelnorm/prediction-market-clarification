@@ -118,6 +118,99 @@ test("POST /api/telegram/webhook stores a pending clarification request and retu
   }
 });
 
+test("POST /api/telegram/webhook rejects requests with a missing webhook secret when configured", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "telegram-webhook-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    telegramWebhookSecret: "telegram-secret"
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        update_id: 1001,
+        message: {
+          message_id: 77,
+          chat: {
+            id: 9001,
+            type: "private"
+          },
+          from: {
+            id: 42
+          },
+          text: "/clarify gm_eth_above_5000 Should wick trades above $5,000 count?"
+        }
+      })
+    });
+
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      error: {
+        code: "TELEGRAM_WEBHOOK_FORBIDDEN",
+        message: "Telegram webhook secret token is invalid."
+      }
+    });
+
+    const stored = await repository.load();
+    assert.deepEqual(stored.requests, []);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/telegram/webhook accepts requests with the configured webhook secret", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "telegram-webhook-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    telegramWebhookSecret: "telegram-secret",
+    createRequestId: () => "clr_telegram_secret_001"
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-telegram-bot-api-secret-token": "telegram-secret"
+      },
+      body: JSON.stringify({
+        update_id: 1001,
+        message: {
+          message_id: 77,
+          chat: {
+            id: 9001,
+            type: "private"
+          },
+          from: {
+            id: 42
+          },
+          text: "/clarify gm_eth_above_5000 Should wick trades above $5,000 count?"
+        }
+      })
+    });
+
+    assert.equal(response.status, 202);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      requestId: "clr_telegram_secret_001",
+      status: "pending"
+    });
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test("POST /api/telegram/webhook rejects empty clarification questions", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "telegram-webhook-"));
   const repository = new FileClarificationRequestRepository(
@@ -337,6 +430,10 @@ test("POST /api/telegram/requests/:requestId/status emits processing and complet
       delivery: {
         chatId: "9011",
         text: "Clarification request clr_telegram_status_001 is processing for market gm_sol_above_500."
+      },
+      deliveryResult: {
+        attempted: false,
+        sent: false
       }
     });
 
@@ -363,6 +460,10 @@ test("POST /api/telegram/requests/:requestId/status emits processing and complet
       delivery: {
         chatId: "9011",
         text: "Clarification clar_001 completed for request clr_telegram_status_001: Gemini auction and spot prints both count toward resolution."
+      },
+      deliveryResult: {
+        attempted: false,
+        sent: false
       }
     });
 
@@ -377,6 +478,92 @@ test("POST /api/telegram/requests/:requestId/status emits processing and complet
       stored.requests[0].statusHistory.map((entry) => entry.status),
       ["pending", "processing", "completed"]
     );
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/telegram/requests/:requestId/status sends the delivery through Telegram when a bot token is configured", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "telegram-webhook-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const sentMessages = [];
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    now: () => new Date("2026-03-21T18:20:00.000Z"),
+    createRequestId: () => "clr_telegram_delivery_001",
+    telegramBotToken: "telegram-bot-token",
+    sendTelegramMessage: async (message) => {
+      sentMessages.push(message);
+      return {
+        ok: true,
+        messageId: 4321
+      };
+    }
+  });
+
+  try {
+    await fetch(`${baseUrl}/api/telegram/webhook`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        update_id: 1005,
+        message: {
+          message_id: 81,
+          chat: {
+            id: 9011,
+            type: "private"
+          },
+          from: {
+            id: 56
+          },
+          text: "/clarify gm_sol_above_500 Does the daily candle close decide the result?"
+        }
+      })
+    });
+
+    const completedResponse = await fetch(
+      `${baseUrl}/api/telegram/requests/clr_telegram_delivery_001/status`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          status: "completed",
+          clarificationId: "clar_001",
+          summary: "Gemini auction and spot prints both count toward resolution."
+        })
+      }
+    );
+
+    assert.equal(completedResponse.status, 200);
+    assert.deepEqual(await completedResponse.json(), {
+      ok: true,
+      requestId: "clr_telegram_delivery_001",
+      status: "completed",
+      delivery: {
+        chatId: "9011",
+        text: "Clarification clar_001 completed for request clr_telegram_delivery_001: Gemini auction and spot prints both count toward resolution."
+      },
+      deliveryResult: {
+        attempted: true,
+        sent: true,
+        messageId: 4321
+      }
+    });
+
+    assert.deepEqual(sentMessages, [
+      {
+        botToken: "telegram-bot-token",
+        chatId: "9011",
+        text: "Clarification clar_001 completed for request clr_telegram_delivery_001: Gemini auction and spot prints both count toward resolution.",
+        apiBaseUrl: undefined
+      }
+    ]);
   } finally {
     await stopTestServer(server);
   }
@@ -442,6 +629,10 @@ test("POST /api/telegram/requests/:requestId/status emits sanitized failed deliv
       delivery: {
         chatId: "9012",
         text: "Clarification request clr_telegram_failed_001 failed. Please retry later."
+      },
+      deliveryResult: {
+        attempted: false,
+        sent: false
       }
     });
 

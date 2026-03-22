@@ -55,7 +55,13 @@ Useful environment variables:
 - `REVIEWER_AUTH_TOKEN` protects reviewer-only routes
 - `TELEGRAM_WEBHOOK_SECRET` validates Telegram webhook requests
 - `TELEGRAM_BOT_TOKEN` enables live outbound Telegram delivery
+- `TELEGRAM_WEBHOOK_URL` auto-registers the webhook on startup when set
 - `TELEGRAM_BOT_API_BASE_URL` overrides the Telegram API base URL when needed
+- `LLM_PROVIDER` defaults to `openrouter` and also supports `openai-compatible` and `anthropic-compatible`
+- `LLM_MODEL` selects the model sent to the provider
+- `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`
+- `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_BASE_URL`
+- `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_VERSION`
 - `MARKET_CACHE_PATH`, `UPCOMING_MARKET_CACHE_PATH`
 - `CLARIFICATION_REQUESTS_PATH`, `BACKGROUND_JOBS_PATH`
 - `ARTIFACTS_PATH`, `REVIEWER_SCANS_PATH`, `UPCOMING_REVIEWER_SCANS_PATH`
@@ -100,6 +106,10 @@ npm install
 MARKET_CACHE_PATH="$PWD/data/market-cache.json" \
 UPCOMING_MARKET_CACHE_PATH="$PWD/data/upcoming-market-cache.json" \
 REVIEWER_AUTH_TOKEN="replace-me" \
+LLM_PROVIDER="openrouter" \
+OPENROUTER_API_KEY="replace-me" \
+LLM_MODEL="openrouter/auto" \
+TELEGRAM_WEBHOOK_URL="https://<YOUR_DOMAIN>/api/telegram/webhook" \
 TELEGRAM_WEBHOOK_SECRET="replace-me" \
 TELEGRAM_BOT_TOKEN="replace-me" \
 PORT=3000 \
@@ -121,16 +131,15 @@ The current integration point is the webhook receiver at `POST /api/telegram/web
 
 1. Create a bot with BotFather and get the bot token.
 2. Deploy the API to a public HTTPS URL.
-3. Register the webhook:
+3. Set these env vars on the API before startup:
 
 ```bash
-curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
-  -H 'content-type: application/json' \
-  -d '{
-    "url": "https://<YOUR_DOMAIN>/api/telegram/webhook",
-    "secret_token": "<TELEGRAM_WEBHOOK_SECRET>"
-  }'
+TELEGRAM_BOT_TOKEN="<TELEGRAM_BOT_TOKEN>"
+TELEGRAM_WEBHOOK_URL="https://<YOUR_DOMAIN>/api/telegram/webhook"
+TELEGRAM_WEBHOOK_SECRET="<TELEGRAM_WEBHOOK_SECRET>"
 ```
+
+The server will register the webhook with Telegram automatically on boot.
 
 4. In Telegram, send your bot a message in this format:
 
@@ -156,11 +165,11 @@ curl -X POST "https://<YOUR_DOMAIN>/api/telegram/requests/<REQUEST_ID>/status" \
   }'
 ```
 
-Current expectation: if `TELEGRAM_WEBHOOK_SECRET` matches the value registered with Telegram and `TELEGRAM_BOT_TOKEN` is configured on the API, inbound webhook intake and outbound status delivery should both work.
+Current expectation: if `TELEGRAM_WEBHOOK_SECRET` and `TELEGRAM_WEBHOOK_URL` are set and the process starts cleanly, the server will register the webhook on boot. With `TELEGRAM_BOT_TOKEN` configured, inbound webhook intake and outbound status delivery should both work.
 
 ## In Progress / Missing Pieces
 
-- The default clarification pipeline is a deterministic stub, not a real LLM integration.
+- The LLM integration now supports real provider calls, but it falls back to the deterministic local stub when no provider API key is configured.
 - Persistence is file-backed JSON, not a production database.
 - There is no deployment packaging yet for Docker, systemd, or managed platforms.
 - Reviewer auth is a single shared token and still needs hardening.

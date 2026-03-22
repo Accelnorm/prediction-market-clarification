@@ -1,4 +1,4 @@
-import { buildDefaultInterpretation } from "./automatic-llm-pipeline.js";
+import { generateMarketInterpretation } from "./llm-provider.js";
 import { buildAdaptiveReviewWindow } from "./review-window-policy.js";
 
 function buildRecommendation(llmOutput) {
@@ -10,7 +10,8 @@ export async function createReviewerMarketScan({
   eventId,
   marketCacheRepository,
   reviewerScanRepository,
-  now
+  now,
+  llmRuntime
 }) {
   const market = await marketCacheRepository.findByMarketId(eventId);
 
@@ -22,7 +23,15 @@ export async function createReviewerMarketScan({
   }
 
   const createdAt = now().toISOString();
-  const llmOutput = buildDefaultInterpretation({ market });
+  const { llmOutput } = await generateMarketInterpretation({
+    clarification: {
+      clarificationId: null,
+      eventId,
+      question: `Review this market for ambiguity and suggest clarifying edits.`
+    },
+    market,
+    llmRuntime
+  });
   const reviewWindow = buildAdaptiveReviewWindow({
     clarification: {
       llmOutput

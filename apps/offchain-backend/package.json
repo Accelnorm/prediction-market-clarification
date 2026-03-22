@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node ./src/cli/start-server.js",
     "sync:markets": "node ./src/cli/sync-markets.js",
     "test": "node --test"
   }

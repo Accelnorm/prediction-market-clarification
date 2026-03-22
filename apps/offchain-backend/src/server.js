@@ -6,6 +6,10 @@ import { runAutomaticClarificationPipeline as runDefaultAutomaticClarificationPi
 import { refreshReviewerMarketData } from "./reviewer-refresh-market.js";
 import { createTelegramClarificationRequest } from "./telegram-request-flow.js";
 import {
+  assertTelegramWebhookSecret,
+  sendTelegramMessage as sendDefaultTelegramMessage
+} from "./telegram-bot-client.js";
+import {
   buildTelegramDeliveryPayload,
   parseTelegramStatusUpdate
 } from "./telegram-status-delivery.js";
@@ -632,8 +636,13 @@ export function createServer({
   createClarificationId,
   createBackgroundJobId = () => randomUUID(),
   llmTraceability,
+  llmRuntime,
   reviewerAuthToken,
+  telegramWebhookSecret,
+  telegramBotToken,
+  telegramBotApiBaseUrl,
   fetchReviewerMarketSource,
+  sendTelegramMessage = sendDefaultTelegramMessage,
   runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline,
   runReviewerMarketScan = createReviewerMarketScan
 }) {
@@ -680,7 +689,8 @@ export function createServer({
         artifactRepository,
         marketCacheRepository,
         now,
-        llmTraceability
+        llmTraceability,
+        llmRuntime
       });
 
       await backgroundJobRepository?.updateByJobId?.(job.jobId, {
@@ -722,7 +732,8 @@ export function createServer({
         eventId: job.target.eventId,
         marketCacheRepository: getMarketRepositoryForStage(marketStage),
         reviewerScanRepository: getReviewerScanRepositoryForStage(marketStage),
-        now
+        now,
+        llmRuntime
       });
 
       await backgroundJobRepository?.updateByJobId?.(job.jobId, {
@@ -775,6 +786,7 @@ export function createServer({
 
     if (request.method === "POST" && request.url === "/api/telegram/webhook") {
       try {
+        assertTelegramWebhookSecret(request, telegramWebhookSecret);
         const update = await readJsonBody(request);
         const result = await createTelegramClarificationRequest({
           update,
@@ -916,7 +928,8 @@ export function createServer({
                 artifactRepository,
                 marketCacheRepository,
                 now,
-                llmTraceability
+                llmTraceability,
+                llmRuntime
               })
             )
             .catch(async (pipelineError) => {
@@ -1216,12 +1229,13 @@ export function createServer({
             result: null
           };
         if (!backgroundJobRepository) {
-          const scan = await runReviewerMarketScan({
-            eventId,
-            marketCacheRepository,
-            reviewerScanRepository,
-            now
-          });
+        const scan = await runReviewerMarketScan({
+          eventId,
+          marketCacheRepository,
+          reviewerScanRepository,
+          now,
+          llmRuntime
+        });
 
           sendJson(response, 202, {
             ok: true,
@@ -2244,11 +2258,33 @@ export function createServer({
           return;
         }
 
+        const delivery = buildTelegramDeliveryPayload(storedRequest);
+        let deliveryResult = {
+          attempted: false,
+          sent: false
+        };
+
+        if (telegramBotToken) {
+          const telegramResponse = await sendTelegramMessage({
+            botToken: telegramBotToken,
+            chatId: delivery.chatId,
+            text: delivery.text,
+            apiBaseUrl: telegramBotApiBaseUrl
+          });
+
+          deliveryResult = {
+            attempted: true,
+            sent: true,
+            messageId: telegramResponse.messageId
+          };
+        }
+
         sendJson(response, 200, {
           ok: true,
           requestId: storedRequest.requestId,
           status: storedRequest.status,
-          delivery: buildTelegramDeliveryPayload(storedRequest)
+          delivery,
+          deliveryResult
         });
       } catch (error) {
         if (error instanceof SyntaxError) {
