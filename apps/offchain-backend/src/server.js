@@ -16,6 +16,56 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
+function hasReviewerAccess(request, reviewerAuthToken) {
+  if (!reviewerAuthToken) {
+    return false;
+  }
+
+  return request.headers["x-reviewer-token"] === reviewerAuthToken;
+}
+
+function sendReviewerAuthRequired(response) {
+  sendJson(response, 401, {
+    ok: false,
+    error: {
+      code: "REVIEWER_AUTH_REQUIRED",
+      message: "Reviewer authentication is required for this route."
+    }
+  });
+}
+
+function buildPublicClarificationPayload(clarification) {
+  return {
+    clarificationId: clarification.clarificationId,
+    status: clarification.status,
+    eventId: clarification.eventId,
+    question: clarification.question,
+    createdAt: clarification.createdAt,
+    updatedAt: clarification.updatedAt ?? clarification.createdAt
+  };
+}
+
+function buildReviewerClarificationPayload({
+  clarification,
+  adaptiveReviewWindow
+}) {
+  const clarificationPayload = {
+    ...buildPublicClarificationPayload(clarification),
+    llmOutput: clarification.llmOutput ?? null,
+    llmTrace: clarification.llmTrace ?? null,
+    ...adaptiveReviewWindow
+  };
+
+  if (clarification.artifactCid && clarification.artifactUrl) {
+    clarificationPayload.artifact = {
+      cid: clarification.artifactCid,
+      url: clarification.artifactUrl
+    };
+  }
+
+  return clarificationPayload;
+}
+
 async function readJsonBody(request) {
   const chunks = [];
 
@@ -40,6 +90,7 @@ export function createServer({
   createRequestId,
   createClarificationId,
   llmTraceability,
+  reviewerAuthToken,
   runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline
 }) {
   return http.createServer(async (request, response) => {
@@ -250,28 +301,65 @@ export function createServer({
           now: now()
         });
 
-        const clarificationPayload = {
-          clarificationId: clarification.clarificationId,
-          status: clarification.status,
-          eventId: clarification.eventId,
-          question: clarification.question,
-          llmOutput: clarification.llmOutput ?? null,
-          llmTrace: clarification.llmTrace ?? null,
-          createdAt: clarification.createdAt,
-          updatedAt: clarification.updatedAt ?? clarification.createdAt,
-          ...adaptiveReviewWindow
-        };
+        sendJson(response, 200, {
+          ok: true,
+          clarification: buildPublicClarificationPayload(clarification)
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
 
-        if (clarification.artifactCid && clarification.artifactUrl) {
-          clarificationPayload.artifact = {
-            cid: clarification.artifactCid,
-            url: clarification.artifactUrl
-          };
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      /^\/api\/reviewer\/clarifications\/[^/]+$/.test(requestUrl.pathname)
+    ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const clarificationId = decodeURIComponent(
+          requestUrl.pathname.replace(/^\/api\/reviewer\/clarifications\/([^/]+)$/, "$1")
+        );
+        const clarification =
+          await clarificationRequestRepository.findByClarificationId(clarificationId);
+
+        if (!clarification) {
+          sendJson(response, 404, {
+            ok: false,
+            error: {
+              code: "CLARIFICATION_NOT_FOUND",
+              message: "Clarification not found."
+            }
+          });
+          return;
         }
+
+        const market = clarification.eventId
+          ? await marketCacheRepository?.findByMarketId(clarification.eventId)
+          : null;
+        const adaptiveReviewWindow = buildAdaptiveReviewWindow({
+          clarification,
+          market,
+          now: now()
+        });
 
         sendJson(response, 200, {
           ok: true,
-          clarification: clarificationPayload
+          clarification: buildReviewerClarificationPayload({
+            clarification,
+            adaptiveReviewWindow
+          })
         });
       } catch (error) {
         sendJson(response, 500, {
@@ -290,6 +378,11 @@ export function createServer({
       request.method === "GET" &&
       /^\/api\/artifacts\/[^/]+$/.test(requestUrl.pathname)
     ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
       try {
         const cid = decodeURIComponent(
           requestUrl.pathname.replace(/^\/api\/artifacts\/([^/]+)$/, "$1")

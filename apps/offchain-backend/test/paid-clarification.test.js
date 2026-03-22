@@ -47,6 +47,12 @@ async function stopTestServer(server) {
   });
 }
 
+function createReviewerHeaders(token = "reviewer-secret") {
+  return {
+    "x-reviewer-token": token
+  };
+}
+
 async function createMarketCacheRepository(tempDir, markets = [VALID_MARKET]) {
   const repository = new FileMarketCacheRepository(path.join(tempDir, "market-cache.json"));
   await repository.save(markets);
@@ -517,7 +523,8 @@ test("successful clarifications automatically publish an artifact and store a fe
     artifactRepository,
     marketCacheRepository,
     now: () => new Date("2026-03-21T19:26:00.000Z"),
-    createClarificationId: () => "clar_paid_artifact_001"
+    createClarificationId: () => "clar_paid_artifact_001",
+    reviewerAuthToken: "reviewer-secret"
   });
 
   try {
@@ -550,8 +557,24 @@ test("successful clarifications automatically publish an artifact and store a fe
     });
 
     const storedRequest = await repository.findByClarificationId("clar_paid_artifact_001");
-    const artifactResponse = await fetch(
+    const unauthorizedArtifactResponse = await fetch(
       `${baseUrl}/api/artifacts/${encodeURIComponent(storedRequest.artifactCid)}`
+    );
+
+    assert.equal(unauthorizedArtifactResponse.status, 401);
+    assert.deepEqual(await unauthorizedArtifactResponse.json(), {
+      ok: false,
+      error: {
+        code: "REVIEWER_AUTH_REQUIRED",
+        message: "Reviewer authentication is required for this route."
+      }
+    });
+
+    const artifactResponse = await fetch(
+      `${baseUrl}/api/artifacts/${encodeURIComponent(storedRequest.artifactCid)}`,
+      {
+        headers: createReviewerHeaders()
+      }
     );
 
     assert.equal(artifactResponse.status, 200);
@@ -572,7 +595,17 @@ test("successful clarifications automatically publish an artifact and store a fe
     const detailResponse = await fetch(`${baseUrl}/api/clarifications/clar_paid_artifact_001`);
     assert.equal(detailResponse.status, 200);
     const detailPayload = await detailResponse.json();
-    assert.deepEqual(detailPayload.clarification.artifact, {
+    assert.equal(detailPayload.clarification.artifact, undefined);
+
+    const reviewerDetailResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_paid_artifact_001`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+    assert.equal(reviewerDetailResponse.status, 200);
+    const reviewerDetailPayload = await reviewerDetailResponse.json();
+    assert.deepEqual(reviewerDetailPayload.clarification.artifact, {
       cid: storedRequest.artifactCid,
       url: storedRequest.artifactUrl
     });
@@ -600,6 +633,7 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
     now: () =>
       new Date(firstTimeline[Math.min(firstNowCallCount++, firstTimeline.length - 1)]),
     createClarificationId: () => "clar_paid_trace_001",
+    reviewerAuthToken: "reviewer-secret",
     llmTraceability: {
       promptTemplateVersion: "prompt-v1",
       modelId: "gemini-reviewer-001",
@@ -655,6 +689,37 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
         status: "completed",
         eventId: "gm_btc_above_100k",
         question: "Should Gemini BTC/USD auction prints be excluded?",
+        createdAt: "2026-03-21T19:27:00.000Z",
+        updatedAt: "2026-03-21T19:27:03.000Z"
+      }
+    });
+
+    const unauthorizedReviewerResponse = await fetch(
+      `${firstServerState.baseUrl}/api/reviewer/clarifications/clar_paid_trace_001`
+    );
+    assert.equal(unauthorizedReviewerResponse.status, 401);
+    assert.deepEqual(await unauthorizedReviewerResponse.json(), {
+      ok: false,
+      error: {
+        code: "REVIEWER_AUTH_REQUIRED",
+        message: "Reviewer authentication is required for this route."
+      }
+    });
+
+    const reviewerDetailResponse = await fetch(
+      `${firstServerState.baseUrl}/api/reviewer/clarifications/clar_paid_trace_001`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+    assert.equal(reviewerDetailResponse.status, 200);
+    assert.deepEqual(await reviewerDetailResponse.json(), {
+      ok: true,
+      clarification: {
+        clarificationId: "clar_paid_trace_001",
+        status: "completed",
+        eventId: "gm_btc_above_100k",
+        question: "Should Gemini BTC/USD auction prints be excluded?",
         llmOutput: {
           verdict: "needs_clarification",
           llm_status: "completed",
@@ -702,6 +767,7 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
       now: () =>
         new Date(secondTimeline[Math.min(secondNowCallCount++, secondTimeline.length - 1)]),
       createClarificationId: () => "clar_paid_trace_002",
+      reviewerAuthToken: "reviewer-secret",
       llmTraceability: {
         promptTemplateVersion: "prompt-v2",
         modelId: "gemini-reviewer-001",
@@ -849,11 +915,14 @@ test("clarification detail responses include adaptive review windows bounded bet
     clarificationRequestRepository: repository,
     marketCacheRepository,
     now: () => new Date("2026-03-21T12:00:00.000Z"),
-    createClarificationId: () => "unused"
+    createClarificationId: () => "unused",
+    reviewerAuthToken: "reviewer-secret"
   });
 
   try {
-    const longResponse = await fetch(`${baseUrl}/api/clarifications/clar_review_long`);
+    const longResponse = await fetch(`${baseUrl}/api/reviewer/clarifications/clar_review_long`, {
+      headers: createReviewerHeaders()
+    });
     assert.equal(longResponse.status, 200);
     const longPayload = await longResponse.json();
     assert.equal(longPayload.clarification.review_window_secs, 86400);
@@ -861,7 +930,12 @@ test("clarification detail responses include adaptive review windows bounded bet
     assert.equal(longPayload.clarification.activity_signal, "low");
     assert.equal(longPayload.clarification.ambiguity_score, 0.4);
 
-    const activeResponse = await fetch(`${baseUrl}/api/clarifications/clar_review_active`);
+    const activeResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_review_active`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
     assert.equal(activeResponse.status, 200);
     const activePayload = await activeResponse.json();
     assert.equal(activePayload.clarification.review_window_secs, 28800);
@@ -870,7 +944,10 @@ test("clarification detail responses include adaptive review windows bounded bet
     assert.equal(activePayload.clarification.ambiguity_score, 0.52);
 
     const ambiguousResponse = await fetch(
-      `${baseUrl}/api/clarifications/clar_review_ambiguous`
+      `${baseUrl}/api/reviewer/clarifications/clar_review_ambiguous`,
+      {
+        headers: createReviewerHeaders()
+      }
     );
     assert.equal(ambiguousResponse.status, 200);
     const ambiguousPayload = await ambiguousResponse.json();
@@ -879,7 +956,12 @@ test("clarification detail responses include adaptive review windows bounded bet
     assert.equal(ambiguousPayload.clarification.activity_signal, "normal");
     assert.equal(ambiguousPayload.clarification.ambiguity_score, 0.91);
 
-    const urgentResponse = await fetch(`${baseUrl}/api/clarifications/clar_review_urgent`);
+    const urgentResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_review_urgent`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
     assert.equal(urgentResponse.status, 200);
     const urgentPayload = await urgentResponse.json();
     assert.equal(urgentPayload.clarification.review_window_secs, 3600);
