@@ -1,0 +1,10 @@
+{
+  "name": "offchain-backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync:markets": "node ./src/cli/sync-markets.js",
+    "test": "node --test"
+  }
+}

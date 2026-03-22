@@ -1,0 +1,13 @@
+{
+  "markets": [
+    {
+      "marketId": "gm_eth_above_5000",
+      "title": "Will ETH trade above $5,000 before July 1?",
+      "resolutionText": "Resolves YES if ETH/USD on Gemini is above $5,000 at any time before July 1 2026 00:00 UTC.",
+      "endTime": "2026-06-30T23:59:00.000Z",
+      "slug": "eth-above-5000-july-2026",
+      "url": "https://example.com/markets/eth-above-5000-july-2026",
+      "lastSyncedAt": "2026-03-22T04:32:03.673Z"
+    }
+  ]
+}
