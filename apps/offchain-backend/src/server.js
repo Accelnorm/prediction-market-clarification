@@ -76,6 +76,17 @@ function buildFundingProgress() {
   };
 }
 
+function buildReviewerScanListItem(scan) {
+  return {
+    scanId: scan.scanId,
+    eventId: scan.eventId,
+    createdAt: scan.createdAt,
+    ambiguityScore: scan.ambiguity_score,
+    recommendation: scan.recommendation,
+    reviewWindow: scan.review_window
+  };
+}
+
 async function readJsonBody(request) {
   const chunks = [];
 
@@ -320,6 +331,34 @@ export function createServer({
         sendJson(response, 200, {
           ok: true,
           queue
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/api/reviewer/scans") {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const scans = ((await reviewerScanRepository?.list?.()) ?? [])
+          .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+          .map(buildReviewerScanListItem);
+
+        sendJson(response, 200, {
+          ok: true,
+          scans
         });
       } catch (error) {
         sendJson(response, 500, {

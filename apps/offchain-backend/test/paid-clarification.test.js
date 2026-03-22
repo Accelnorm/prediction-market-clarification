@@ -1339,3 +1339,122 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
     await stopTestServer(server);
   }
 });
+
+test("GET /api/reviewer/scans lists historical reviewer scan records and rejects unauthorized access", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-scan-history-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const reviewerScanRepository = await createReviewerScanRepository(tempDir);
+  const marketCacheRepository = await createMarketCacheRepository(tempDir, [
+    VALID_MARKET,
+    {
+      marketId: "gm_eth_above_5000",
+      title: "Will ETH trade above $5,000 before year end?",
+      resolution:
+        "Resolves YES if Gemini ETH/USD prints above $5,000 before December 31 2026 23:59 UTC.",
+      closesAt: "2026-03-21T23:00:00.000Z",
+      slug: "eth-above-5000-2026",
+      url: "https://example.com/markets/eth-above-5000-2026",
+      lastSyncedAt: "2026-03-21T18:59:00.000Z",
+      activitySignal: "high"
+    }
+  ]);
+  let nowCallCount = 0;
+  const timeline = [
+    "2026-03-21T20:00:00.000Z",
+    "2026-03-21T20:05:00.000Z",
+    "2026-03-21T20:10:00.000Z"
+  ];
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
+    reviewerScanRepository,
+    marketCacheRepository,
+    now: () => new Date(timeline[Math.min(nowCallCount++, timeline.length - 1)]),
+    reviewerAuthToken: "reviewer-secret"
+  });
+
+  try {
+    const unauthorizedResponse = await fetch(`${baseUrl}/api/reviewer/scans`);
+
+    assert.equal(unauthorizedResponse.status, 401);
+    assert.deepEqual(await unauthorizedResponse.json(), {
+      ok: false,
+      error: {
+        code: "REVIEWER_AUTH_REQUIRED",
+        message: "Reviewer authentication is required for this route."
+      }
+    });
+
+    await fetch(`${baseUrl}/api/reviewer/scan/gm_btc_above_100k`, {
+      method: "POST",
+      headers: createReviewerHeaders()
+    });
+    await fetch(`${baseUrl}/api/reviewer/scan/gm_btc_above_100k`, {
+      method: "POST",
+      headers: createReviewerHeaders()
+    });
+    await fetch(`${baseUrl}/api/reviewer/scan/gm_eth_above_5000`, {
+      method: "POST",
+      headers: createReviewerHeaders()
+    });
+
+    const response = await fetch(`${baseUrl}/api/reviewer/scans`, {
+      headers: createReviewerHeaders()
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      scans: [
+        {
+          scanId: "scan_gm_eth_above_5000_2026-03-21T20:10:00.000Z",
+          eventId: "gm_eth_above_5000",
+          createdAt: "2026-03-21T20:10:00.000Z",
+          ambiguityScore: 0.72,
+          recommendation: "review",
+          reviewWindow: {
+            review_window_secs: 3600,
+            review_window_reason:
+              "Base window set from lt_6h time-to-end bucket. High activity reduced the review window by one policy step. Final window 3600 seconds within 3600-86400 second policy bounds.",
+            time_to_end_bucket: "lt_6h",
+            activity_signal: "high",
+            ambiguity_score: 0.72
+          }
+        },
+        {
+          scanId: "scan_gm_btc_above_100k_2026-03-21T20:05:00.000Z",
+          eventId: "gm_btc_above_100k",
+          createdAt: "2026-03-21T20:05:00.000Z",
+          ambiguityScore: 0.72,
+          recommendation: "review",
+          reviewWindow: {
+            review_window_secs: 86400,
+            review_window_reason:
+              "Base window set from gt_72h time-to-end bucket. Final window 86400 seconds within 3600-86400 second policy bounds.",
+            time_to_end_bucket: "gt_72h",
+            activity_signal: "normal",
+            ambiguity_score: 0.72
+          }
+        },
+        {
+          scanId: "scan_gm_btc_above_100k_2026-03-21T20:00:00.000Z",
+          eventId: "gm_btc_above_100k",
+          createdAt: "2026-03-21T20:00:00.000Z",
+          ambiguityScore: 0.72,
+          recommendation: "review",
+          reviewWindow: {
+            review_window_secs: 86400,
+            review_window_reason:
+              "Base window set from gt_72h time-to-end bucket. Final window 86400 seconds within 3600-86400 second policy bounds.",
+            time_to_end_bucket: "gt_72h",
+            activity_signal: "normal",
+            ambiguity_score: 0.72
+          }
+        }
+      ]
+    });
+  } finally {
+    await stopTestServer(server);
+  }
+});
