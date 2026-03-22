@@ -121,7 +121,7 @@ function loadReviewerSession() {
   if (typeof window === "undefined") {
     return {
       apiBaseUrl: "",
-      reviewerToken: ""
+      reviewerToken: "",
     };
   }
 
@@ -131,21 +131,22 @@ function loadReviewerSession() {
     if (!raw) {
       return {
         apiBaseUrl: "",
-        reviewerToken: ""
+        reviewerToken: "",
       };
     }
 
     const parsed = JSON.parse(raw);
 
     return {
-      apiBaseUrl: typeof parsed.apiBaseUrl === "string" ? parsed.apiBaseUrl : "",
+      apiBaseUrl:
+        typeof parsed.apiBaseUrl === "string" ? parsed.apiBaseUrl : "",
       reviewerToken:
-        typeof parsed.reviewerToken === "string" ? parsed.reviewerToken : ""
+        typeof parsed.reviewerToken === "string" ? parsed.reviewerToken : "",
     };
   } catch {
     return {
       apiBaseUrl: "",
-      reviewerToken: ""
+      reviewerToken: "",
     };
   }
 }
@@ -158,7 +159,10 @@ function saveReviewerSession(session: {
     return;
   }
 
-  window.localStorage.setItem(REVIEWER_SESSION_STORAGE_KEY, JSON.stringify(session));
+  window.localStorage.setItem(
+    REVIEWER_SESSION_STORAGE_KEY,
+    JSON.stringify(session)
+  );
 }
 
 function clearReviewerSession() {
@@ -171,9 +175,12 @@ function clearReviewerSession() {
 
 function formatTimestamp(timestamp: string) {
   return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZoneName: "short"
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
   }).format(new Date(timestamp));
 }
 
@@ -198,27 +205,34 @@ function formatCurrency(amount: string) {
 
 function ReviewerConsole() {
   const initialSession = useMemo(() => loadReviewerSession(), []);
-  const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl);
+  const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(
+    initialSession.apiBaseUrl
+  );
   const [draftReviewerToken, setDraftReviewerToken] = useState(
     initialSession.reviewerToken
   );
   const [session, setSession] = useState(initialSession);
   const [activeFilter, setActiveFilter] = useState<string>("all");
-  const [queueResponse, setQueueResponse] = useState<ReviewerQueueResponse | null>(null);
-  const [selectedClarificationId, setSelectedClarificationId] = useState<string | null>(
-    null
-  );
+  const [queueResponse, setQueueResponse] =
+    useState<ReviewerQueueResponse | null>(null);
+  const [selectedClarificationId, setSelectedClarificationId] = useState<
+    string | null
+  >(null);
   const [detailResponse, setDetailResponse] =
     useState<ReviewerClarificationDetailResponse | null>(null);
-  const [artifactPreview, setArtifactPreview] = useState<ReviewerArtifactRecord | null>(
+  const [artifactPreview, setArtifactPreview] =
+    useState<ReviewerArtifactRecord | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [detailErrorMessage, setDetailErrorMessage] = useState<string | null>(
     null
   );
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [detailErrorMessage, setDetailErrorMessage] = useState<string | null>(null);
-  const [artifactPreviewError, setArtifactPreviewError] = useState<string | null>(null);
+  const [artifactPreviewError, setArtifactPreviewError] = useState<
+    string | null
+  >(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
-  const [isArtifactPreviewLoading, setIsArtifactPreviewLoading] = useState(false);
+  const [isArtifactPreviewLoading, setIsArtifactPreviewLoading] =
+    useState(false);
 
   useEffect(() => {
     if (!session.apiBaseUrl || !session.reviewerToken) {
@@ -241,8 +255,8 @@ function ReviewerConsole() {
 
         const response = await fetch(endpoint, {
           headers: {
-            "x-reviewer-token": session.reviewerToken
-          }
+            "x-reviewer-token": session.reviewerToken,
+          },
         });
         const payload = await response.json();
 
@@ -280,7 +294,11 @@ function ReviewerConsole() {
   }, [activeFilter, session]);
 
   useEffect(() => {
-    if (!session.apiBaseUrl || !session.reviewerToken || !selectedClarificationId) {
+    if (
+      !session.apiBaseUrl ||
+      !session.reviewerToken ||
+      !selectedClarificationId
+    ) {
       setDetailResponse(null);
       setDetailErrorMessage(null);
       setIsDetailLoading(false);
@@ -301,8 +319,8 @@ function ReviewerConsole() {
         );
         const response = await fetch(endpoint, {
           headers: {
-            "x-reviewer-token": session.reviewerToken
-          }
+            "x-reviewer-token": session.reviewerToken,
+          },
         });
         const payload = await response.json();
 
@@ -366,8 +384,8 @@ function ReviewerConsole() {
         );
         const response = await fetch(endpoint, {
           headers: {
-            "x-reviewer-token": session.reviewerToken
-          }
+            "x-reviewer-token": session.reviewerToken,
+          },
         });
         const payload = await response.json();
 
@@ -409,7 +427,7 @@ function ReviewerConsole() {
 
     const nextSession = {
       apiBaseUrl: draftApiBaseUrl.trim().replace(/\/+$/, ""),
-      reviewerToken: draftReviewerToken.trim()
+      reviewerToken: draftReviewerToken.trim(),
     };
 
     saveReviewerSession(nextSession);
@@ -422,7 +440,7 @@ function ReviewerConsole() {
     setDraftReviewerToken("");
     setSession({
       apiBaseUrl: "",
-      reviewerToken: ""
+      reviewerToken: "",
     });
     setQueueResponse(null);
     setErrorMessage(null);
@@ -540,8 +558,12 @@ function ReviewerConsole() {
                 ) : null}
               </div>
 
-              <div className="flex flex-wrap gap-2">
+              <div
+                className="flex flex-wrap gap-2"
+                data-testid="reviewer-filter-list"
+              >
                 <button
+                  data-testid="filter-all"
                   className={`rounded-full border px-3 py-2 text-sm transition ${
                     activeFilter === "all"
                       ? "border-foreground bg-foreground text-background"
@@ -554,6 +576,7 @@ function ReviewerConsole() {
                 </button>
                 {filters.map((filter) => (
                   <button
+                    data-testid={`filter-${filter.key}`}
                     className={`rounded-full border px-3 py-2 text-sm transition ${
                       activeFilter === filter.key
                         ? "border-foreground bg-foreground text-background"
@@ -563,24 +586,33 @@ function ReviewerConsole() {
                     onClick={() => setActiveFilter(filter.key)}
                     type="button"
                   >
-                    {filter.label} <span className="opacity-70">({filter.count})</span>
+                    {filter.label}{" "}
+                    <span className="opacity-70">({filter.count})</span>
                   </button>
                 ))}
               </div>
             </div>
 
             {isLoading ? (
-              <div className="py-10 text-sm text-muted">Loading reviewer queue…</div>
+              <div className="py-10 text-sm text-muted">
+                Loading reviewer queue…
+              </div>
             ) : null}
 
             {!isLoading && errorMessage ? (
-              <div className="mt-4 rounded-2xl border border-border-low bg-bg1 p-4 text-sm text-muted">
+              <div
+                className="mt-4 rounded-2xl border border-border-low bg-bg1 p-4 text-sm text-muted"
+                data-testid="reviewer-queue-error"
+              >
                 {errorMessage}
               </div>
             ) : null}
 
             {!isLoading && !errorMessage && !session.apiBaseUrl ? (
-              <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1 p-6 text-sm leading-6 text-muted">
+              <div
+                className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1 p-6 text-sm leading-6 text-muted"
+                data-testid="reviewer-session-blocked"
+              >
                 Enter reviewer credentials to unlock the queue. Unauthorized
                 sessions stay out of reviewer-only data.
               </div>
@@ -591,7 +623,10 @@ function ReviewerConsole() {
             session.apiBaseUrl &&
             queueResponse &&
             queueResponse.queue.length === 0 ? (
-              <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1 p-6 text-sm leading-6 text-muted">
+              <div
+                className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1 p-6 text-sm leading-6 text-muted"
+                data-testid="reviewer-empty-state"
+              >
                 No markets match the <strong>{activeFilter}</strong> filter
                 right now.
               </div>
@@ -604,6 +639,7 @@ function ReviewerConsole() {
               <div className="mt-5 grid gap-4">
                 {queueResponse.queue.map((item) => (
                   <article
+                    data-testid={`queue-item-${item.eventId}`}
                     className={`rounded-[1.5rem] border bg-bg1 p-5 transition ${
                       selectedClarificationId === item.latestClarificationId &&
                       item.latestClarificationId
@@ -656,8 +692,8 @@ function ReviewerConsole() {
                             Funding
                           </dt>
                           <dd className="mt-1 text-lg font-semibold">
-                            {item.fundingProgress.raisedAmount}/{item.fundingProgress.targetAmount}{" "}
-                            USDC
+                            {item.fundingProgress.raisedAmount}/
+                            {item.fundingProgress.targetAmount} USDC
                           </dd>
                         </div>
                         <div className="rounded-xl border border-border-low bg-card p-3">
@@ -665,7 +701,10 @@ function ReviewerConsole() {
                             Review window
                           </dt>
                           <dd className="mt-1 text-lg font-semibold">
-                            {Math.round(item.reviewWindow.review_window_secs / 3600)}h
+                            {Math.round(
+                              item.reviewWindow.review_window_secs / 3600
+                            )}
+                            h
                           </dd>
                         </div>
                       </dl>
@@ -685,7 +724,9 @@ function ReviewerConsole() {
                           Activity signal
                         </p>
                         <p className="mt-2 text-foreground">
-                          {formatQueueStateLabel(item.reviewWindow.activity_signal)}
+                          {formatQueueStateLabel(
+                            item.reviewWindow.activity_signal
+                          )}
                         </p>
                       </div>
                       <div className="rounded-xl border border-border-low bg-card p-3">
@@ -693,8 +734,8 @@ function ReviewerConsole() {
                           Contributors
                         </p>
                         <p className="mt-2 text-foreground">
-                          {item.fundingProgress.contributorCount} reviewer-facing
-                          funding records
+                          {item.fundingProgress.contributorCount}{" "}
+                          reviewer-facing funding records
                         </p>
                       </div>
                     </div>
@@ -710,16 +751,21 @@ function ReviewerConsole() {
                           : "No clarification detail yet"}
                       </p>
                       <button
+                        data-testid={`open-detail-${item.eventId}`}
                         className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-medium transition ${
                           item.latestClarificationId
                             ? "border border-border-low bg-card hover:-translate-y-0.5"
                             : "cursor-not-allowed border border-border-low bg-card/60 text-muted"
                         }`}
                         disabled={!item.latestClarificationId}
-                        onClick={() => setSelectedClarificationId(item.latestClarificationId)}
+                        onClick={() =>
+                          setSelectedClarificationId(item.latestClarificationId)
+                        }
                         type="button"
                       >
-                        {item.latestClarificationId ? "Open reviewer detail" : "Awaiting paid request"}
+                        {item.latestClarificationId
+                          ? "Open reviewer detail"
+                          : "Awaiting paid request"}
                       </button>
                     </div>
                   </article>
@@ -745,27 +791,43 @@ function ReviewerConsole() {
               </div>
 
               {isDetailLoading ? (
-                <div className="py-10 text-sm text-muted">Loading clarification detail…</div>
+                <div className="py-10 text-sm text-muted">
+                  Loading clarification detail…
+                </div>
               ) : null}
 
               {!isDetailLoading && detailErrorMessage ? (
-                <div className="mt-4 rounded-2xl border border-border-low bg-card p-4 text-sm text-muted">
+                <div
+                  className="mt-4 rounded-2xl border border-border-low bg-card p-4 text-sm text-muted"
+                  data-testid="reviewer-detail-error"
+                >
                   {detailErrorMessage}
                 </div>
               ) : null}
 
-              {!isDetailLoading && !detailErrorMessage && !selectedClarificationId ? (
-                <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-card p-6 text-sm leading-6 text-muted">
-                  Pick a queue item with a paid clarification to inspect market text,
-                  interpretation output, funding history, artifact reference, and vote
-                  placeholders.
+              {!isDetailLoading &&
+              !detailErrorMessage &&
+              !selectedClarificationId ? (
+                <div
+                  className="mt-4 rounded-2xl border border-dashed border-border-low bg-card p-6 text-sm leading-6 text-muted"
+                  data-testid="reviewer-detail-empty"
+                >
+                  Pick a queue item with a paid clarification to inspect market
+                  text, interpretation output, funding history, artifact
+                  reference, and vote placeholders.
                 </div>
               ) : null}
 
               {!isDetailLoading && !detailErrorMessage && detail ? (
-                <div className="mt-5 grid gap-5">
+                <div
+                  className="mt-5 grid gap-5"
+                  data-testid="reviewer-detail-panel"
+                >
                   <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                    <article className="rounded-[1.5rem] border border-border-low bg-card p-5">
+                    <article
+                      className="rounded-[1.5rem] border border-border-low bg-card p-5"
+                      data-testid="reviewer-market-section"
+                    >
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="space-y-1">
                           <p className="text-xs uppercase tracking-[0.16em] text-muted">
@@ -780,7 +842,8 @@ function ReviewerConsole() {
                         </span>
                       </div>
                       <p className="mt-4 text-sm leading-7 text-muted">
-                        {detail.market.resolutionText ?? "No market text cached for this clarification."}
+                        {detail.market.resolutionText ??
+                          "No market text cached for this clarification."}
                       </p>
                       <div className="mt-5 grid gap-3 sm:grid-cols-2">
                         <div className="rounded-xl border border-border-low bg-bg1 p-3">
@@ -814,13 +877,17 @@ function ReviewerConsole() {
                       ) : null}
                     </article>
 
-                    <article className="rounded-[1.5rem] border border-border-low bg-card p-5">
+                    <article
+                      className="rounded-[1.5rem] border border-border-low bg-card p-5"
+                      data-testid="reviewer-review-window-section"
+                    >
                       <div className="space-y-1">
                         <p className="text-xs uppercase tracking-[0.16em] text-muted">
                           Review window
                         </p>
                         <h4 className="text-xl font-semibold tracking-tight">
-                          {Math.round(detail.review_window_secs / 3600)} hour response window
+                          {Math.round(detail.review_window_secs / 3600)} hour
+                          response window
                         </h4>
                       </div>
                       <dl className="mt-5 grid gap-3 text-sm">
@@ -856,7 +923,10 @@ function ReviewerConsole() {
                   </section>
 
                   <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                    <article className="rounded-[1.5rem] border border-border-low bg-card p-5">
+                    <article
+                      className="rounded-[1.5rem] border border-border-low bg-card p-5"
+                      data-testid="reviewer-llm-section"
+                    >
                       <div className="space-y-1">
                         <p className="text-xs uppercase tracking-[0.16em] text-muted">
                           LLM interpretation
@@ -910,19 +980,25 @@ function ReviewerConsole() {
                         </div>
                       ) : (
                         <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
-                          No completed LLM output is available on this clarification yet.
+                          No completed LLM output is available on this
+                          clarification yet.
                         </div>
                       )}
                     </article>
 
                     <div className="grid gap-4">
-                      <article className="rounded-[1.5rem] border border-border-low bg-card p-5">
+                      <article
+                        className="rounded-[1.5rem] border border-border-low bg-card p-5"
+                        data-testid="reviewer-artifact-section"
+                      >
                         <div className="space-y-1">
                           <p className="text-xs uppercase tracking-[0.16em] text-muted">
                             Artifact preview
                           </p>
                           <h4 className="text-xl font-semibold tracking-tight">
-                            {detail.artifact ? detail.artifact.cid : "No artifact published"}
+                            {detail.artifact
+                              ? detail.artifact.cid
+                              : "No artifact published"}
                           </h4>
                         </div>
                         {detail.artifact ? (
@@ -940,12 +1016,15 @@ function ReviewerConsole() {
                                 Loading authenticated artifact preview…
                               </div>
                             ) : null}
-                            {!isArtifactPreviewLoading && artifactPreviewError ? (
+                            {!isArtifactPreviewLoading &&
+                            artifactPreviewError ? (
                               <div className="rounded-xl border border-border-low bg-bg1 p-3 text-muted">
                                 {artifactPreviewError}
                               </div>
                             ) : null}
-                            {!isArtifactPreviewLoading && !artifactPreviewError && artifactPreview ? (
+                            {!isArtifactPreviewLoading &&
+                            !artifactPreviewError &&
+                            artifactPreview ? (
                               <div className="grid gap-3">
                                 <div className="rounded-xl border border-border-low bg-bg1 p-3">
                                   <p className="text-xs uppercase tracking-[0.12em] text-muted">
@@ -971,7 +1050,10 @@ function ReviewerConsole() {
                                     {artifactPreview.clarificationNote}
                                   </p>
                                   <p className="mt-3 text-xs text-muted">
-                                    Generated {formatTimestamp(artifactPreview.generatedAtUtc)}
+                                    Generated{" "}
+                                    {formatTimestamp(
+                                      artifactPreview.generatedAtUtc
+                                    )}
                                   </p>
                                 </div>
                               </div>
@@ -989,12 +1071,16 @@ function ReviewerConsole() {
                           </div>
                         ) : (
                           <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
-                            This clarification does not have an artifact reference yet.
+                            This clarification does not have an artifact
+                            reference yet.
                           </div>
                         )}
                       </article>
 
-                      <article className="rounded-[1.5rem] border border-border-low bg-card p-5">
+                      <article
+                        className="rounded-[1.5rem] border border-border-low bg-card p-5"
+                        data-testid="reviewer-vote-section"
+                      >
                         <div className="space-y-1">
                           <p className="text-xs uppercase tracking-[0.16em] text-muted">
                             Vote placeholder
@@ -1006,18 +1092,69 @@ function ReviewerConsole() {
                         <div className="mt-4 rounded-xl border border-border-low bg-bg1 p-4 text-sm leading-6 text-muted">
                           <p>{detail.vote.summary}</p>
                           <p className="mt-3 text-foreground">
-                            Placeholder fields active: {detail.vote.placeholder ? "yes" : "no"}
+                            Placeholder fields active:{" "}
+                            {detail.vote.placeholder ? "yes" : "no"}
                           </p>
                           <p className="mt-2 text-foreground">
-                            Last workflow update: {formatTimestamp(detail.vote.updatedAt)}
+                            Last workflow update:{" "}
+                            {formatTimestamp(detail.vote.updatedAt)}
                           </p>
                         </div>
+                      </article>
+                      <article
+                        className="rounded-[1.5rem] border border-border-low bg-card p-5"
+                        data-testid="reviewer-trace-section"
+                      >
+                        <div className="space-y-1">
+                          <p className="text-xs uppercase tracking-[0.16em] text-muted">
+                            LLM trace
+                          </p>
+                          <h4 className="text-xl font-semibold tracking-tight">
+                            {detail.llmTrace?.modelId ??
+                              "Trace metadata unavailable"}
+                          </h4>
+                        </div>
+                        {detail.llmTrace ? (
+                          <dl className="mt-4 grid gap-3 text-sm">
+                            <div className="rounded-xl border border-border-low bg-bg1 p-3">
+                              <dt className="text-xs uppercase tracking-[0.12em] text-muted">
+                                Prompt template
+                              </dt>
+                              <dd className="mt-2 text-foreground">
+                                {detail.llmTrace.promptTemplateVersion}
+                              </dd>
+                            </div>
+                            <div className="rounded-xl border border-border-low bg-bg1 p-3">
+                              <dt className="text-xs uppercase tracking-[0.12em] text-muted">
+                                Processing version
+                              </dt>
+                              <dd className="mt-2 text-foreground">
+                                {detail.llmTrace.processingVersion}
+                              </dd>
+                            </div>
+                            <div className="rounded-xl border border-border-low bg-bg1 p-3">
+                              <dt className="text-xs uppercase tracking-[0.12em] text-muted">
+                                Requested
+                              </dt>
+                              <dd className="mt-2 text-foreground">
+                                {formatTimestamp(detail.llmTrace.requestedAt)}
+                              </dd>
+                            </div>
+                          </dl>
+                        ) : (
+                          <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
+                            No trace metadata was stored for this clarification.
+                          </div>
+                        )}
                       </article>
                     </div>
                   </section>
 
                   <section className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
-                    <article className="rounded-[1.5rem] border border-border-low bg-card p-5">
+                    <article
+                      className="rounded-[1.5rem] border border-border-low bg-card p-5"
+                      data-testid="reviewer-funding-state-section"
+                    >
                       <div className="space-y-1">
                         <p className="text-xs uppercase tracking-[0.16em] text-muted">
                           Funding state
@@ -1041,7 +1178,8 @@ function ReviewerConsole() {
                             Contributors
                           </dt>
                           <dd className="mt-2 text-foreground">
-                            {detail.funding.contributorCount} recorded contributors
+                            {detail.funding.contributorCount} recorded
+                            contributors
                           </dd>
                         </div>
                         <div className="rounded-xl border border-border-low bg-bg1 p-3">
@@ -1055,7 +1193,10 @@ function ReviewerConsole() {
                       </dl>
                     </article>
 
-                    <article className="rounded-[1.5rem] border border-border-low bg-card p-5">
+                    <article
+                      className="rounded-[1.5rem] border border-border-low bg-card p-5"
+                      data-testid="reviewer-funding-history-section"
+                    >
                       <div className="space-y-1">
                         <p className="text-xs uppercase tracking-[0.16em] text-muted">
                           Funding history
@@ -1094,7 +1235,8 @@ function ReviewerConsole() {
                         </div>
                       ) : (
                         <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
-                          No funding entries have been recorded for this clarification yet.
+                          No funding entries have been recorded for this
+                          clarification yet.
                         </div>
                       )}
                     </article>

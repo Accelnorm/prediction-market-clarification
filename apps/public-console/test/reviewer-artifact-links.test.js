@@ -12,7 +12,9 @@ test("buildArtifactLinkHref converts ipfs artifact references to a browser-safe 
 
 test("buildArtifactLinkHref keeps https artifact references unchanged", () => {
   assert.equal(
-    buildArtifactLinkHref("https://artifacts.example.test/ipfs/bafydetailartifact001"),
+    buildArtifactLinkHref(
+      "https://artifacts.example.test/ipfs/bafydetailartifact001"
+    ),
     "https://artifacts.example.test/ipfs/bafydetailartifact001"
   );
 });
