@@ -26,20 +26,20 @@ No Gemini order-management endpoints are used here.
 ## Install
 
 ```bash
-cd apps/offchain-backend
+cd offchain-backend
 npm install
 ```
 
 ## Test
 
 ```bash
-cd apps/offchain-backend
+cd offchain-backend
 npm test
 ```
 
 ## Storage Modes
 
-- Local/dev mode: file-backed JSON under `apps/offchain-backend/data`
+- Local/dev mode: file-backed JSON under `offchain-backend/data`
 - Demo/production mode: Postgres via `DATABASE_URL`
 
 When `DATABASE_URL` is set, both `npm run start` and `npm run sync:markets` bootstrap the required Postgres schema automatically.
@@ -49,7 +49,7 @@ When `DATABASE_URL` is set, both `npm run start` and `npm run sync:markets` boot
 Local file-backed sync:
 
 ```bash
-cd apps/offchain-backend
+cd offchain-backend
 MARKET_CACHE_PATH="$PWD/data/market-cache.json" \
 UPCOMING_MARKET_CACHE_PATH="$PWD/data/upcoming-market-cache.json" \
 npm run sync:markets
@@ -58,7 +58,7 @@ npm run sync:markets
 Postgres-backed sync:
 
 ```bash
-cd apps/offchain-backend
+cd offchain-backend
 DATABASE_URL="postgres://<USER>:<PASS>@<HOST>:5432/<DB>" \
 npm run sync:markets
 ```
@@ -73,7 +73,7 @@ The sync job does two things:
 Local/dev start:
 
 ```bash
-cd apps/offchain-backend
+cd offchain-backend
 PORT=3000 \
 npm run start
 ```
@@ -81,7 +81,7 @@ npm run start
 Strict Phase 1 demo / production-style start:
 
 ```bash
-cd apps/offchain-backend
+cd offchain-backend
 DATABASE_URL="postgres://<USER>:<PASS>@<HOST>:5432/<DB>" \
 APP_ENV="production" \
 ENABLE_PHASE2_REVIEWER_ROUTES="0" \

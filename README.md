@@ -57,7 +57,7 @@ No Gemini order-management endpoints are used. This project is clarification-onl
 The backend test suite passes locally:
 
 ```bash
-cd apps/offchain-backend
+cd offchain-backend
 npm install
 npm test
 ```
@@ -78,7 +78,7 @@ Important limitation: Telegram coverage is still HTTP-level only. The code is te
 Sync market data:
 
 ```bash
-cd apps/offchain-backend
+cd offchain-backend
 MARKET_CACHE_PATH="$PWD/data/market-cache.json" \
 UPCOMING_MARKET_CACHE_PATH="$PWD/data/upcoming-market-cache.json" \
 npm run sync:markets
@@ -87,12 +87,12 @@ npm run sync:markets
 Start the API locally:
 
 ```bash
-cd apps/offchain-backend
+cd offchain-backend
 PORT=3000 \
 npm run start
 ```
 
-Without `DATABASE_URL`, the backend stores state in JSON files under `apps/offchain-backend/data`. With `DATABASE_URL`, the API and market sync CLIs bootstrap the Postgres schema automatically and use Postgres-backed repositories.
+Without `DATABASE_URL`, the backend stores state in file-backed JSON under `offchain-backend/data`. With `DATABASE_URL`, the API and market sync CLIs bootstrap the Postgres schema automatically and use Postgres-backed repositories.
 
 Useful environment variables:
 
@@ -160,7 +160,7 @@ curl http://127.0.0.1:3000/api/clarifications/<CLARIFICATION_ID>
 
 For a hackathon demo, the easiest deployment path is:
 
-1. One Node service running `apps/offchain-backend`
+1. One Node service running `offchain-backend`
 2. One Postgres database
 3. Phase 2 routes disabled: `ENABLE_PHASE2_REVIEWER_ROUTES=0`
 4. Telegram disabled unless you actively want it in the demo: `ENABLE_TELEGRAM_ROUTES=0`
