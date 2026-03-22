@@ -1,39 +1,166 @@
 # Oracle's Wake-Up Call
 
-Prediction-market ambiguity resolution workspace with an off-chain reviewer MVP and a public console.
+This repo currently centers on the off-chain backend for clarification intake, reviewer workflows, market sync, and Telegram-facing request ingestion.
 
-## Repo Layout
+## What Works Today
 
-- [apps/offchain-backend](/home/user/gemini-pm/apps/offchain-backend): Node service for market sync, paid clarification creation, reviewer APIs, artifact publishing, funding read models, and off-chain workflow state.
-- [apps/public-console](/home/user/gemini-pm/apps/public-console): Vite/React frontend with the `/reviewer` route and Playwright browser coverage.
-- [specs](/home/user/gemini-pm/specs): Product and roadmap documents. This is a nested Git repo with its own history and remote.
+- Gemini market sync into local file-backed caches
+- Paid clarification API flow with background-job persistence
+- Reviewer queue, scans, funding, audit, and finalization endpoints
+- Telegram webhook intake for `/clarify <market_id> <question>`
+- Telegram request lookup and status-payload generation
 
-## Specs
+## What Is Actually Tested
 
-Primary product documents live under [specs](/home/user/gemini-pm/specs):
-
-- [prd.md](/home/user/gemini-pm/specs/prd.md)
-- [prd-offchain.json](/home/user/gemini-pm/specs/prd-offchain.json)
-- [implementation-roadmap.md](/home/user/gemini-pm/specs/implementation-roadmap.md)
-- [solana-program-prd.md](/home/user/gemini-pm/specs/solana-program-prd.md)
-
-`prd-offchain.json` is the checklist used to track reviewer-first MVP completion.
-
-## Validation
-
-Backend:
+The backend test suite passes locally:
 
 ```bash
 cd apps/offchain-backend
+npm install
 npm test
 ```
 
-Frontend:
+Current automated coverage includes:
+
+- Gemini market sync normalization
+- Paid clarification creation and deduplication
+- Reviewer queue, scan, funding, audit, and finalization routes
+- Telegram webhook parsing, persistence, lookup, and status update payloads
+
+Important limitation: the Telegram coverage is HTTP-level only. The code is tested for receiving Telegram-style webhook payloads and producing status messages, but it is not yet tested end-to-end against the live Telegram Bot API.
+
+## Run The API Locally
+
+Start by syncing market data:
 
 ```bash
-cd apps/public-console
-npm run ci
-npm run test:e2e
+cd apps/offchain-backend
+MARKET_CACHE_PATH="$PWD/data/market-cache.json" \
+UPCOMING_MARKET_CACHE_PATH="$PWD/data/upcoming-market-cache.json" \
+npm run sync:markets
 ```
 
-The reviewer UI is verified in-browser with Playwright coverage and MCP browser checks against `/reviewer`.
+Then start the API:
+
+```bash
+cd apps/offchain-backend
+REVIEWER_AUTH_TOKEN="reviewer-secret" \
+PORT=3000 \
+npm run start
+```
+
+Useful environment variables:
+
+- `PORT` and `HOST` control the HTTP listener
+- `REVIEWER_AUTH_TOKEN` protects reviewer-only routes
+- `TELEGRAM_WEBHOOK_SECRET` validates Telegram webhook requests
+- `TELEGRAM_BOT_TOKEN` enables live outbound Telegram delivery
+- `TELEGRAM_BOT_API_BASE_URL` overrides the Telegram API base URL when needed
+- `MARKET_CACHE_PATH`, `UPCOMING_MARKET_CACHE_PATH`
+- `CLARIFICATION_REQUESTS_PATH`, `BACKGROUND_JOBS_PATH`
+- `ARTIFACTS_PATH`, `REVIEWER_SCANS_PATH`, `UPCOMING_REVIEWER_SCANS_PATH`
+
+By default the backend stores state in JSON files under `apps/offchain-backend/data`.
+
+## Test The API Manually
+
+1. Sync markets and start the API.
+2. Create a paid clarification:
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
+  -H 'content-type: application/json' \
+  -d '{
+    "requesterId": "wallet_123",
+    "question": "Should auction prints count?",
+    "payment": {
+      "proof": "pay_proof_001",
+      "amount": "1.00",
+      "asset": "USDC",
+      "reference": "x402_ref_001",
+      "verified": true
+    }
+  }'
+```
+
+3. Read reviewer data:
+
+```bash
+curl http://127.0.0.1:3000/api/reviewer/queue \
+  -H 'x-reviewer-token: reviewer-secret'
+```
+
+## Deploy The API
+
+The backend is now runnable as a plain Node process:
+
+```bash
+cd apps/offchain-backend
+npm install
+MARKET_CACHE_PATH="$PWD/data/market-cache.json" \
+UPCOMING_MARKET_CACHE_PATH="$PWD/data/upcoming-market-cache.json" \
+REVIEWER_AUTH_TOKEN="replace-me" \
+TELEGRAM_WEBHOOK_SECRET="replace-me" \
+TELEGRAM_BOT_TOKEN="replace-me" \
+PORT=3000 \
+npm run start
+```
+
+For deployment behind a public URL:
+
+1. Provision a host that can run Node 20+ and keep local JSON files on persistent disk.
+2. Run `npm install`.
+3. Run `npm run sync:markets` on deploy, then on a schedule.
+4. Start `npm run start` under a process manager or container runtime.
+5. Put the service behind HTTPS.
+6. Keep `REVIEWER_AUTH_TOKEN` out of source control.
+
+## Deploy And Test Telegram
+
+The current integration point is the webhook receiver at `POST /api/telegram/webhook`.
+
+1. Create a bot with BotFather and get the bot token.
+2. Deploy the API to a public HTTPS URL.
+3. Register the webhook:
+
+```bash
+curl -X POST "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook" \
+  -H 'content-type: application/json' \
+  -d '{
+    "url": "https://<YOUR_DOMAIN>/api/telegram/webhook",
+    "secret_token": "<TELEGRAM_WEBHOOK_SECRET>"
+  }'
+```
+
+4. In Telegram, send your bot a message in this format:
+
+```text
+/clarify gm_btc_above_100k Should auction prints count?
+```
+
+5. Confirm the request was stored:
+
+```bash
+curl "https://<YOUR_DOMAIN>/api/telegram/requests?chat_id=<CHAT_ID>&user_id=<USER_ID>"
+```
+
+6. Simulate downstream status updates:
+
+```bash
+curl -X POST "https://<YOUR_DOMAIN>/api/telegram/requests/<REQUEST_ID>/status" \
+  -H 'content-type: application/json' \
+  -d '{
+    "status": "completed",
+    "clarificationId": "clar_001",
+    "summary": "Gemini auction and spot prints both count toward resolution."
+  }'
+```
+
+Current expectation: if `TELEGRAM_WEBHOOK_SECRET` matches the value registered with Telegram and `TELEGRAM_BOT_TOKEN` is configured on the API, inbound webhook intake and outbound status delivery should both work.
+
+## In Progress / Missing Pieces
+
+- The default clarification pipeline is a deterministic stub, not a real LLM integration.
+- Persistence is file-backed JSON, not a production database.
+- There is no deployment packaging yet for Docker, systemd, or managed platforms.
+- Reviewer auth is a single shared token and still needs hardening.
