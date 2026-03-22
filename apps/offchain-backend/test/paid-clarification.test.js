@@ -1281,6 +1281,143 @@ test("GET /api/reviewer/clarifications/:clarificationId returns reviewer detail 
   }
 });
 
+test("POST /api/reviewer/clarifications/:clarificationId/awaiting-panel-vote stores placeholder vote workflow status without chain integration", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-vote-placeholder-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  const reviewerScanRepository = await createReviewerScanRepository(tempDir);
+
+  await clarificationRequestRepository.create({
+    clarificationId: "clar_vote_placeholder_001",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_btc_above_100k",
+    question: "Should the reviewer panel vote before final text is locked?",
+    requesterId: "wallet_vote_placeholder_001",
+    paymentAmount: "1.00",
+    paymentAsset: "USDC",
+    paymentReference: "x402_ref_vote_placeholder_001",
+    paymentProof: "pay_proof_vote_placeholder_001",
+    paymentVerifiedAt: "2026-03-21T20:50:00.000Z",
+    llmOutput: {
+      verdict: "needs_clarification",
+      llm_status: "completed",
+      reasoning: "The market text needs a decision on whether auction prints qualify.",
+      cited_clause: VALID_MARKET.resolution,
+      ambiguity_score: 0.76,
+      ambiguity_summary: "Auction-print handling is ambiguous.",
+      suggested_market_text:
+        "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC?",
+      suggested_note:
+        "Use Gemini's primary BTC/USD spot exchange feed and exclude auction-only prints."
+    },
+    createdAt: "2026-03-21T20:50:00.000Z",
+    updatedAt: "2026-03-21T20:55:00.000Z"
+  });
+
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
+    marketCacheRepository,
+    reviewerScanRepository,
+    now: () => new Date("2026-03-21T21:00:00.000Z"),
+    reviewerAuthToken: "reviewer-secret"
+  });
+
+  try {
+    const transitionResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_vote_placeholder_001/awaiting-panel-vote`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...createReviewerHeaders()
+        },
+        body: JSON.stringify({
+          reviewerId: "reviewer.casey"
+        })
+      }
+    );
+
+    assert.equal(transitionResponse.status, 200);
+    assert.deepEqual(await transitionResponse.json(), {
+      ok: true,
+      clarification: {
+        clarificationId: "clar_vote_placeholder_001",
+        reviewerWorkflowStatus: "awaiting_panel_vote",
+        vote: {
+          status: "awaiting_panel_vote",
+          label: "Awaiting Panel Vote",
+          placeholder: true,
+          summary: "Off-chain placeholder until panel voting is implemented.",
+          updatedAt: "2026-03-21T21:00:00.000Z"
+        }
+      }
+    });
+
+    const storedClarification =
+      await clarificationRequestRepository.findByClarificationId("clar_vote_placeholder_001");
+    assert.equal(storedClarification.reviewerWorkflowStatus, "awaiting_panel_vote");
+    assert.deepEqual(storedClarification.reviewerActions, [
+      {
+        type: "marked_awaiting_panel_vote",
+        actor: "reviewer.casey",
+        timestamp: "2026-03-21T21:00:00.000Z",
+        previousReviewerWorkflowStatus: "not_started"
+      }
+    ]);
+
+    const detailResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_vote_placeholder_001`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+    assert.equal(detailResponse.status, 200);
+    assert.equal(
+      (await detailResponse.json()).clarification.vote.status,
+      "awaiting_panel_vote"
+    );
+
+    const queueResponse = await fetch(
+      `${baseUrl}/api/reviewer/queue?filter=awaiting_panel_vote`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+    assert.equal(queueResponse.status, 200);
+    assert.deepEqual((await queueResponse.json()).queue, [
+      {
+        eventId: "gm_btc_above_100k",
+        latestClarificationId: "clar_vote_placeholder_001",
+        marketTitle: VALID_MARKET.title,
+        endTime: VALID_MARKET.closesAt,
+        ambiguityScore: null,
+        fundingProgress: {
+          raisedAmount: "1.00",
+          targetAmount: "1.00",
+          contributorCount: 1,
+          fundingState: "funded"
+        },
+        reviewWindow: {
+          review_window_secs: 86400,
+          review_window_reason:
+            "Base window set from gt_72h time-to-end bucket. Final window 86400 seconds within 3600-86400 second policy bounds.",
+          time_to_end_bucket: "gt_72h",
+          activity_signal: "normal",
+          ambiguity_score: 0
+        },
+        voteStatus: "awaiting_panel_vote",
+        queueStates: ["needs_scan", "funded", "awaiting_panel_vote"]
+      }
+    ]);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
 test("POST /api/reviewer/clarifications/:clarificationId/finalize stores off-chain finalization data and exposes finalized reviewer detail", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-finalization-"));
   const clarificationRequestRepository = new FileClarificationRequestRepository(

@@ -256,6 +256,21 @@ function parseReviewerFinalizationPayload(payload) {
   };
 }
 
+function parseReviewerWorkflowPayload(payload) {
+  const reviewerId = String(payload?.reviewerId ?? "system").trim();
+
+  if (!reviewerId) {
+    const error = new Error("Reviewer identity is required.");
+    error.statusCode = 400;
+    error.code = "INVALID_REVIEWER_ID";
+    throw error;
+  }
+
+  return {
+    reviewerId
+  };
+}
+
 async function readJsonBody(request) {
   const chunks = [];
 
@@ -742,6 +757,111 @@ export function createServer({
           clarification: buildPublicClarificationPayload(clarification)
         });
       } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      /^\/api\/reviewer\/clarifications\/[^/]+\/awaiting-panel-vote$/.test(
+        requestUrl.pathname
+      )
+    ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const clarificationId = decodeURIComponent(
+          requestUrl.pathname.replace(
+            /^\/api\/reviewer\/clarifications\/([^/]+)\/awaiting-panel-vote$/,
+            "$1"
+          )
+        );
+        const clarification =
+          await clarificationRequestRepository.findByClarificationId(clarificationId);
+
+        if (!clarification) {
+          sendJson(response, 404, {
+            ok: false,
+            error: {
+              code: "CLARIFICATION_NOT_FOUND",
+              message: "Clarification not found."
+            }
+          });
+          return;
+        }
+
+        if (clarification.status !== "completed") {
+          sendJson(response, 409, {
+            ok: false,
+            error: {
+              code: "CLARIFICATION_NOT_READY",
+              message: "Only completed clarifications can move to awaiting panel vote."
+            }
+          });
+          return;
+        }
+
+        const payload = parseReviewerWorkflowPayload(await readJsonBody(request));
+        const updatedAt = now().toISOString();
+        const reviewerActions = [
+          ...(Array.isArray(clarification.reviewerActions) ? clarification.reviewerActions : []),
+          {
+            type: "marked_awaiting_panel_vote",
+            actor: payload.reviewerId,
+            timestamp: updatedAt,
+            previousReviewerWorkflowStatus:
+              clarification.reviewerWorkflowStatus ?? "not_started"
+          }
+        ];
+        const updatedClarification =
+          await clarificationRequestRepository.updateByClarificationId(clarificationId, {
+            reviewerWorkflowStatus: "awaiting_panel_vote",
+            reviewerActions,
+            updatedAt
+          });
+
+        sendJson(response, 200, {
+          ok: true,
+          clarification: {
+            clarificationId: updatedClarification.clarificationId,
+            reviewerWorkflowStatus: updatedClarification.reviewerWorkflowStatus,
+            vote: buildReviewerVotePayload(updatedClarification)
+          }
+        });
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          sendJson(response, 400, {
+            ok: false,
+            error: {
+              code: "INVALID_JSON",
+              message: "Request body must be valid JSON."
+            }
+          });
+          return;
+        }
+
+        if (error.statusCode) {
+          sendJson(response, error.statusCode, {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message
+            }
+          });
+          return;
+        }
+
         sendJson(response, 500, {
           ok: false,
           error: {
