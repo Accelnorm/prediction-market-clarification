@@ -6,6 +6,7 @@ import {
   buildTelegramDeliveryPayload,
   parseTelegramStatusUpdate
 } from "./telegram-status-delivery.js";
+import { buildAdaptiveReviewWindow } from "./review-window-policy.js";
 import { parsePaidClarificationRequest } from "./x402-paid-clarification.js";
 
 function sendJson(response, statusCode, payload) {
@@ -240,6 +241,15 @@ export function createServer({
           return;
         }
 
+        const market = clarification.eventId
+          ? await marketCacheRepository?.findByMarketId(clarification.eventId)
+          : null;
+        const adaptiveReviewWindow = buildAdaptiveReviewWindow({
+          clarification,
+          market,
+          now: now()
+        });
+
         const clarificationPayload = {
           clarificationId: clarification.clarificationId,
           status: clarification.status,
@@ -248,7 +258,8 @@ export function createServer({
           llmOutput: clarification.llmOutput ?? null,
           llmTrace: clarification.llmTrace ?? null,
           createdAt: clarification.createdAt,
-          updatedAt: clarification.updatedAt ?? clarification.createdAt
+          updatedAt: clarification.updatedAt ?? clarification.createdAt,
+          ...adaptiveReviewWindow
         };
 
         if (clarification.artifactCid && clarification.artifactUrl) {

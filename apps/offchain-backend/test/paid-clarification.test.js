@@ -677,7 +677,13 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
           processingVersion: "offchain-pipeline-2026-03-21"
         },
         createdAt: "2026-03-21T19:27:00.000Z",
-        updatedAt: "2026-03-21T19:27:03.000Z"
+        updatedAt: "2026-03-21T19:27:03.000Z",
+        review_window_secs: 86400,
+        review_window_reason:
+          "Base window set from gt_72h time-to-end bucket. Final window 86400 seconds within 3600-86400 second policy bounds.",
+        time_to_end_bucket: "gt_72h",
+        activity_signal: "normal",
+        ambiguity_score: 0.72
       }
     });
 
@@ -751,6 +757,149 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
     } else {
       await stopTestServer(firstServerState.server);
     }
+  }
+});
+
+test("clarification detail responses include adaptive review windows bounded between one and twenty-four hours", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir, [
+    {
+      ...VALID_MARKET,
+      marketId: "gm_review_long",
+      closesAt: "2026-03-26T12:00:00.000Z",
+      activitySignal: "low"
+    },
+    {
+      ...VALID_MARKET,
+      marketId: "gm_review_active",
+      closesAt: "2026-03-23T04:00:00.000Z",
+      activitySignal: "high"
+    },
+    {
+      ...VALID_MARKET,
+      marketId: "gm_review_ambiguous",
+      closesAt: "2026-03-21T22:00:00.000Z",
+      activitySignal: "normal"
+    },
+    {
+      ...VALID_MARKET,
+      marketId: "gm_review_urgent",
+      closesAt: "2026-03-21T17:00:00.000Z",
+      activitySignal: "high"
+    }
+  ]);
+
+  await repository.create({
+    clarificationId: "clar_review_long",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_review_long",
+    question: "Long dated review window?",
+    llmOutput: {
+      ambiguity_score: 0.4
+    },
+    createdAt: "2026-03-21T12:00:00.000Z",
+    updatedAt: "2026-03-21T12:00:00.000Z"
+  });
+  await repository.create({
+    clarificationId: "clar_review_active",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_review_active",
+    question: "High activity review window?",
+    llmOutput: {
+      ambiguity_score: 0.52
+    },
+    createdAt: "2026-03-21T12:00:00.000Z",
+    updatedAt: "2026-03-21T12:00:00.000Z"
+  });
+  await repository.create({
+    clarificationId: "clar_review_ambiguous",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_review_ambiguous",
+    question: "Near expiry ambiguity review window?",
+    llmOutput: {
+      ambiguity_score: 0.91
+    },
+    createdAt: "2026-03-21T12:00:00.000Z",
+    updatedAt: "2026-03-21T12:00:00.000Z"
+  });
+  await repository.create({
+    clarificationId: "clar_review_urgent",
+    requestId: null,
+    source: "paid_api",
+    status: "completed",
+    eventId: "gm_review_urgent",
+    question: "Urgent review window?",
+    llmOutput: {
+      ambiguity_score: 0.97
+    },
+    createdAt: "2026-03-21T12:00:00.000Z",
+    updatedAt: "2026-03-21T12:00:00.000Z"
+  });
+
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T12:00:00.000Z"),
+    createClarificationId: () => "unused"
+  });
+
+  try {
+    const longResponse = await fetch(`${baseUrl}/api/clarifications/clar_review_long`);
+    assert.equal(longResponse.status, 200);
+    const longPayload = await longResponse.json();
+    assert.equal(longPayload.clarification.review_window_secs, 86400);
+    assert.equal(longPayload.clarification.time_to_end_bucket, "gt_72h");
+    assert.equal(longPayload.clarification.activity_signal, "low");
+    assert.equal(longPayload.clarification.ambiguity_score, 0.4);
+
+    const activeResponse = await fetch(`${baseUrl}/api/clarifications/clar_review_active`);
+    assert.equal(activeResponse.status, 200);
+    const activePayload = await activeResponse.json();
+    assert.equal(activePayload.clarification.review_window_secs, 28800);
+    assert.equal(activePayload.clarification.time_to_end_bucket, "between_24h_and_72h");
+    assert.equal(activePayload.clarification.activity_signal, "high");
+    assert.equal(activePayload.clarification.ambiguity_score, 0.52);
+
+    const ambiguousResponse = await fetch(
+      `${baseUrl}/api/clarifications/clar_review_ambiguous`
+    );
+    assert.equal(ambiguousResponse.status, 200);
+    const ambiguousPayload = await ambiguousResponse.json();
+    assert.equal(ambiguousPayload.clarification.review_window_secs, 14400);
+    assert.equal(ambiguousPayload.clarification.time_to_end_bucket, "between_6h_and_24h");
+    assert.equal(ambiguousPayload.clarification.activity_signal, "normal");
+    assert.equal(ambiguousPayload.clarification.ambiguity_score, 0.91);
+
+    const urgentResponse = await fetch(`${baseUrl}/api/clarifications/clar_review_urgent`);
+    assert.equal(urgentResponse.status, 200);
+    const urgentPayload = await urgentResponse.json();
+    assert.equal(urgentPayload.clarification.review_window_secs, 3600);
+    assert.equal(urgentPayload.clarification.time_to_end_bucket, "lt_6h");
+    assert.equal(urgentPayload.clarification.activity_signal, "high");
+    assert.equal(urgentPayload.clarification.ambiguity_score, 0.97);
+
+    for (const payload of [
+      longPayload.clarification,
+      activePayload.clarification,
+      ambiguousPayload.clarification,
+      urgentPayload.clarification
+    ]) {
+      assert.equal(typeof payload.review_window_reason, "string");
+      assert.ok(payload.review_window_reason.length > 0);
+      assert.ok(payload.review_window_secs >= 3600);
+      assert.ok(payload.review_window_secs <= 86400);
+    }
+  } finally {
+    await stopTestServer(server);
   }
 });
 
