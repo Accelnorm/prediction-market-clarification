@@ -29,6 +29,11 @@ export class FileMarketCacheRepository {
     await writeFile(this.filePath, JSON.stringify({ markets }, null, 2) + "\n", "utf8");
   }
 
+  async list() {
+    const cache = await this.load();
+    return cache.markets;
+  }
+
   async findByMarketId(marketId) {
     const cache = await this.load();
     return cache.markets.find((market) => market.marketId === marketId) ?? null;

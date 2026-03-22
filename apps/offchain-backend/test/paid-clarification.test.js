@@ -8,6 +8,7 @@ import { createServer } from "../src/server.js";
 import { FileArtifactRepository } from "../src/artifact-repository.js";
 import { FileClarificationRequestRepository } from "../src/clarification-request-repository.js";
 import { FileMarketCacheRepository } from "../src/market-cache-repository.js";
+import { FileReviewerScanRepository } from "../src/reviewer-scan-repository.js";
 
 const VALID_MARKET = {
   marketId: "gm_btc_above_100k",
@@ -56,6 +57,12 @@ function createReviewerHeaders(token = "reviewer-secret") {
 async function createMarketCacheRepository(tempDir, markets = [VALID_MARKET]) {
   const repository = new FileMarketCacheRepository(path.join(tempDir, "market-cache.json"));
   await repository.save(markets);
+  return repository;
+}
+
+async function createReviewerScanRepository(tempDir) {
+  const repository = new FileReviewerScanRepository(path.join(tempDir, "reviewer-scans.json"));
+  await repository.save([]);
   return repository;
 }
 
@@ -1160,6 +1167,174 @@ test("POST /api/clarify/:eventId marks automatic interpretation failures as retr
         timestamp: "2026-03-21T19:30:00.000Z"
       }
     ]);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs for active markets", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "reviewer-queue-scan-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const reviewerScanRepository = await createReviewerScanRepository(tempDir);
+  const marketCacheRepository = await createMarketCacheRepository(tempDir, [
+    VALID_MARKET,
+    {
+      marketId: "gm_eth_above_5000",
+      title: "Will ETH trade above $5,000 before year end?",
+      resolution:
+        "Resolves YES if Gemini ETH/USD prints above $5,000 before December 31 2026 23:59 UTC.",
+      closesAt: "2026-03-21T23:00:00.000Z",
+      slug: "eth-above-5000-2026",
+      url: "https://example.com/markets/eth-above-5000-2026",
+      lastSyncedAt: "2026-03-21T18:59:00.000Z",
+      activitySignal: "high"
+    }
+  ]);
+  let nowCallCount = 0;
+  const timeline = [
+    "2026-03-21T19:40:00.000Z",
+    "2026-03-21T19:45:00.000Z",
+    "2026-03-21T19:50:00.000Z"
+  ];
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
+    reviewerScanRepository,
+    marketCacheRepository,
+    now: () => new Date(timeline[Math.min(nowCallCount++, timeline.length - 1)]),
+    reviewerAuthToken: "reviewer-secret"
+  });
+
+  try {
+    const singleScanResponse = await fetch(
+      `${baseUrl}/api/reviewer/scan/gm_btc_above_100k`,
+      {
+        method: "POST",
+        headers: createReviewerHeaders()
+      }
+    );
+
+    assert.equal(singleScanResponse.status, 202);
+    assert.deepEqual(await singleScanResponse.json(), {
+      ok: true,
+      scan: {
+        scanId: "scan_gm_btc_above_100k_2026-03-21T19:40:00.000Z",
+        eventId: "gm_btc_above_100k",
+        createdAt: "2026-03-21T19:40:00.000Z",
+        ambiguity_score: 0.72,
+        recommendation: "review",
+        flagged_clauses: [VALID_MARKET.resolution],
+        suggested_market_text:
+          "Will Gemini BTC/USD spot trade above $100,000 on the primary Gemini exchange feed before December 31 2026 23:59 UTC?",
+        suggested_note:
+          "Use Gemini's primary BTC/USD spot exchange feed and count the first eligible trade print above $100,000 before expiry.",
+        review_window: {
+          review_window_secs: 86400,
+          review_window_reason:
+            "Base window set from gt_72h time-to-end bucket. Final window 86400 seconds within 3600-86400 second policy bounds.",
+          time_to_end_bucket: "gt_72h",
+          activity_signal: "normal",
+          ambiguity_score: 0.72
+        }
+      }
+    });
+
+    const queueResponse = await fetch(`${baseUrl}/api/reviewer/queue`, {
+      headers: createReviewerHeaders()
+    });
+
+    assert.equal(queueResponse.status, 200);
+    assert.deepEqual(await queueResponse.json(), {
+      ok: true,
+      queue: [
+        {
+          eventId: "gm_btc_above_100k",
+          marketTitle: VALID_MARKET.title,
+          endTime: VALID_MARKET.closesAt,
+          ambiguityScore: 0.72,
+          fundingProgress: {
+            raisedAmount: "0.00",
+            targetAmount: "1.00",
+            contributorCount: 0,
+            fundingState: "unfunded"
+          },
+          reviewWindow: {
+            review_window_secs: 86400,
+            review_window_reason:
+              "Base window set from gt_72h time-to-end bucket. Final window 86400 seconds within 3600-86400 second policy bounds.",
+            time_to_end_bucket: "gt_72h",
+            activity_signal: "normal",
+            ambiguity_score: 0.72
+          },
+          voteStatus: "not_started"
+        },
+        {
+          eventId: "gm_eth_above_5000",
+          marketTitle: "Will ETH trade above $5,000 before year end?",
+          endTime: "2026-03-21T23:00:00.000Z",
+          ambiguityScore: null,
+          fundingProgress: {
+            raisedAmount: "0.00",
+            targetAmount: "1.00",
+            contributorCount: 0,
+            fundingState: "unfunded"
+          },
+          reviewWindow: {
+            review_window_secs: 3600,
+            review_window_reason:
+              "Base window set from lt_6h time-to-end bucket. High activity reduced the review window by one policy step. Final window 3600 seconds within 3600-86400 second policy bounds.",
+            time_to_end_bucket: "lt_6h",
+            activity_signal: "high",
+            ambiguity_score: 0
+          },
+          voteStatus: "not_started"
+        }
+      ]
+    });
+
+    const scanAllResponse = await fetch(`${baseUrl}/api/reviewer/scan-all`, {
+      method: "POST",
+      headers: createReviewerHeaders()
+    });
+
+    assert.equal(scanAllResponse.status, 202);
+    const scanAllPayload = await scanAllResponse.json();
+    assert.equal(scanAllPayload.ok, true);
+    assert.equal(scanAllPayload.scans.length, 2);
+    assert.equal(scanAllPayload.scans[0].eventId, "gm_btc_above_100k");
+    assert.equal(scanAllPayload.scans[1].eventId, "gm_eth_above_5000");
+
+    const storedScans = await reviewerScanRepository.list();
+    assert.equal(storedScans.length, 3);
+    assert.deepEqual(
+      storedScans.map((scan) => ({
+        eventId: scan.eventId,
+        recommendation: scan.recommendation,
+        hasSuggestedNote: typeof scan.suggested_note === "string",
+        hasReviewWindow: typeof scan.review_window?.review_window_secs === "number"
+      })),
+      [
+        {
+          eventId: "gm_btc_above_100k",
+          recommendation: "review",
+          hasSuggestedNote: true,
+          hasReviewWindow: true
+        },
+        {
+          eventId: "gm_btc_above_100k",
+          recommendation: "review",
+          hasSuggestedNote: true,
+          hasReviewWindow: true
+        },
+        {
+          eventId: "gm_eth_above_5000",
+          recommendation: "review",
+          hasSuggestedNote: true,
+          hasReviewWindow: true
+        }
+      ]
+    );
   } finally {
     await stopTestServer(server);
   }

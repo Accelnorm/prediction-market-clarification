@@ -1,4 +1,4 @@
-function buildDefaultInterpretation({ market }) {
+export function buildDefaultInterpretation({ market }) {
   return {
     verdict: "needs_clarification",
     llm_status: "completed",

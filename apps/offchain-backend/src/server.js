@@ -7,6 +7,7 @@ import {
   parseTelegramStatusUpdate
 } from "./telegram-status-delivery.js";
 import { buildAdaptiveReviewWindow } from "./review-window-policy.js";
+import { createReviewerMarketScan } from "./reviewer-scan-service.js";
 import { parsePaidClarificationRequest } from "./x402-paid-clarification.js";
 
 function sendJson(response, statusCode, payload) {
@@ -66,6 +67,15 @@ function buildReviewerClarificationPayload({
   return clarificationPayload;
 }
 
+function buildFundingProgress() {
+  return {
+    raisedAmount: "0.00",
+    targetAmount: "1.00",
+    contributorCount: 0,
+    fundingState: "unfunded"
+  };
+}
+
 async function readJsonBody(request) {
   const chunks = [];
 
@@ -85,6 +95,7 @@ async function readJsonBody(request) {
 export function createServer({
   clarificationRequestRepository,
   artifactRepository,
+  reviewerScanRepository,
   marketCacheRepository,
   now,
   createRequestId,
@@ -258,6 +269,145 @@ export function createServer({
           return;
         }
 
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === "/api/reviewer/queue") {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const markets = (await marketCacheRepository?.list?.()) ?? [];
+        const queue = [];
+
+        for (const market of markets) {
+          const latestScan =
+            (await reviewerScanRepository?.findLatestByEventId?.(market.marketId)) ?? null;
+          const reviewWindow =
+            latestScan?.review_window ??
+            buildAdaptiveReviewWindow({
+              clarification: {
+                llmOutput: {
+                  ambiguity_score: 0
+                }
+              },
+              market,
+              now: now()
+            });
+
+          queue.push({
+            eventId: market.marketId,
+            marketTitle: market.title,
+            endTime: market.closesAt,
+            ambiguityScore: latestScan?.ambiguity_score ?? null,
+            fundingProgress: buildFundingProgress(),
+            reviewWindow,
+            voteStatus: "not_started"
+          });
+        }
+
+        sendJson(response, 200, {
+          ok: true,
+          queue
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      /^\/api\/reviewer\/scan\/[^/]+$/.test(requestUrl.pathname)
+    ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const eventId = decodeURIComponent(
+          requestUrl.pathname.replace(/^\/api\/reviewer\/scan\/([^/]+)$/, "$1")
+        );
+        const scan = await createReviewerMarketScan({
+          eventId,
+          marketCacheRepository,
+          reviewerScanRepository,
+          now
+        });
+
+        sendJson(response, 202, {
+          ok: true,
+          scan
+        });
+      } catch (error) {
+        if (error.statusCode) {
+          sendJson(response, error.statusCode, {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message
+            }
+          });
+          return;
+        }
+
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (request.method === "POST" && requestUrl.pathname === "/api/reviewer/scan-all") {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const markets = (await marketCacheRepository?.list?.()) ?? [];
+        const scans = [];
+
+        for (const market of markets) {
+          scans.push(
+            await createReviewerMarketScan({
+              eventId: market.marketId,
+              marketCacheRepository,
+              reviewerScanRepository,
+              now
+            })
+          );
+        }
+
+        sendJson(response, 202, {
+          ok: true,
+          scans
+        });
+      } catch (error) {
         sendJson(response, 500, {
           ok: false,
           error: {
