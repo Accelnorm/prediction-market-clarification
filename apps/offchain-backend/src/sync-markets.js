@@ -1,74 +1,25 @@
-function isActiveMarket(market) {
-  if (typeof market?.status === "string") {
-    return market.status.toLowerCase() === "active";
-  }
+import {
+  normalizeGeminiMarket,
+  sameNormalizedMarketShape
+} from "./gemini-market-normalizer.js";
 
-  if (typeof market?.active === "boolean") {
-    return market.active;
+function isMarketWithStatus(market, status) {
+  if (typeof market?.status === "string") {
+    return market.status.toLowerCase() === status;
   }
 
   return false;
 }
 
-function extractRichTextText(value) {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  if (!value || typeof value !== "object") {
-    return "";
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(extractRichTextText).filter(Boolean).join(" ").trim();
-  }
-
-  if (typeof value.value === "string") {
-    return value.value;
-  }
-
-  if (Array.isArray(value.content)) {
-    return value.content.map(extractRichTextText).filter(Boolean).join(" ").trim();
-  }
-
-  return "";
-}
-
-function normalizeMarket(market, lastSyncedAt) {
-  const resolutionText = String(
-    market.resolution ?? market.resolutionText ?? extractRichTextText(market.description)
-  );
-  const endTime = String(market.closesAt ?? market.endTime ?? market.expiryDate ?? "");
-
-  return {
-    marketId: String(market.id),
-    title: String(market.title ?? ""),
-    resolution: resolutionText,
-    resolutionText,
-    closesAt: endTime,
-    endTime,
-    slug: market.slug ? String(market.slug) : null,
-    url: market.url ? String(market.url) : null,
-    lastSyncedAt
-  };
-}
-
-function sameMarketShape(left, right) {
-  return (
-    left.marketId === right.marketId &&
-    left.title === right.title &&
-    left.resolution === right.resolution &&
-    left.resolutionText === right.resolutionText &&
-    left.closesAt === right.closesAt &&
-    left.endTime === right.endTime &&
-    left.slug === right.slug &&
-    left.url === right.url
-  );
-}
-
-export async function syncMarkets({ repository, fetchMarkets, now = () => new Date() }) {
+async function syncMarketSet({
+  repository,
+  fetchMarkets,
+  now = () => new Date(),
+  includeMarket = () => true,
+  totalKey
+}) {
   const sourceMarkets = await fetchMarkets();
-  const activeMarkets = sourceMarkets.filter(isActiveMarket);
+  const matchingMarkets = sourceMarkets.filter(includeMarket);
   const cache = await repository.load();
   const marketsById = new Map(cache.markets.map((market) => [market.marketId, market]));
   const lastSyncedAt = now().toISOString();
@@ -76,8 +27,8 @@ export async function syncMarkets({ repository, fetchMarkets, now = () => new Da
   let inserted = 0;
   let updated = 0;
 
-  for (const sourceMarket of activeMarkets) {
-    const normalized = normalizeMarket(sourceMarket, lastSyncedAt);
+  for (const sourceMarket of matchingMarkets) {
+    const normalized = normalizeGeminiMarket(sourceMarket, lastSyncedAt);
     const existing = marketsById.get(normalized.marketId);
 
     if (!existing) {
@@ -89,7 +40,7 @@ export async function syncMarkets({ repository, fetchMarkets, now = () => new Da
     updated += 1;
     marketsById.set(
       normalized.marketId,
-      sameMarketShape(existing, normalized)
+      sameNormalizedMarketShape(existing, normalized)
         ? { ...existing, lastSyncedAt }
         : normalized
     );
@@ -104,6 +55,26 @@ export async function syncMarkets({ repository, fetchMarkets, now = () => new Da
   return {
     inserted,
     updated,
-    totalActive: activeMarkets.length
+    [totalKey]: matchingMarkets.length
   };
+}
+
+export async function syncMarkets({ repository, fetchMarkets, now = () => new Date() }) {
+  return syncMarketSet({
+    repository,
+    fetchMarkets,
+    now,
+    includeMarket: (market) => isMarketWithStatus(market, "active"),
+    totalKey: "totalActive"
+  });
+}
+
+export async function syncUpcomingMarkets({ repository, fetchMarkets, now = () => new Date() }) {
+  return syncMarketSet({
+    repository,
+    fetchMarkets,
+    now,
+    includeMarket: (market) => isMarketWithStatus(market, "approved"),
+    totalKey: "totalUpcoming"
+  });
 }

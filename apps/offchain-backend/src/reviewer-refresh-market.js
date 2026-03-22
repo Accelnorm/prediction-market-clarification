@@ -1,22 +1,7 @@
-function normalizeRefreshedMarket(sourceMarket, existingMarket, refreshedAt) {
-  return {
-    ...existingMarket,
-    marketId: existingMarket.marketId,
-    title: String(sourceMarket.title ?? existingMarket.title ?? ""),
-    resolution: String(
-      sourceMarket.resolution ?? sourceMarket.resolutionText ?? existingMarket.resolution ?? ""
-    ),
-    closesAt: String(
-      sourceMarket.closesAt ?? sourceMarket.endTime ?? existingMarket.closesAt ?? ""
-    ),
-    slug: sourceMarket.slug ? String(sourceMarket.slug) : null,
-    url: sourceMarket.url ? String(sourceMarket.url) : null,
-    lastRefreshedAt: refreshedAt,
-    ...(sourceMarket.activitySignal
-      ? { activitySignal: String(sourceMarket.activitySignal) }
-      : {})
-  };
-}
+import {
+  mergeNormalizedMarket,
+  normalizeGeminiMarket
+} from "./gemini-market-normalizer.js";
 
 export async function refreshReviewerMarketData({
   eventId,
@@ -49,7 +34,11 @@ export async function refreshReviewerMarketData({
     throw error;
   }
 
-  const sourceMarketId = String(sourceMarket.id ?? sourceMarket.marketId ?? eventId);
+  const refreshedAt = now().toISOString();
+  const normalizedSourceMarket = normalizeGeminiMarket(sourceMarket, refreshedAt);
+  const sourceMarketId = String(
+    sourceMarket.id ?? sourceMarket.marketId ?? normalizedSourceMarket.marketId ?? eventId
+  );
 
   if (sourceMarketId !== eventId) {
     const error = new Error("Configured refresh source returned a mismatched market identifier.");
@@ -58,10 +47,10 @@ export async function refreshReviewerMarketData({
     throw error;
   }
 
-  const refreshedMarket = normalizeRefreshedMarket(
-    sourceMarket,
+  const refreshedMarket = mergeNormalizedMarket(
     existingMarket,
-    now().toISOString()
+    normalizedSourceMarket,
+    refreshedAt
   );
   await marketCacheRepository.upsert(refreshedMarket);
 

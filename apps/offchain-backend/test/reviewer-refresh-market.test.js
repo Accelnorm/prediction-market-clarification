@@ -116,11 +116,25 @@ test("POST /api/reviewer/refresh-market/:eventId refreshes cached market data wi
         title: "Will BTC trade above $105,000 before year end?",
         resolution:
           "Resolves YES if Gemini BTC/USD spot prints above $105,000 before December 31 2026 23:59 UTC.",
+        resolutionText:
+          "Resolves YES if Gemini BTC/USD spot prints above $105,000 before December 31 2026 23:59 UTC.",
         closesAt: "2026-12-30T23:59:00.000Z",
+        endTime: "2026-12-30T23:59:00.000Z",
         slug: "btc-above-105k-2026",
         url: "https://example.com/markets/btc-above-105k-2026",
         lastSyncedAt: "2026-03-21T18:59:00.000Z",
         lastRefreshedAt: "2026-03-21T21:00:00.000Z",
+        ticker: null,
+        description: "",
+        category: null,
+        subcategory: null,
+        tags: [],
+        status: null,
+        effectiveDate: null,
+        expiryDate: "2026-12-30T23:59:00.000Z",
+        resolvedAt: null,
+        termsLink: null,
+        contracts: [],
         activitySignal: "high"
       }
     });
@@ -131,11 +145,25 @@ test("POST /api/reviewer/refresh-market/:eventId refreshes cached market data wi
       title: "Will BTC trade above $105,000 before year end?",
       resolution:
         "Resolves YES if Gemini BTC/USD spot prints above $105,000 before December 31 2026 23:59 UTC.",
+      resolutionText:
+        "Resolves YES if Gemini BTC/USD spot prints above $105,000 before December 31 2026 23:59 UTC.",
       closesAt: "2026-12-30T23:59:00.000Z",
+      endTime: "2026-12-30T23:59:00.000Z",
       slug: "btc-above-105k-2026",
       url: "https://example.com/markets/btc-above-105k-2026",
       lastSyncedAt: "2026-03-21T18:59:00.000Z",
       lastRefreshedAt: "2026-03-21T21:00:00.000Z",
+      ticker: null,
+      description: "",
+      category: null,
+      subcategory: null,
+      tags: [],
+      status: null,
+      effectiveDate: null,
+      expiryDate: "2026-12-30T23:59:00.000Z",
+      resolvedAt: null,
+      termsLink: null,
+      contracts: [],
       activitySignal: "high"
     });
 

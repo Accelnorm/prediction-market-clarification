@@ -1,5 +1,10 @@
-export const DEFAULT_GEMINI_MARKETS_SOURCE_URL =
-  "https://api.gemini.com/v1/prediction-markets/events?status=active&limit=500";
+const GEMINI_API_BASE_URL = "https://api.gemini.com";
+const DEFAULT_PAGE_LIMIT = "500";
+
+export const DEFAULT_GEMINI_ACTIVE_MARKETS_SOURCE_URL =
+  `${GEMINI_API_BASE_URL}/v1/prediction-markets/events?status=active&limit=${DEFAULT_PAGE_LIMIT}`;
+export const DEFAULT_GEMINI_UPCOMING_MARKETS_SOURCE_URL =
+  `${GEMINI_API_BASE_URL}/v1/prediction-markets/events/upcoming?limit=${DEFAULT_PAGE_LIMIT}`;
 
 function isFileUrl(sourceUrl) {
   return sourceUrl.startsWith("file://");
@@ -78,7 +83,7 @@ async function fetchMarketsFromEndpoint(sourceUrl, fetchImpl) {
 }
 
 export async function fetchConfiguredMarkets({
-  sourceUrl = DEFAULT_GEMINI_MARKETS_SOURCE_URL,
+  sourceUrl = DEFAULT_GEMINI_ACTIVE_MARKETS_SOURCE_URL,
   fetchImpl = fetch
 } = {}) {
   if (isFileUrl(sourceUrl)) {
@@ -86,4 +91,49 @@ export async function fetchConfiguredMarkets({
   }
 
   return fetchMarketsFromEndpoint(sourceUrl, fetchImpl);
+}
+
+export async function fetchActiveMarkets(options = {}) {
+  return fetchConfiguredMarkets({
+    ...options,
+    sourceUrl: options.sourceUrl ?? DEFAULT_GEMINI_ACTIVE_MARKETS_SOURCE_URL
+  });
+}
+
+export async function fetchUpcomingMarkets(options = {}) {
+  return fetchConfiguredMarkets({
+    ...options,
+    sourceUrl: options.sourceUrl ?? DEFAULT_GEMINI_UPCOMING_MARKETS_SOURCE_URL
+  });
+}
+
+export async function fetchPredictionMarketEventByTicker(eventTicker, { fetchImpl = fetch } = {}) {
+  const response = await fetchImpl(
+    `${GEMINI_API_BASE_URL}/v1/prediction-markets/events/${encodeURIComponent(eventTicker)}`
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch Gemini event ${eventTicker}: ${response.status} ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function fetchEnrichedPredictionMarkets({
+  fetchMarkets = fetchActiveMarkets,
+  fetchEventByTicker = fetchPredictionMarketEventByTicker
+} = {}) {
+  const markets = await fetchMarkets();
+  const enrichedMarkets = [];
+
+  for (const market of markets) {
+    if (typeof market?.ticker !== "string" || market.ticker.trim() === "") {
+      enrichedMarkets.push(market);
+      continue;
+    }
+
+    enrichedMarkets.push(await fetchEventByTicker(market.ticker));
+  }
+
+  return enrichedMarkets;
 }

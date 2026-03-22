@@ -1,6 +1,7 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 
+import { fetchPredictionMarketEventByTicker } from "./gemini-markets-source.js";
 import { runAutomaticClarificationPipeline as runDefaultAutomaticClarificationPipeline } from "./automatic-llm-pipeline.js";
 import { refreshReviewerMarketData } from "./reviewer-refresh-market.js";
 import { createTelegramClarificationRequest } from "./telegram-request-flow.js";
@@ -174,14 +175,7 @@ function buildReviewerClarificationPayload({
     ...buildPublicClarificationPayload(clarification),
     llmOutput: clarification.llmOutput ?? null,
     llmTrace: clarification.llmTrace ?? null,
-    market: {
-      marketId: clarification.eventId ?? null,
-      title: market?.title ?? null,
-      resolutionText: market?.resolution ?? null,
-      endTime: market?.closesAt ?? null,
-      slug: market?.slug ?? null,
-      url: market?.url ?? null
-    },
+    market: buildReviewerMarketPayload(market, clarification.eventId),
     funding: buildFundingDetails(clarification, relatedClarifications),
     vote: buildReviewerVotePayload(clarification),
     ...adaptiveReviewWindow
@@ -204,6 +198,63 @@ function buildReviewerClarificationPayload({
   }
 
   return clarificationPayload;
+}
+
+function buildReviewerMarketPayload(market, fallbackMarketId = null) {
+  const payload = {
+    marketId: market?.marketId ?? fallbackMarketId ?? null,
+    title: market?.title ?? null,
+    resolutionText: market?.resolution ?? market?.resolutionText ?? null,
+    endTime: market?.closesAt ?? market?.endTime ?? null,
+    slug: market?.slug ?? null,
+    url: market?.url ?? null
+  };
+
+  if (typeof market?.ticker === "string" && market.ticker !== "") {
+    payload.ticker = market.ticker;
+  }
+
+  if (typeof market?.description === "string" && market.description !== "") {
+    payload.description = market.description;
+  }
+
+  if (typeof market?.category === "string" && market.category !== "") {
+    payload.category = market.category;
+  }
+
+  if (market?.subcategory) {
+    payload.subcategory = market.subcategory;
+  }
+
+  if (Array.isArray(market?.tags) && market.tags.length > 0) {
+    payload.tags = market.tags;
+  }
+
+  if (typeof market?.status === "string" && market.status !== "") {
+    payload.status = market.status;
+  }
+
+  if (typeof market?.effectiveDate === "string" && market.effectiveDate !== "") {
+    payload.effectiveDate = market.effectiveDate;
+  }
+
+  if (typeof market?.expiryDate === "string" && market.expiryDate !== "") {
+    payload.expiryDate = market.expiryDate;
+  }
+
+  if (typeof market?.resolvedAt === "string" && market.resolvedAt !== "") {
+    payload.resolvedAt = market.resolvedAt;
+  }
+
+  if (typeof market?.termsLink === "string" && market.termsLink !== "") {
+    payload.termsLink = market.termsLink;
+  }
+
+  if (Array.isArray(market?.contracts) && market.contracts.length > 0) {
+    payload.contracts = market.contracts;
+  }
+
+  return payload;
 }
 
 function buildReviewerActionDetails(action) {
@@ -464,6 +515,35 @@ function buildReviewerScanListItem(scan) {
   };
 }
 
+function buildPrelaunchQueueItem({ market, latestScan, now }) {
+  const reviewWindow =
+    latestScan?.review_window ??
+    buildAdaptiveReviewWindow({
+      clarification: {
+        llmOutput: {
+          ambiguity_score: 0
+        }
+      },
+      market,
+      now
+    });
+
+  return {
+    eventId: market.marketId,
+    marketTitle: market.title,
+    ticker: market.ticker ?? null,
+    category: market.category ?? null,
+    status: market.status ?? null,
+    startsAt: market.effectiveDate ?? null,
+    endTime: market.closesAt,
+    ambiguityScore: latestScan?.ambiguity_score ?? null,
+    needsScan: latestScan === null,
+    latestScanId: latestScan?.scanId ?? null,
+    reviewWindow,
+    contracts: Array.isArray(market.contracts) ? market.contracts : []
+  };
+}
+
 function parseReviewerFinalizationPayload(payload) {
   const finalEditedText = String(payload?.finalEditedText ?? "").trim();
   const finalNote = String(payload?.finalNote ?? "").trim();
@@ -545,6 +625,8 @@ export function createServer({
   backgroundJobRepository,
   reviewerScanRepository,
   marketCacheRepository,
+  upcomingMarketCacheRepository,
+  upcomingReviewerScanRepository,
   now,
   createRequestId,
   createClarificationId,
@@ -555,6 +637,14 @@ export function createServer({
   runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline,
   runReviewerMarketScan = createReviewerMarketScan
 }) {
+  function getMarketRepositoryForStage(marketStage = "active") {
+    return marketStage === "upcoming" ? upcomingMarketCacheRepository : marketCacheRepository;
+  }
+
+  function getReviewerScanRepositoryForStage(marketStage = "active") {
+    return marketStage === "upcoming" ? upcomingReviewerScanRepository : reviewerScanRepository;
+  }
+
   async function markJobProcessing(job) {
     const processingTimestamp = now().toISOString();
 
@@ -626,11 +716,12 @@ export function createServer({
 
   async function executeReviewerScanJob(job) {
     try {
+      const marketStage = job.target.marketStage ?? "active";
       const scan = await runReviewerMarketScan({
         jobId: job.jobId,
         eventId: job.target.eventId,
-        marketCacheRepository,
-        reviewerScanRepository,
+        marketCacheRepository: getMarketRepositoryForStage(marketStage),
+        reviewerScanRepository: getReviewerScanRepositoryForStage(marketStage),
         now
       });
 
@@ -661,6 +752,11 @@ export function createServer({
     }
 
     if (job.kind === "reviewer_scan") {
+      await executeReviewerScanJob(job);
+      return;
+    }
+
+    if (job.kind === "reviewer_prelaunch_scan") {
       await executeReviewerScanJob(job);
       return;
     }
@@ -963,6 +1059,92 @@ export function createServer({
       return;
     }
 
+    if (request.method === "GET" && requestUrl.pathname === "/api/reviewer/prelaunch/queue") {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const markets = (await upcomingMarketCacheRepository?.list?.()) ?? [];
+        const queue = [];
+
+        for (const market of markets) {
+          const latestScan =
+            (await upcomingReviewerScanRepository?.findLatestByEventId?.(market.marketId)) ?? null;
+          queue.push(
+            buildPrelaunchQueueItem({
+              market,
+              latestScan,
+              now: now()
+            })
+          );
+        }
+
+        sendJson(response, 200, {
+          ok: true,
+          queue
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      /^\/api\/reviewer\/prelaunch\/markets\/[^/]+$/.test(requestUrl.pathname)
+    ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const eventId = decodeURIComponent(
+          requestUrl.pathname.replace(/^\/api\/reviewer\/prelaunch\/markets\/([^/]+)$/, "$1")
+        );
+        const market = await upcomingMarketCacheRepository?.findByMarketId?.(eventId);
+
+        if (!market) {
+          sendJson(response, 404, {
+            ok: false,
+            error: {
+              code: "MARKET_NOT_FOUND",
+              message: "Upcoming market was not found."
+            }
+          });
+          return;
+        }
+
+        const latestScan =
+          (await upcomingReviewerScanRepository?.findLatestByEventId?.(eventId)) ?? null;
+
+        sendJson(response, 200, {
+          ok: true,
+          market: buildReviewerMarketPayload(market, eventId),
+          latestScan: latestScan ? buildReviewerScanListItem(latestScan) : null
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
     if (request.method === "GET" && requestUrl.pathname === "/api/reviewer/scans") {
       if (!hasReviewerAccess(request, reviewerAuthToken)) {
         sendReviewerAuthRequired(response);
@@ -1078,6 +1260,96 @@ export function createServer({
       return;
     }
 
+    if (
+      request.method === "POST" &&
+      /^\/api\/reviewer\/prelaunch\/scan\/[^/]+$/.test(requestUrl.pathname)
+    ) {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const eventId = decodeURIComponent(
+          requestUrl.pathname.replace(/^\/api\/reviewer\/prelaunch\/scan\/([^/]+)$/, "$1")
+        );
+        const timestamp = now().toISOString();
+        const queuedJob =
+          (await backgroundJobRepository?.create?.({
+            jobId: createBackgroundJobId(),
+            kind: "reviewer_prelaunch_scan",
+            status: "queued",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            attempts: 0,
+            retryable: false,
+            target: {
+              eventId,
+              marketStage: "upcoming"
+            },
+            errorMessage: null,
+            result: null
+          })) ?? {
+            jobId: createBackgroundJobId(),
+            kind: "reviewer_prelaunch_scan",
+            status: "queued",
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            attempts: 0,
+            retryable: false,
+            target: {
+              eventId,
+              marketStage: "upcoming"
+            },
+            errorMessage: null,
+            result: null
+          };
+
+        if (!backgroundJobRepository) {
+          const scan = await runReviewerMarketScan({
+            eventId,
+            marketCacheRepository: upcomingMarketCacheRepository,
+            reviewerScanRepository: upcomingReviewerScanRepository,
+            now
+          });
+
+          sendJson(response, 202, {
+            ok: true,
+            scan
+          });
+          return;
+        }
+
+        const processingJob = await startBackgroundJob(queuedJob);
+
+        sendJson(response, 202, {
+          ok: true,
+          job: buildBackgroundJobPayload(processingJob)
+        });
+      } catch (error) {
+        if (error.statusCode) {
+          sendJson(response, error.statusCode, {
+            ok: false,
+            error: {
+              code: error.code,
+              message: error.message
+            }
+          });
+          return;
+        }
+
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
     if (request.method === "POST" && requestUrl.pathname === "/api/reviewer/scan-all") {
       if (!hasReviewerAccess(request, reviewerAuthToken)) {
         sendReviewerAuthRequired(response);
@@ -1114,6 +1386,68 @@ export function createServer({
                 eventId: market.marketId,
                 marketCacheRepository,
                 reviewerScanRepository,
+                now
+              })
+            );
+          }
+        }
+
+        sendJson(response, 202, {
+          ok: true,
+          ...(backgroundJobRepository
+            ? { jobs: jobs.map(buildBackgroundJobPayload) }
+            : { scans: jobs })
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "An unexpected error occurred."
+          }
+        });
+      }
+
+      return;
+    }
+
+    if (request.method === "POST" && requestUrl.pathname === "/api/reviewer/prelaunch/scan-all") {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const markets = (await upcomingMarketCacheRepository?.list?.()) ?? [];
+        const jobs = [];
+
+        for (const market of markets) {
+          const timestamp = now().toISOString();
+          const queuedJob =
+            (await backgroundJobRepository?.create?.({
+              jobId: createBackgroundJobId(),
+              kind: "reviewer_prelaunch_scan",
+              status: "queued",
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              attempts: 0,
+              retryable: false,
+              target: {
+                eventId: market.marketId,
+                marketStage: "upcoming"
+              },
+              errorMessage: null,
+              result: null
+            })) ?? null;
+
+          if (queuedJob) {
+            jobs.push(await startBackgroundJob(queuedJob));
+          } else {
+            jobs.push(
+              await runReviewerMarketScan({
+                eventId: market.marketId,
+                marketCacheRepository: upcomingMarketCacheRepository,
+                reviewerScanRepository: upcomingReviewerScanRepository,
                 now
               })
             );
@@ -1208,10 +1542,23 @@ export function createServer({
         const eventId = decodeURIComponent(
           requestUrl.pathname.replace(/^\/api\/reviewer\/refresh-market\/([^/]+)$/, "$1")
         );
+        const cachedMarket = await marketCacheRepository?.findByMarketId?.(eventId);
+        const reviewerRefreshSource =
+          fetchReviewerMarketSource ??
+          (async (requestedEventId) => {
+            if (!cachedMarket?.ticker) {
+              const error = new Error("Cached market does not include a Gemini ticker.");
+              error.statusCode = 503;
+              error.code = "MARKET_REFRESH_UNAVAILABLE";
+              throw error;
+            }
+
+            return fetchPredictionMarketEventByTicker(cachedMarket.ticker);
+          });
         const market = await refreshReviewerMarketData({
           eventId,
           marketCacheRepository,
-          fetchReviewerMarketSource,
+          fetchReviewerMarketSource: reviewerRefreshSource,
           now
         });
 

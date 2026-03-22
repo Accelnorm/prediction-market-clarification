@@ -2,11 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  DEFAULT_GEMINI_MARKETS_SOURCE_URL,
-  fetchConfiguredMarkets
+  DEFAULT_GEMINI_ACTIVE_MARKETS_SOURCE_URL,
+  DEFAULT_GEMINI_UPCOMING_MARKETS_SOURCE_URL,
+  fetchActiveMarkets,
+  fetchConfiguredMarkets,
+  fetchEnrichedPredictionMarkets,
+  fetchPredictionMarketEventByTicker,
+  fetchUpcomingMarkets
 } from "../src/gemini-markets-source.js";
 
-test("fetchConfiguredMarkets defaults to the live Gemini prediction markets endpoint", async () => {
+test("fetchActiveMarkets defaults to the live Gemini active markets endpoint", async () => {
   const requests = [];
   const fetchImpl = async (url) => {
     requests.push(url);
@@ -19,10 +24,10 @@ test("fetchConfiguredMarkets defaults to the live Gemini prediction markets endp
     };
   };
 
-  const markets = await fetchConfiguredMarkets({ fetchImpl });
+  const markets = await fetchActiveMarkets({ fetchImpl });
 
   assert.deepEqual(markets, [{ id: "evt_1", status: "active" }]);
-  assert.deepEqual(requests, [DEFAULT_GEMINI_MARKETS_SOURCE_URL + "&offset=0"]);
+  assert.deepEqual(requests, [DEFAULT_GEMINI_ACTIVE_MARKETS_SOURCE_URL + "&offset=0"]);
 });
 
 test("fetchConfiguredMarkets follows paginated Gemini event responses", async () => {
@@ -58,6 +63,68 @@ test("fetchConfiguredMarkets follows paginated Gemini event responses", async ()
   assert.deepEqual(requests, [
     "https://api.gemini.com/v1/prediction-markets/events?status=active&limit=2&offset=0",
     "https://api.gemini.com/v1/prediction-markets/events?status=active&limit=2&offset=2"
+  ]);
+});
+
+test("fetchUpcomingMarkets defaults to the live Gemini upcoming markets endpoint", async () => {
+  const requests = [];
+  const fetchImpl = async (url) => {
+    requests.push(url);
+    return {
+      ok: true,
+      json: async () => ({
+        data: [{ id: "evt_up_1", status: "approved" }],
+        pagination: { offset: 0, limit: 500, total: 1 }
+      })
+    };
+  };
+
+  const markets = await fetchUpcomingMarkets({ fetchImpl });
+
+  assert.deepEqual(markets, [{ id: "evt_up_1", status: "approved" }]);
+  assert.deepEqual(requests, [DEFAULT_GEMINI_UPCOMING_MARKETS_SOURCE_URL + "&offset=0"]);
+});
+
+test("fetchPredictionMarketEventByTicker requests the Gemini detail endpoint", async () => {
+  const requests = [];
+  const fetchImpl = async (url) => {
+    requests.push(url);
+    return {
+      ok: true,
+      json: async () => ({
+        id: "evt_1",
+        ticker: "BTC100K2025"
+      })
+    };
+  };
+
+  const market = await fetchPredictionMarketEventByTicker("BTC100K2025", { fetchImpl });
+
+  assert.deepEqual(market, {
+    id: "evt_1",
+    ticker: "BTC100K2025"
+  });
+  assert.deepEqual(requests, [
+    "https://api.gemini.com/v1/prediction-markets/events/BTC100K2025"
+  ]);
+});
+
+test("fetchEnrichedPredictionMarkets hydrates list results with per-event Gemini detail", async () => {
+  const enrichedMarkets = await fetchEnrichedPredictionMarkets({
+    fetchMarkets: async () => [
+      { id: "evt_1", ticker: "BTC100K2025" },
+      { id: "evt_2", ticker: "ETH5K2025" }
+    ],
+    fetchEventByTicker: async (ticker) => ({
+      id: ticker === "BTC100K2025" ? "evt_1" : "evt_2",
+      ticker,
+      title: `${ticker} detail`
+    })
+  });
+
+  assert.deepEqual(enrichedMarkets, [
+    { id: "evt_1", ticker: "BTC100K2025", title: "BTC100K2025 detail" },
+    { id: "evt_2", ticker: "ETH5K2025", title: "ETH5K2025 detail" }
   ]);
 });
 
