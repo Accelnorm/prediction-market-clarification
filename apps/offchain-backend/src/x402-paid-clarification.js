@@ -1,17 +1,31 @@
-function paymentRequiredError() {
-  const error = new Error(
-    "A verified x402 payment of 1.00 USDC is required before creating a clarification."
-  );
-  error.statusCode = 402;
-  error.code = "PAYMENT_REQUIRED";
+function createError({ statusCode, code, message, details = null }) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+
+  if (details !== null) {
+    error.details = details;
+  }
+
   return error;
 }
 
-function validationError(code, message) {
-  const error = new Error(message);
-  error.statusCode = 400;
-  error.code = code;
-  return error;
+export function paymentRequiredError(details = null) {
+  return createError({
+    statusCode: 402,
+    code: "PAYMENT_REQUIRED",
+    message: "A verified x402 payment of 1.00 USDC is required before creating a clarification.",
+    details
+  });
+}
+
+export function validationError(code, message, details = null) {
+  return createError({
+    statusCode: 400,
+    code,
+    message,
+    details
+  });
 }
 
 function normalizeString(value) {
@@ -24,22 +38,9 @@ function normalizeQuestion(value) {
 
 export const MAX_QUESTION_LENGTH = 500;
 
-export function parsePaidClarificationRequest(payload) {
+export function parseClarificationRequestInput(payload) {
   const requesterId = normalizeString(payload?.requesterId);
   const question = normalizeQuestion(payload?.question);
-  const paymentProof = normalizeString(payload?.payment?.proof);
-  const paymentReference = normalizeString(payload?.payment?.reference);
-  const paymentAmount = normalizeString(payload?.payment?.amount);
-  const paymentAsset = normalizeString(payload?.payment?.asset);
-  const paymentVerified = payload?.payment?.verified === true;
-
-  if (!paymentVerified || !paymentProof || !paymentReference) {
-    throw paymentRequiredError();
-  }
-
-  if (paymentAmount !== "1.00" || paymentAsset !== "USDC") {
-    throw paymentRequiredError();
-  }
 
   if (!question) {
     throw validationError("INVALID_QUESTION", "Clarification question cannot be empty.");
@@ -54,10 +55,6 @@ export function parsePaidClarificationRequest(payload) {
 
   return {
     requesterId,
-    question,
-    paymentAmount,
-    paymentAsset,
-    paymentProof,
-    paymentReference
+    question
   };
 }

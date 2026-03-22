@@ -7,6 +7,8 @@ import { FileMarketCacheRepository } from "../market-cache-repository.js";
 import { FileReviewerScanRepository } from "../reviewer-scan-repository.js";
 import { createServer } from "../server.js";
 import { registerTelegramWebhook } from "../telegram-bot-client.js";
+import { FileVerifiedPaymentRepository } from "../verified-payment-repository.js";
+import { loadX402PaymentConfig } from "../x402-payment-config.js";
 
 function resolvePathFromEnv(name, fallback) {
   return process.env[name] ?? new URL(fallback, import.meta.url);
@@ -70,6 +72,10 @@ const reviewerScansPath = resolvePathFromEnv(
   "REVIEWER_SCANS_PATH",
   "../../data/reviewer-scans.json"
 );
+const verifiedPaymentsPath = resolvePathFromEnv(
+  "VERIFIED_PAYMENTS_PATH",
+  "../../data/verified-payments.json"
+);
 const upcomingReviewerScansPath = resolvePathFromEnv(
   "UPCOMING_REVIEWER_SCANS_PATH",
   "../../data/upcoming-reviewer-scans.json"
@@ -86,6 +92,7 @@ const server = createServer({
   artifactRepository: new FileArtifactRepository(artifactsPath),
   backgroundJobRepository: new FileBackgroundJobRepository(backgroundJobsPath),
   reviewerScanRepository: new FileReviewerScanRepository(reviewerScansPath),
+  verifiedPaymentRepository: new FileVerifiedPaymentRepository(verifiedPaymentsPath),
   marketCacheRepository: new FileMarketCacheRepository(marketCachePath),
   upcomingMarketCacheRepository: new FileMarketCacheRepository(upcomingMarketCachePath),
   upcomingReviewerScanRepository: new FileReviewerScanRepository(upcomingReviewerScansPath),
@@ -97,6 +104,7 @@ const server = createServer({
   telegramWebhookSecret: process.env.TELEGRAM_WEBHOOK_SECRET,
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   telegramBotApiBaseUrl: process.env.TELEGRAM_BOT_API_BASE_URL,
+  x402PaymentConfig: loadX402PaymentConfig(),
   llmTraceability: {
     promptTemplateVersion:
       process.env.LLM_PROMPT_TEMPLATE_VERSION ?? "reviewer-offchain-prompt-v1",
@@ -130,6 +138,7 @@ server.listen(port, host, () => {
   console.log(`offchain-backend listening on http://${host}:${resolvedPort}`);
   console.log(`market cache: ${marketCachePath}`);
   console.log(`clarification store: ${clarificationRequestsPath}`);
+  console.log(`verified payment store: ${verifiedPaymentsPath}`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

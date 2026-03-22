@@ -71,25 +71,30 @@ By default the backend stores state in JSON files under `apps/offchain-backend/d
 ## Test The API Manually
 
 1. Sync markets and start the API.
-2. Create a paid clarification:
+2. Request the x402 payment challenge:
 
 ```bash
 curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
   -H 'content-type: application/json' \
   -d '{
     "requesterId": "wallet_123",
-    "question": "Should auction prints count?",
-    "payment": {
-      "proof": "pay_proof_001",
-      "amount": "1.00",
-      "asset": "USDC",
-      "reference": "x402_ref_001",
-      "verified": true
-    }
+    "question": "Should auction prints count?"
   }'
 ```
 
-3. Read reviewer data:
+3. Retry with a paid proof in `PAYMENT-SIGNATURE`:
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
+  -H 'content-type: application/json' \
+  -H 'PAYMENT-SIGNATURE: <base64-encoded-x402-payment-payload>' \
+  -d '{
+    "requesterId": "wallet_123",
+    "question": "Should auction prints count?"
+  }'
+```
+
+4. Read reviewer data:
 
 ```bash
 curl http://127.0.0.1:3000/api/reviewer/queue \

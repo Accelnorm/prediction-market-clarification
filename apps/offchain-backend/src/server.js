@@ -15,11 +15,18 @@ import {
 } from "./telegram-status-delivery.js";
 import { buildAdaptiveReviewWindow } from "./review-window-policy.js";
 import { createReviewerMarketScan } from "./reviewer-scan-service.js";
-import { parsePaidClarificationRequest } from "./x402-paid-clarification.js";
+import { parseClarificationRequestInput } from "./x402-paid-clarification.js";
+import { buildX402PaymentRequiredPayload } from "./x402-payment-challenge.js";
+import { loadX402PaymentConfig } from "./x402-payment-config.js";
+import {
+  extractX402PaymentCandidate,
+  verifyClarificationPayment as verifyDefaultClarificationPayment
+} from "./x402-payment-verifier.js";
 
-function sendJson(response, statusCode, payload) {
+function sendJson(response, statusCode, payload, headers = {}) {
   response.writeHead(statusCode, {
-    "content-type": "application/json; charset=utf-8"
+    "content-type": "application/json; charset=utf-8",
+    ...headers
   });
   response.end(JSON.stringify(payload));
 }
@@ -641,6 +648,10 @@ export function createServer({
   telegramWebhookSecret,
   telegramBotToken,
   telegramBotApiBaseUrl,
+  x402PaymentConfig = loadX402PaymentConfig(),
+  verifiedPaymentRepository,
+  verifyX402Payment = verifyDefaultClarificationPayment,
+  buildX402PaymentChallenge = buildX402PaymentRequiredPayload,
   fetchReviewerMarketSource,
   sendTelegramMessage = sendDefaultTelegramMessage,
   runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline,
@@ -782,7 +793,16 @@ export function createServer({
   }
 
   return http.createServer(async (request, response) => {
-    const requestUrl = new URL(request.url, "http://127.0.0.1");
+    const forwardedProto = request.headers["x-forwarded-proto"];
+    const requestProtocol =
+      typeof forwardedProto === "string" && forwardedProto.trim() !== ""
+        ? forwardedProto.split(",")[0].trim()
+        : "http";
+    const requestHost =
+      typeof request.headers.host === "string" && request.headers.host.trim() !== ""
+        ? request.headers.host
+        : "127.0.0.1";
+    const requestUrl = new URL(request.url, `${requestProtocol}://${requestHost}`);
 
     if (request.method === "POST" && request.url === "/api/telegram/webhook") {
       try {
@@ -843,7 +863,8 @@ export function createServer({
         const eventId = decodeURIComponent(
           requestUrl.pathname.replace(/^\/api\/clarify\/([^/]+)$/, "$1")
         );
-        const payload = parsePaidClarificationRequest(await readJsonBody(request));
+        const body = await readJsonBody(request);
+        const payload = parseClarificationRequestInput(body);
         const supportedMarket = await marketCacheRepository?.findByMarketId(eventId);
 
         if (!supportedMarket) {
@@ -855,8 +876,38 @@ export function createServer({
           throw error;
         }
 
+        const paymentCandidate = extractX402PaymentCandidate(request, body);
+
+        if (!paymentCandidate) {
+          const challengePayload = buildX402PaymentChallenge({
+            eventId,
+            requesterId: payload.requesterId,
+            config: x402PaymentConfig,
+            requestUrl
+          });
+          sendJson(response, 402, challengePayload, {
+            "payment-required": Buffer.from(
+              JSON.stringify(challengePayload.paymentRequirements),
+              "utf8"
+            ).toString("base64")
+          });
+          return;
+        }
+
+        const verifiedPayment = await verifyX402Payment({
+          paymentCandidate,
+          config: x402PaymentConfig,
+          now,
+          requestContext: {
+            eventId,
+            requesterId: payload.requesterId
+          },
+          requestUrl,
+          verifiedPaymentRepository
+        });
+
         const existingClarification =
-          await clarificationRequestRepository.findByPaymentProof(payload.paymentProof);
+          await clarificationRequestRepository.findByPaymentProof(verifiedPayment.paymentProof);
 
         if (existingClarification) {
           sendJson(response, 200, {
@@ -868,6 +919,17 @@ export function createServer({
         }
 
         const timestamp = now().toISOString();
+        const existingVerifiedPayment =
+          (await verifiedPaymentRepository?.findByPaymentProof?.(verifiedPayment.paymentProof)) ?? null;
+
+        if (!existingVerifiedPayment) {
+          await verifiedPaymentRepository?.create?.({
+            ...verifiedPayment,
+            createdAt: timestamp,
+            updatedAt: timestamp
+          });
+        }
+
         const clarification = await clarificationRequestRepository.create({
           clarificationId: createClarificationId(),
           requestId: null,
@@ -880,12 +942,21 @@ export function createServer({
             question: payload.question
           },
           requesterId: payload.requesterId,
-          paymentAmount: payload.paymentAmount,
-          paymentAsset: payload.paymentAsset,
-          paymentReference: payload.paymentReference,
-          paymentProof: payload.paymentProof,
-          paymentVerifiedAt: timestamp,
+          paymentAmount: verifiedPayment.paymentAmount,
+          paymentAsset: verifiedPayment.paymentAsset,
+          paymentReference: verifiedPayment.paymentReference,
+          paymentProof: verifiedPayment.paymentProof,
+          paymentVerifiedAt: verifiedPayment.paymentVerifiedAt ?? timestamp,
+          paymentRecipient: verifiedPayment.paymentRecipient ?? null,
+          paymentMint: verifiedPayment.paymentMint ?? null,
+          paymentCluster: verifiedPayment.paymentCluster ?? null,
+          paymentTransactionSignature: verifiedPayment.paymentTransactionSignature ?? null,
+          paymentVerificationSource: verifiedPayment.verificationSource ?? null,
           createdAt: timestamp,
+          updatedAt: timestamp
+        });
+        await verifiedPaymentRepository?.updateByPaymentProof?.(verifiedPayment.paymentProof, {
+          clarificationId: clarification.clarificationId,
           updatedAt: timestamp
         });
 
@@ -946,12 +1017,21 @@ export function createServer({
             });
         }
 
-        sendJson(response, 202, {
-          ok: true,
-          clarificationId: clarification.clarificationId,
-          status: "processing",
-          ...(processingJob ? { job: buildBackgroundJobPayload(processingJob) } : {})
-        });
+        sendJson(
+          response,
+          202,
+          {
+            ok: true,
+            clarificationId: clarification.clarificationId,
+            status: "processing",
+            ...(processingJob ? { job: buildBackgroundJobPayload(processingJob) } : {})
+          },
+          verifiedPayment.paymentResponseHeader
+            ? {
+                "payment-response": verifiedPayment.paymentResponseHeader
+              }
+            : {}
+        );
       } catch (error) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
@@ -969,7 +1049,8 @@ export function createServer({
             ok: false,
             error: {
               code: error.code,
-              message: error.message
+              message: error.message,
+              ...(error.details ? { details: error.details } : {})
             }
           });
           return;

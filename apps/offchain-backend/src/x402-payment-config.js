@@ -1,0 +1,69 @@
+const SOLANA_MAINNET_CAIP2 = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+const SOLANA_DEVNET_CAIP2 = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
+const SOLANA_MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SOLANA_DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
+
+function normalizeString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function resolveNetworkIdentifier(value) {
+  const normalized = normalizeString(value).toLowerCase();
+
+  if (!normalized || normalized === "solana:devnet" || normalized === "devnet") {
+    return SOLANA_DEVNET_CAIP2;
+  }
+
+  if (
+    normalized === "solana:mainnet" ||
+    normalized === "solana" ||
+    normalized === "mainnet" ||
+    normalized === "mainnet-beta"
+  ) {
+    return SOLANA_MAINNET_CAIP2;
+  }
+
+  return normalizeString(value);
+}
+
+function resolveCluster(network) {
+  if (network === SOLANA_MAINNET_CAIP2) {
+    return "mainnet";
+  }
+
+  return "devnet";
+}
+
+function resolveDefaultMint(network) {
+  return network === SOLANA_MAINNET_CAIP2
+    ? SOLANA_MAINNET_USDC_MINT
+    : SOLANA_DEVNET_USDC_MINT;
+}
+
+export function loadX402PaymentConfig(env = process.env) {
+  const network = resolveNetworkIdentifier(env.X402_NETWORK);
+  const cluster = resolveCluster(network);
+
+  return {
+    x402Version: Number.parseInt(env.X402_VERSION ?? "2", 10),
+    scheme: normalizeString(env.X402_SCHEME) || "exact",
+    priceUsd: normalizeString(env.X402_PRICE_USD) || "1.00",
+    maxAmountRequired:
+      normalizeString(env.X402_MAX_AMOUNT_REQUIRED) || "1000000",
+    assetSymbol: normalizeString(env.X402_ASSET_SYMBOL) || "USDC",
+    network,
+    cluster,
+    mintAddress: normalizeString(env.X402_MINT_ADDRESS) || resolveDefaultMint(network),
+    recipientAddress:
+      normalizeString(env.X402_RECIPIENT_ADDRESS) ||
+      "11111111111111111111111111111111",
+    maxTimeoutSeconds: Number.parseInt(env.X402_MAX_TIMEOUT_SECONDS ?? "300", 10),
+    facilitatorUrl:
+      normalizeString(env.X402_FACILITATOR_URL) ||
+      "https://api.cdp.coinbase.com/platform/v2/x402",
+    facilitatorAuthToken: normalizeString(env.X402_FACILITATOR_AUTH_TOKEN) || null,
+    verificationSource:
+      normalizeString(env.X402_VERIFICATION_SOURCE) || "coinbase_cdp_facilitator",
+    resourceBaseUrl: normalizeString(env.PUBLIC_API_BASE_URL) || null
+  };
+}

@@ -10,6 +10,23 @@ import { FileBackgroundJobRepository } from "../src/background-job-repository.js
 import { FileClarificationRequestRepository } from "../src/clarification-request-repository.js";
 import { FileMarketCacheRepository } from "../src/market-cache-repository.js";
 import { FileReviewerScanRepository } from "../src/reviewer-scan-repository.js";
+import { FileVerifiedPaymentRepository } from "../src/verified-payment-repository.js";
+
+const DEFAULT_X402_PAYMENT_CONFIG = {
+  x402Version: 2,
+  scheme: "exact",
+  priceUsd: "1.00",
+  maxAmountRequired: "1000000",
+  assetSymbol: "USDC",
+  network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+  cluster: "devnet",
+  mintAddress: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+  recipientAddress: "11111111111111111111111111111111",
+  maxTimeoutSeconds: 300,
+  facilitatorUrl: "https://api.cdp.coinbase.com/platform/v2/x402",
+  facilitatorAuthToken: "test-token",
+  verificationSource: "test_verifier"
+};
 
 const VALID_MARKET = {
   marketId: "gm_btc_above_100k",
@@ -22,7 +39,41 @@ const VALID_MARKET = {
 };
 
 async function startTestServer(options) {
-  const server = createServer(options);
+  const verifiedPaymentRepository =
+    options.verifiedPaymentRepository ??
+    new FileVerifiedPaymentRepository(
+      path.join(
+        os.tmpdir(),
+        `verified-payments-${Date.now()}-${Math.random().toString(16).slice(2)}.json`
+      )
+    );
+  const verifyX402Payment =
+    options.verifyX402Payment ??
+    (async ({ paymentCandidate, config, now }) => ({
+      paymentProof: paymentCandidate.proof,
+      paymentReference:
+        paymentCandidate.paymentReference ?? `ref_${paymentCandidate.proof.slice(0, 24)}`,
+      paymentAmount: config.priceUsd,
+      paymentAsset: config.assetSymbol,
+      paymentMint: config.mintAddress,
+      paymentCluster: config.cluster,
+      paymentRecipient: config.recipientAddress,
+      paymentTransactionSignature: `sig_${paymentCandidate.proof.slice(0, 24)}`,
+      paymentVerifiedAt: now().toISOString(),
+      paymentSettledAt: now().toISOString(),
+      verificationSource: "test_verifier",
+      verificationStatus: "verified",
+      paymentResponseHeader: Buffer.from(
+        JSON.stringify({ success: true, proof: paymentCandidate.proof }),
+        "utf8"
+      ).toString("base64")
+    }));
+  const server = createServer({
+    x402PaymentConfig: DEFAULT_X402_PAYMENT_CONFIG,
+    verifiedPaymentRepository,
+    verifyX402Payment,
+    ...options
+  });
 
   await new Promise((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
@@ -52,6 +103,14 @@ async function stopTestServer(server) {
 function createReviewerHeaders(token = "reviewer-secret") {
   return {
     "x-reviewer-token": token
+  };
+}
+
+function createPaymentSignatureHeaders(paymentPayload, extraHeaders = {}) {
+  return {
+    "content-type": "application/json",
+    "payment-signature": Buffer.from(JSON.stringify(paymentPayload), "utf8").toString("base64"),
+    ...extraHeaders
   };
 }
 
@@ -105,31 +164,51 @@ test("POST /api/clarify/:eventId rejects unpaid requests", async () => {
   });
 
   try {
-    const response = await fetch(`${baseUrl}/api/clarify/gm_eth_above_5000`, {
+    const response = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
       method: "POST",
       headers: {
         "content-type": "application/json"
       },
       body: JSON.stringify({
         requesterId: "wallet_001",
-        question: "Does Gemini auction data resolve the market?",
-        payment: {
-          proof: "pay_proof_missing_verification",
-          amount: "1.00",
-          asset: "USDC",
-          reference: "xref_unpaid_001"
-        }
+        question: "Does Gemini auction data resolve the market?"
       })
     });
 
     assert.equal(response.status, 402);
-    assert.deepEqual(await response.json(), {
+    const responseBody = await response.json();
+    const paymentRequirements = responseBody.paymentRequirements;
+    assert.equal(typeof response.headers.get("payment-required"), "string");
+    assert.deepEqual(responseBody, {
       ok: false,
       error: {
         code: "PAYMENT_REQUIRED",
         message: "A verified x402 payment of 1.00 USDC is required before creating a clarification."
-      }
+      },
+      paymentRequirements
     });
+    assert.deepEqual(paymentRequirements, [
+      {
+        x402Version: 2,
+        scheme: "exact",
+        network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+        amount: "1.00",
+        maxAmountRequired: "1000000",
+        asset: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        assetSymbol: "USDC",
+        description: "Create a clarification request for gm_btc_above_100k.",
+        mimeType: "application/json",
+        payTo: "11111111111111111111111111111111",
+        resource: `${baseUrl}/api/clarify/gm_btc_above_100k`,
+        maxTimeoutSeconds: 300,
+        extra: {
+          cluster: "devnet",
+          eventId: "gm_btc_above_100k",
+          requesterId: "wallet_001",
+          purpose: "clarification_request"
+        }
+      }
+    ]);
 
     const stored = await repository.load();
     assert.deepEqual(stored.requests, []);
@@ -217,6 +296,11 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
       paymentReference: "x402_ref_001",
       paymentProof: "pay_proof_001",
       paymentVerifiedAt: "2026-03-21T19:05:00.000Z",
+      paymentRecipient: "11111111111111111111111111111111",
+      paymentMint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      paymentCluster: "devnet",
+      paymentTransactionSignature: "sig_pay_proof_001",
+      paymentVerificationSource: "test_verifier",
       createdAt: "2026-03-21T19:05:00.000Z",
       updatedAt: "2026-03-21T19:05:00.000Z",
       summary: null,
@@ -243,6 +327,104 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
         }
       ]
     });
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/clarify/:eventId accepts PAYMENT-SIGNATURE header proofs", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T19:07:00.000Z"),
+    createClarificationId: () => "clar_paid_header_001",
+    runAutomaticClarificationPipeline: async () => {}
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
+      method: "POST",
+      headers: createPaymentSignatureHeaders({
+        x402Version: 2,
+        scheme: "exact",
+        network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+        payload: {
+          transaction: "tx_001"
+        }
+      }),
+      body: JSON.stringify({
+        requesterId: "wallet_header_001",
+        question: "Should the clarification intake accept header based x402 proofs?"
+      })
+    });
+
+    assert.equal(response.status, 202);
+    assert.equal(typeof response.headers.get("payment-response"), "string");
+
+    const stored = await repository.findByClarificationId("clar_paid_header_001");
+    assert.equal(typeof stored.paymentProof, "string");
+    assert.ok(stored.paymentProof.length > 0);
+    assert.equal(stored.paymentReference.startsWith("ref_"), true);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/clarify/:eventId returns structured verifier failures without creating clarifications", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    now: () => new Date("2026-03-21T19:08:00.000Z"),
+    createClarificationId: () => "clar_paid_invalid_unused",
+    verifyX402Payment: async () => {
+      const error = new Error("The supplied x402 payment proof is invalid.");
+      error.statusCode = 402;
+      error.code = "INVALID_PAYMENT";
+      error.details = {
+        invalidReason: "invalid_exact_svm_payload_transaction_amount_mismatch"
+      };
+      throw error;
+    }
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        requesterId: "wallet_invalid_001",
+        question: "Will mismatched payments be rejected?",
+        payment: {
+          proof: "pay_proof_invalid_001",
+          reference: "x402_ref_invalid_001"
+        }
+      })
+    });
+
+    assert.equal(response.status, 402);
+    assert.deepEqual(await response.json(), {
+      ok: false,
+      error: {
+        code: "INVALID_PAYMENT",
+        message: "The supplied x402 payment proof is invalid.",
+        details: {
+          invalidReason: "invalid_exact_svm_payload_transaction_amount_mismatch"
+        }
+      }
+    });
+    assert.deepEqual((await repository.load()).requests, []);
   } finally {
     await stopTestServer(server);
   }
@@ -693,7 +875,7 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
       assert.deepEqual(storedRequest.llmTrace, {
         promptTemplateVersion: "prompt-v1",
         modelId: "gemini-reviewer-001",
-        requestedAt: "2026-03-21T19:27:02.000Z",
+        requestedAt: "2026-03-21T19:27:03.000Z",
         processingVersion: "offchain-pipeline-2026-03-21"
       });
     });
@@ -709,7 +891,7 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
         status: "completed",
         eventId: "gm_btc_above_100k",
         question: "Should Gemini BTC/USD auction prints be excluded?",
-        createdAt: "2026-03-21T19:27:00.000Z",
+        createdAt: "2026-03-21T19:27:02.000Z",
         updatedAt: "2026-03-21T19:27:03.000Z"
       }
     });
@@ -758,7 +940,7 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
         llmTrace: {
           promptTemplateVersion: "prompt-v1",
           modelId: "gemini-reviewer-001",
-          requestedAt: "2026-03-21T19:27:02.000Z",
+          requestedAt: "2026-03-21T19:27:03.000Z",
           processingVersion: "offchain-pipeline-2026-03-21"
         },
         market: {
@@ -790,7 +972,7 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
           summary: "Off-chain placeholder until panel voting is implemented.",
           updatedAt: "2026-03-21T19:27:03.000Z"
         },
-        createdAt: "2026-03-21T19:27:00.000Z",
+        createdAt: "2026-03-21T19:27:02.000Z",
         updatedAt: "2026-03-21T19:27:03.000Z",
         review_window_secs: 86400,
         review_window_reason:
@@ -854,7 +1036,7 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
       assert.deepEqual(secondStoredRequest.llmTrace, {
         promptTemplateVersion: "prompt-v2",
         modelId: "gemini-reviewer-001",
-        requestedAt: "2026-03-21T19:28:02.000Z",
+        requestedAt: "2026-03-21T19:28:03.000Z",
         processingVersion: "offchain-pipeline-2026-03-22"
       });
     });
@@ -863,7 +1045,7 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
     assert.deepEqual(firstStoredRequest.llmTrace, {
       promptTemplateVersion: "prompt-v1",
       modelId: "gemini-reviewer-001",
-      requestedAt: "2026-03-21T19:27:02.000Z",
+      requestedAt: "2026-03-21T19:27:03.000Z",
       processingVersion: "offchain-pipeline-2026-03-21"
     });
   } finally {

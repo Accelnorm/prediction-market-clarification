@@ -50,27 +50,36 @@ Environment variables:
 - `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_BASE_URL`
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_VERSION`
 - `MARKET_CACHE_PATH`, `UPCOMING_MARKET_CACHE_PATH`
-- `CLARIFICATION_REQUESTS_PATH`, `BACKGROUND_JOBS_PATH`
+- `CLARIFICATION_REQUESTS_PATH`, `VERIFIED_PAYMENTS_PATH`, `BACKGROUND_JOBS_PATH`
 - `ARTIFACTS_PATH`, `REVIEWER_SCANS_PATH`, `UPCOMING_REVIEWER_SCANS_PATH`
 - `LLM_PROMPT_TEMPLATE_VERSION`, `LLM_MODEL_ID`, `LLM_PROCESSING_VERSION`
+- `PUBLIC_API_BASE_URL`
+- `X402_VERSION`, `X402_SCHEME`, `X402_PRICE_USD`, `X402_MAX_AMOUNT_REQUIRED`
+- `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`
+- `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `X402_FACILITATOR_AUTH_TOKEN`
 
 ## Quick API Checks
 
-Create a paid clarification:
+Request the x402 payment challenge:
 
 ```bash
 curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
   -H 'content-type: application/json' \
   -d '{
     "requesterId": "wallet_123",
-    "question": "Should auction prints count?",
-    "payment": {
-      "proof": "pay_proof_001",
-      "amount": "1.00",
-      "asset": "USDC",
-      "reference": "x402_ref_001",
-      "verified": true
-    }
+    "question": "Should auction prints count?"
+  }'
+```
+
+Retry with a paid x402 proof in `PAYMENT-SIGNATURE`:
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
+  -H 'content-type: application/json' \
+  -H 'PAYMENT-SIGNATURE: <base64-encoded-x402-payment-payload>' \
+  -d '{
+    "requesterId": "wallet_123",
+    "question": "Should auction prints count?"
   }'
 ```
 
