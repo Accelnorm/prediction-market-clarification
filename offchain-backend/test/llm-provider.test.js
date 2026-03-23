@@ -159,6 +159,65 @@ test("generateMarketInterpretation loads the upcoming-market-review skill when r
   }
 });
 
+test("generateMarketInterpretation loads the gemini-clarification-response skill when requested", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          model: "openrouter/auto",
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  verdict: "needs_clarification",
+                  llm_status: "completed",
+                  reasoning: "The contract does not say whether Gemini auction prints count.",
+                  cited_clause: MARKET.resolution,
+                  ambiguity_score: 0.76,
+                  ambiguity_summary: "The qualifying Gemini print rule is not binding.",
+                  suggested_market_text:
+                    "Will Gemini BTC/USD spot trade above $100,000 on the primary Gemini BTC/USD continuous order book before December 31 2026 23:59 UTC?",
+                  suggested_note:
+                    "Exclude auctions and count only the first qualifying continuous-order-book execution."
+                })
+              }
+            }
+          ]
+        };
+      }
+    };
+  };
+
+  try {
+    await generateMarketInterpretation({
+      clarification: CLARIFICATION,
+      market: MARKET,
+      llmRuntime: {
+        provider: "openrouter",
+        apiKey: "openrouter-key",
+        model: "openrouter/auto",
+        baseUrl: "https://openrouter.test/api/v1"
+      },
+      promptProfile: "gemini-clarification-response"
+    });
+
+    const requestBody = JSON.parse(requests[0].options.body);
+    const systemPrompt = requestBody.messages[0].content;
+
+    assert.match(systemPrompt, /# Gemini Clarification Response/);
+    assert.match(systemPrompt, /Return output with these exact keys/);
+    assert.match(systemPrompt, /# Gemini Clarification Heuristics/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("generateMarketInterpretation uses an Anthropic-compatible provider response when configured", async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];

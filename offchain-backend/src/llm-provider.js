@@ -25,6 +25,10 @@ export function buildDefaultInterpretation({ market }) {
 }
 
 const PROMPT_PROFILE_FILES = {
+  "gemini-clarification-response": [
+    "../../new-skills/gemini-clarification-response/SKILL.md",
+    "../../new-skills/gemini-clarification-response/references/clarification-heuristics.md"
+  ],
   "upcoming-market-review": [
     "../../new-skills/upcoming-market-review/SKILL.md",
     "../../new-skills/upcoming-market-review/references/review-heuristics.md"

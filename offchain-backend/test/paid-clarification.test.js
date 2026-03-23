@@ -1107,6 +1107,117 @@ test("POST /api/clarify/:eventId can wait briefly and return a completed public 
   }
 });
 
+test("paid clarification pipeline sends the gemini clarification skill in the LLM prompt", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-prompt-"));
+  const repository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir);
+  const originalFetch = globalThis.fetch;
+  const llmRequests = [];
+  let nowCallCount = 0;
+  const timeline = [
+    "2026-03-21T19:29:00.000Z",
+    "2026-03-21T19:29:01.000Z",
+    "2026-03-21T19:29:02.000Z",
+    "2026-03-21T19:29:03.000Z"
+  ];
+
+  globalThis.fetch = async (url, options) => {
+    if (String(url).startsWith("https://openrouter.test/api/v1/")) {
+      llmRequests.push({ url, options });
+
+      return {
+        ok: true,
+        async json() {
+          return {
+            model: "openrouter/auto",
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    verdict: "needs_clarification",
+                    llm_status: "completed",
+                    reasoning: "The market text does not say whether Gemini auction prints count.",
+                    cited_clause: VALID_MARKET.resolution,
+                    ambiguity_score: 0.79,
+                    ambiguity_summary: "The qualifying Gemini execution rule is not explicit.",
+                    suggested_market_text:
+                      "Will Gemini BTC/USD spot trade above $100,000 on the primary Gemini BTC/USD continuous order book before December 31 2026 23:59 UTC?",
+                    suggested_note:
+                      "Exclude auctions and count only the first qualifying continuous-order-book trade."
+                  })
+                }
+              }
+            ]
+          };
+        }
+      };
+    }
+
+    return originalFetch(url, options);
+  };
+
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository: repository,
+    marketCacheRepository,
+    now: () => new Date(timeline[Math.min(nowCallCount++, timeline.length - 1)]),
+    createClarificationId: () => "clar_paid_prompt_001",
+    llmRuntime: {
+      provider: "openrouter",
+      apiKey: "openrouter-key",
+      model: "openrouter/auto",
+      baseUrl: "https://openrouter.test/api/v1"
+    }
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        requesterId: "wallet_prompt",
+        question: "Should Gemini BTC/USD auction prints be excluded?",
+        payment: {
+          proof: "pay_proof_prompt_001",
+          amount: "1.00",
+          asset: "USDC",
+          reference: "x402_ref_prompt_001",
+          verified: true
+        }
+      })
+    });
+
+    assert.equal(response.status, 202);
+
+    await waitFor(async () => {
+      const storedRequest = await repository.findByClarificationId("clar_paid_prompt_001");
+      assert.ok(storedRequest);
+      assert.equal(storedRequest.status, "completed");
+    });
+
+    assert.equal(llmRequests.length, 1);
+    const llmRequestBody = JSON.parse(llmRequests[0].options.body);
+    assert.match(llmRequestBody.messages[0].content, /# Gemini Clarification Response/);
+    assert.match(
+      llmRequestBody.messages[0].content,
+      /Return output with these exact keys/
+    );
+    assert.match(
+      llmRequestBody.messages[0].content,
+      /# Gemini Clarification Heuristics/
+    );
+
+    const storedRequest = await repository.findByClarificationId("clar_paid_prompt_001");
+    assert.equal(storedRequest.llmTrace.promptTemplateVersion, "gemini-clarification-response-v1");
+  } finally {
+    globalThis.fetch = originalFetch;
+    await stopTestServer(server);
+  }
+});
+
 test("POST /api/clarify/:eventId returns 202 when wait window expires before completion", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-wait-"));
   const repository = new FileClarificationRequestRepository(
