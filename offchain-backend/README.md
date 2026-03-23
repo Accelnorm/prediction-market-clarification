@@ -104,12 +104,11 @@ npm run start
 One-command Docker demo deploy from the repo root:
 
 ```bash
-cp .env.demo.example .env.demo
+cp .env.example .env
 ./scripts/deploy-demo.sh
 ```
 
-If you prefer the older demo-specific template name, [`.env.demo.example`](/home/user/gemini-pm/.env.demo.example) is also kept up to date.
-The demo template enables reviewer routes and sets `REVIEWER_AUTH_TOKEN=demo-reviewer-token` so the reviewer and prelaunch flows are immediately testable.
+The root env template includes `REVIEWER_AUTH_TOKEN=demo-reviewer-token`, and the demo compose file enables reviewer routes by default so the reviewer and prelaunch flows are immediately testable.
 
 ## Health Endpoints
 
