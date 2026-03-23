@@ -200,7 +200,7 @@ One-command demo deploy after creating root `.env`:
 
 The script runs `docker compose` against [`docker-compose.demo.yml`](/home/user/gemini-pm/docker-compose.demo.yml), starts a bundled Postgres instance, builds the backend image from [`offchain-backend/Dockerfile`](/home/user/gemini-pm/offchain-backend/Dockerfile), syncs Gemini markets on boot, and starts the API.
 
-Bootstrap the env file from [`.env.example`](/home/user/gemini-pm/.env.example):
+Bootstrap the env file from [`.env.example`](/home/user/gemini-pm/.env.example) or [`.env.demo.example`](/home/user/gemini-pm/.env.demo.example):
 
 ```bash
 cp .env.example .env

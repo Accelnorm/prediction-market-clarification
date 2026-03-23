@@ -107,6 +107,8 @@ cp .env.example .env
 ./scripts/deploy-demo.sh
 ```
 
+If you prefer the older demo-specific template name, [`.env.demo.example`](/home/user/gemini-pm/.env.demo.example) is also kept up to date.
+
 ## Health Endpoints
 
 - `GET /health/live`
