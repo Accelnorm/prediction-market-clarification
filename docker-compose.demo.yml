@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-gemini_pm}"
+      POSTGRES_USER: "${POSTGRES_USER:-gemini_pm}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-gemini_pm_demo_password}"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  offchain-backend:
+    build:
+      context: .
+      dockerfile: offchain-backend/Dockerfile
+    image: gemini-pm-demo
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      APP_ENV: production
+      DATABASE_URL: "postgres://${POSTGRES_USER:-gemini_pm}:${POSTGRES_PASSWORD:-gemini_pm_demo_password}@postgres:5432/${POSTGRES_DB:-gemini_pm}"
+      ENABLE_PHASE2_REVIEWER_ROUTES: "${ENABLE_PHASE2_REVIEWER_ROUTES:-0}"
+      ENABLE_TELEGRAM_ROUTES: "${ENABLE_TELEGRAM_ROUTES:-0}"
+      HOST: 0.0.0.0
+      PORT: 3000
+      LLM_PROVIDER: "${LLM_PROVIDER:-openrouter}"
+      LLM_MODEL: "${LLM_MODEL:-openrouter/auto}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      OPENROUTER_BASE_URL: "${OPENROUTER_BASE_URL:-}"
+      OPENROUTER_APP_URL: "${OPENROUTER_APP_URL:-}"
+      OPENROUTER_APP_NAME: "${OPENROUTER_APP_NAME:-gemini-pm}"
+      OPENAI_COMPATIBLE_API_KEY: "${OPENAI_COMPATIBLE_API_KEY:-}"
+      OPENAI_COMPATIBLE_BASE_URL: "${OPENAI_COMPATIBLE_BASE_URL:-}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      ANTHROPIC_BASE_URL: "${ANTHROPIC_BASE_URL:-}"
+      ANTHROPIC_VERSION: "${ANTHROPIC_VERSION:-}"
+      X402_RECIPIENT_ADDRESS: "${X402_RECIPIENT_ADDRESS:-}"
+      X402_NETWORK: "${X402_NETWORK:-}"
+      X402_MINT_ADDRESS: "${X402_MINT_ADDRESS:-}"
+      X402_FEE_PAYER: "${X402_FEE_PAYER:-}"
+      PAYAI_API_KEY_ID: "${PAYAI_API_KEY_ID:-}"
+      PAYAI_API_KEY_SECRET: "${PAYAI_API_KEY_SECRET:-}"
+      X402_FACILITATOR_URL: "${X402_FACILITATOR_URL:-}"
+      PUBLIC_API_BASE_URL: "${PUBLIC_API_BASE_URL:-}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_WEBHOOK_URL: "${TELEGRAM_WEBHOOK_URL:-}"
+      TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET:-}"
+      TELEGRAM_BOT_API_BASE_URL: "${TELEGRAM_BOT_API_BASE_URL:-}"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

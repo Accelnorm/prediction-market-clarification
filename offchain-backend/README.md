@@ -78,7 +78,7 @@ PORT=3000 \
 npm run start
 ```
 
-Strict Phase 1 demo / production-style start:
+Strict Phase 1 demo / production-style start with Postgres:
 
 ```bash
 cd offchain-backend
@@ -90,10 +90,21 @@ LLM_PROVIDER="openrouter" \
 OPENROUTER_API_KEY="replace-me" \
 LLM_MODEL="openrouter/auto" \
 X402_RECIPIENT_ADDRESS="<YOUR_SOLANA_USDC_RECIPIENT>" \
-PAYAI_API_KEY_ID="replace-me" \
-PAYAI_API_KEY_SECRET="payai_sk_replace-me" \
+X402_NETWORK="solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1" \
+X402_MINT_ADDRESS="4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" \
+X402_FEE_PAYER="CKPKJWNdJEqa81x7CkZ14BVPiY6y16Sxs7owznqtWYp5" \
+X402_FACILITATOR_URL="https://x402.org/facilitator" \
+PAYAI_API_KEY_ID="" \
+PAYAI_API_KEY_SECRET="" \
 PORT=3000 \
 npm run start
+```
+
+One-command Docker demo deploy from the repo root:
+
+```bash
+cp .env.example .env
+./scripts/deploy-demo.sh
 ```
 
 ## Health Endpoints
@@ -125,7 +136,7 @@ Use `/health/ready` for deployment health checks. It verifies runtime readiness 
 - `CLARIFICATION_PROCESSING_ACTIVITY_ENABLED`
 - `PUBLIC_API_BASE_URL`
 - `X402_VERSION`, `X402_SCHEME`, `X402_PRICE_USD`, `X402_MAX_AMOUNT_REQUIRED`
-- `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`
+- `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`, `X402_FEE_PAYER`
 - `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_API_BASE_URL`
 
@@ -143,7 +154,6 @@ In production mode, startup fails closed if these are missing or invalid:
 
 - `DATABASE_URL`
 - a real LLM provider API key
-- `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
 - a non-placeholder `X402_RECIPIENT_ADDRESS`
 - complete Telegram webhook config when Telegram is enabled
 
@@ -195,11 +205,12 @@ With Telegram enabled, the server registers the webhook on boot. Telegram remain
 
 For a hackathon demo, the backend is ready if you deploy it with:
 
-- Postgres enabled via `DATABASE_URL`
 - production mode enabled
+- Postgres via `DATABASE_URL`
 - a real LLM provider key
-- real PayAI facilitator credentials and a recipient address
+- a recipient address with a USDC token account on the selected network
+- either facilitator credentials or an unauthenticated facilitator path for low-volume verification
 - Phase 2 routes disabled
 - Telegram disabled unless you explicitly want it in the demo
 
-The main remaining gap is deployment ergonomics. The service does not yet ship with a Dockerfile or platform template, so deployment is still “manual Node process plus Postgres” rather than one-click.
+The repo now ships with a Dockerized single-service demo path through [`docker-compose.demo.yml`](/home/user/gemini-pm/docker-compose.demo.yml) and [`scripts/deploy-demo.sh`](/home/user/gemini-pm/scripts/deploy-demo.sh).

@@ -112,7 +112,7 @@ Useful environment variables:
 - `CLARIFICATION_FINALITY_STATIC_SECS`
 - `CLARIFICATION_PROCESSING_ACTIVITY_ENABLED`
 - `X402_VERSION`, `X402_SCHEME`, `X402_PRICE_USD`, `X402_MAX_AMOUNT_REQUIRED`
-- `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`
+- `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`, `X402_FEE_PAYER`
 - `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_API_BASE_URL`
 
@@ -158,39 +158,53 @@ curl http://127.0.0.1:3000/api/clarifications/<CLARIFICATION_ID>
 
 ## Hackathon Demo Path
 
-For a hackathon demo, the easiest deployment path is:
+For a hackathon demo, the recommended path is one Docker Compose stack with:
 
-1. One Node service running `offchain-backend`
-2. One Postgres database
-3. Phase 2 routes disabled: `ENABLE_PHASE2_REVIEWER_ROUTES=0`
-4. Telegram disabled unless you actively want it in the demo: `ENABLE_TELEGRAM_ROUTES=0`
-5. A startup job or manual step running `npm run sync:markets`
-6. Demo traffic hitting:
-   - `POST /api/clarify/:eventId`
-   - `GET /api/clarifications/:clarificationId`
+- one `offchain-backend` container
+- one bundled Postgres container
+- Phase 2 routes disabled
+- Telegram disabled unless you explicitly want it
 
 Minimal demo env:
 
 ```bash
-DATABASE_URL="postgres://<USER>:<PASS>@<HOST>:5432/<DB>"
 APP_ENV="production"
+DATABASE_URL="postgres://<USER>:<PASS>@<HOST>:5432/<DB>"
 ENABLE_PHASE2_REVIEWER_ROUTES="0"
 ENABLE_TELEGRAM_ROUTES="0"
 LLM_PROVIDER="openrouter"
 OPENROUTER_API_KEY="replace-me"
 LLM_MODEL="openrouter/auto"
 X402_RECIPIENT_ADDRESS="<YOUR_SOLANA_USDC_RECIPIENT>"
-PAYAI_API_KEY_ID="replace-me"
-PAYAI_API_KEY_SECRET="payai_sk_replace-me"
+X402_NETWORK="solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
+X402_MINT_ADDRESS="4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
+X402_FEE_PAYER="CKPKJWNdJEqa81x7CkZ14BVPiY6y16Sxs7owznqtWYp5"
+X402_FACILITATOR_URL="https://x402.org/facilitator"
+PAYAI_API_KEY_ID=""
+PAYAI_API_KEY_SECRET=""
 PORT="3000"
 ```
 
 That is enough for a hackathon demo as long as:
 
-- market sync has run successfully
-- the PayAI facilitator credentials are valid
 - the LLM provider key is valid
-- your deployment points to a working Postgres instance
+- the facilitator accepts unauthenticated low-volume verification or valid facilitator credentials are supplied
+- the recipient wallet has a USDC token account on the selected network
+- the Postgres volume can persist data
+
+One-command demo deploy after creating root `.env`:
+
+```bash
+./scripts/deploy-demo.sh
+```
+
+The script runs `docker compose` against [`docker-compose.demo.yml`](/home/user/gemini-pm/docker-compose.demo.yml), starts a bundled Postgres instance, builds the backend image from [`offchain-backend/Dockerfile`](/home/user/gemini-pm/offchain-backend/Dockerfile), syncs Gemini markets on boot, and starts the API.
+
+Bootstrap the env file from [`.env.example`](/home/user/gemini-pm/.env.example):
+
+```bash
+cp .env.example .env
+```
 
 ## Telegram
 
@@ -207,4 +221,4 @@ When Telegram is enabled, the server registers the webhook on boot. Telegram rem
 
 ## Status
 
-This backend is ready for a hackathon demo if you deploy it with Postgres, production-mode env vars, and Phase 2 routes disabled. It is not yet packaged into a one-command demo deployment like Docker or a platform template, so the main remaining gap is deployment ergonomics rather than core API functionality.
+This backend is ready for a hackathon demo as a one-command Docker Compose deployment with bundled Postgres, production-mode env vars, and Phase 2 routes disabled.

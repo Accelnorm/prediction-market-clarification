@@ -70,12 +70,6 @@ export function validateProductionRuntimeConfig({
     throw validationError("A real LLM API key is required in production.");
   }
 
-  if (!normalizeString(x402PaymentConfig?.facilitatorAuthToken) && !hasPayAIApiKeys(x402PaymentConfig)) {
-    throw validationError(
-      "PAYAI_API_KEY_ID and PAYAI_API_KEY_SECRET are required in production."
-    );
-  }
-
   if (!normalizeString(x402PaymentConfig?.recipientAddress)) {
     throw validationError("X402_RECIPIENT_ADDRESS is required in production.");
   }

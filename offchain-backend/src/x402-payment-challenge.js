@@ -2,6 +2,20 @@ function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function toUsdcBaseUnits(amount) {
+  const normalized = normalizeString(amount);
+
+  if (!normalized) {
+    return "0";
+  }
+
+  const [wholePart = "0", fractionalPart = ""] = normalized.split(".");
+  const paddedFractionalPart = `${fractionalPart}000000`.slice(0, 6);
+  const combined = `${wholePart}${paddedFractionalPart}`.replace(/^0+(?=\d)/, "");
+
+  return combined || "0";
+}
+
 function joinUrl(baseUrl, pathname) {
   if (!baseUrl) {
     return pathname;
@@ -23,10 +37,15 @@ export function buildClarificationPaymentRequirements({
   const normalizedRequesterId = normalizeString(requesterId);
 
   return {
+    ...(config.feePayer
+      ? {
+          feePayer: config.feePayer
+        }
+      : {}),
     x402Version: config.x402Version,
     scheme: config.scheme,
     network: config.network,
-    amount: config.priceUsd,
+    amount: toUsdcBaseUnits(config.priceUsd),
     maxAmountRequired: config.maxAmountRequired,
     asset: config.mintAddress,
     assetSymbol: config.assetSymbol,
@@ -38,6 +57,11 @@ export function buildClarificationPaymentRequirements({
     extra: {
       cluster: config.cluster,
       eventId,
+      ...(config.feePayer
+        ? {
+            feePayer: config.feePayer
+          }
+        : {}),
       requesterId: normalizedRequesterId || null,
       purpose: "clarification_request"
     }
@@ -61,5 +85,16 @@ export function buildX402PaymentRequiredPayload({ eventId, requesterId, config, 
       message: "A verified x402 payment of 1.00 USDC is required before creating a clarification."
     },
     paymentRequirements
+  };
+}
+
+export function buildX402PaymentRequiredHeader(payload) {
+  const primaryRequirement = payload.paymentRequirements[0] ?? null;
+
+  return {
+    x402Version: primaryRequirement?.x402Version ?? 2,
+    accepts: payload.paymentRequirements,
+    resource: primaryRequirement?.resource ?? null,
+    extensions: {}
   };
 }

@@ -74,6 +74,7 @@ export function loadX402PaymentConfig(env = process.env) {
     facilitatorUrl:
       normalizeString(env.X402_FACILITATOR_URL) ||
       "https://facilitator.payai.network",
+    feePayer: normalizeString(env.X402_FEE_PAYER) || null,
     facilitatorAuthToken: authConfig.facilitatorAuthToken,
     payaiApiKeyId: authConfig.payaiApiKeyId,
     payaiApiKeySecret: authConfig.payaiApiKeySecret,

@@ -12,6 +12,7 @@ import { FileMarketCacheRepository } from "../src/market-cache-repository.js";
 import { FileReviewerScanRepository } from "../src/reviewer-scan-repository.js";
 import { FileTradeActivityRepository } from "../src/trade-activity-repository.js";
 import { FileVerifiedPaymentRepository } from "../src/verified-payment-repository.js";
+import { buildX402PaymentRequiredHeader } from "../src/x402-payment-challenge.js";
 
 const DEFAULT_X402_PAYMENT_CONFIG = {
   x402Version: 2,
@@ -23,6 +24,7 @@ const DEFAULT_X402_PAYMENT_CONFIG = {
   cluster: "devnet",
   mintAddress: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
   recipientAddress: "11111111111111111111111111111111",
+  feePayer: "CKPKJWNdJEqa81x7CkZ14BVPiY6y16Sxs7owznqtWYp5",
   maxTimeoutSeconds: 300,
   facilitatorUrl: "https://facilitator.payai.network",
   facilitatorAuthToken: "test-token",
@@ -38,6 +40,8 @@ const VALID_MARKET = {
   url: "https://example.com/markets/btc-above-100k-2026",
   lastSyncedAt: "2026-03-21T18:59:00.000Z"
 };
+
+const EXPECTED_PAYMENT_FEE_PAYER = DEFAULT_X402_PAYMENT_CONFIG.feePayer;
 
 async function startTestServer(options) {
   const verifiedPaymentRepository =
@@ -183,7 +187,8 @@ test("POST /api/clarify/:eventId rejects unpaid requests", async () => {
     assert.equal(response.status, 402);
     const responseBody = await response.json();
     const paymentRequirements = responseBody.paymentRequirements;
-    assert.equal(typeof response.headers.get("payment-required"), "string");
+    const encodedPaymentRequired = response.headers.get("payment-required");
+    assert.equal(typeof encodedPaymentRequired, "string");
     assert.deepEqual(responseBody, {
       ok: false,
       error: {
@@ -194,10 +199,11 @@ test("POST /api/clarify/:eventId rejects unpaid requests", async () => {
     });
     assert.deepEqual(paymentRequirements, [
       {
+        feePayer: EXPECTED_PAYMENT_FEE_PAYER,
         x402Version: 2,
         scheme: "exact",
         network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
-        amount: "1.00",
+        amount: "1000000",
         maxAmountRequired: "1000000",
         asset: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
         assetSymbol: "USDC",
@@ -209,11 +215,16 @@ test("POST /api/clarify/:eventId rejects unpaid requests", async () => {
         extra: {
           cluster: "devnet",
           eventId: "gm_btc_above_100k",
+          feePayer: EXPECTED_PAYMENT_FEE_PAYER,
           requesterId: "wallet_001",
           purpose: "clarification_request"
         }
       }
     ]);
+    assert.deepEqual(
+      JSON.parse(Buffer.from(encodedPaymentRequired, "base64").toString("utf8")),
+      buildX402PaymentRequiredHeader(responseBody)
+    );
 
     const stored = await repository.load();
     assert.deepEqual(stored.requests, []);

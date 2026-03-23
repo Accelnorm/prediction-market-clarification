@@ -21,6 +21,7 @@ import { buildAdaptiveReviewWindow } from "./review-window-policy.js";
 import { createReviewerMarketScan } from "./reviewer-scan-service.js";
 import { parseClarificationRequestInput } from "./x402-paid-clarification.js";
 import { buildX402PaymentRequiredPayload } from "./x402-payment-challenge.js";
+import { buildX402PaymentRequiredHeader } from "./x402-payment-challenge.js";
 import { loadX402PaymentConfig } from "./x402-payment-config.js";
 import {
   extractX402PaymentCandidate,
@@ -1073,6 +1074,14 @@ export function createServer({
           return;
         }
 
+        logger.error("clarify.request.failed", {
+          requestId: requestContext.requestId,
+          path: requestUrl.pathname,
+          errorName: error?.name ?? "Error",
+          errorMessage: error?.message ?? "Unknown error",
+          errorStack: error?.stack ?? null
+        });
+
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -1137,9 +1146,10 @@ export function createServer({
             config: x402PaymentConfig,
             requestUrl
           });
+          const paymentRequiredHeader = buildX402PaymentRequiredHeader(challengePayload);
           sendJson(response, 402, challengePayload, {
             "payment-required": Buffer.from(
-              JSON.stringify(challengePayload.paymentRequirements),
+              JSON.stringify(paymentRequiredHeader),
               "utf8"
             ).toString("base64")
           });

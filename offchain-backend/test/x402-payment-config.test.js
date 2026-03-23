@@ -18,10 +18,12 @@ test("loadX402PaymentConfig defaults to PayAI facilitator and reads PayAI API ke
 
 test("loadX402PaymentConfig still accepts legacy facilitator bearer tokens", () => {
   const config = loadX402PaymentConfig({
-    X402_FACILITATOR_AUTH_TOKEN: "legacy-token"
+    X402_FACILITATOR_AUTH_TOKEN: "legacy-token",
+    X402_FEE_PAYER: "CKPKJWNdJEqa81x7CkZ14BVPiY6y16Sxs7owznqtWYp5"
   });
 
   assert.equal(config.facilitatorAuthToken, "legacy-token");
   assert.equal(config.payaiApiKeyId, null);
   assert.equal(config.payaiApiKeySecret, null);
+  assert.equal(config.feePayer, "CKPKJWNdJEqa81x7CkZ14BVPiY6y16Sxs7owznqtWYp5");
 });

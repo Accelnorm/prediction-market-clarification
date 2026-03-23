@@ -1,0 +1,8 @@
+.git
+.agents
+node_modules
+offchain-backend/node_modules
+apps/public-console/node_modules
+apps/public-console/dist
+offchain-backend/data
+**/.env

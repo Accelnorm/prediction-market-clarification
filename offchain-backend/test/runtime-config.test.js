@@ -50,6 +50,25 @@ test("production validation rejects missing critical configuration", () => {
   );
 });
 
+test("production validation accepts unauthenticated facilitator access", () => {
+  assert.doesNotThrow(() =>
+    validateProductionRuntimeConfig({
+      env: { NODE_ENV: "production" },
+      llmRuntime: { apiKey: "llm-key" },
+      x402PaymentConfig: {
+        facilitatorAuthToken: null,
+        payaiApiKeyId: null,
+        payaiApiKeySecret: null,
+        recipientAddress: VALID_X402_CONFIG.recipientAddress,
+        network: VALID_X402_CONFIG.network,
+        mintAddress: VALID_X402_CONFIG.mintAddress
+      },
+      telegramEnabled: false,
+      hasDatabase: true
+    })
+  );
+});
+
 test("production validation accepts legacy bearer-token auth while migrating", () => {
   assert.doesNotThrow(() =>
     validateProductionRuntimeConfig({
