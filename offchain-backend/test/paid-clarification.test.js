@@ -1107,7 +1107,7 @@ test("POST /api/clarify/:eventId can wait briefly and return a completed public 
   }
 });
 
-test("paid clarification pipeline sends the gemini clarification skill in the LLM prompt", async () => {
+test("paid clarification pipeline sends the issue clarification skill in the LLM prompt", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-prompt-"));
   const repository = new FileClarificationRequestRepository(
     path.join(tempDir, "clarification-requests.json")
@@ -1200,7 +1200,7 @@ test("paid clarification pipeline sends the gemini clarification skill in the LL
 
     assert.equal(llmRequests.length, 1);
     const llmRequestBody = JSON.parse(llmRequests[0].options.body);
-    assert.match(llmRequestBody.messages[0].content, /# Gemini Clarification Response/);
+    assert.match(llmRequestBody.messages[0].content, /# Issue Clarification Response/);
     assert.match(
       llmRequestBody.messages[0].content,
       /Return output with these exact keys/
@@ -1211,7 +1211,7 @@ test("paid clarification pipeline sends the gemini clarification skill in the LL
     );
 
     const storedRequest = await repository.findByClarificationId("clar_paid_prompt_001");
-    assert.equal(storedRequest.llmTrace.promptTemplateVersion, "gemini-clarification-response-v1");
+    assert.equal(storedRequest.llmTrace.promptTemplateVersion, "issue-clarification-response-v1");
   } finally {
     globalThis.fetch = originalFetch;
     await stopTestServer(server);

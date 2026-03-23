@@ -1,0 +1,4 @@
+interface:
+  display_name: "Issue Clarification Response"
+  short_description: "Answer Gemini clarification requests"
+  default_prompt: "Use $issue-clarification-response to answer a paid Gemini market clarification request with deterministic wording and an operator note."

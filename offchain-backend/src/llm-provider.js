@@ -25,13 +25,13 @@ export function buildDefaultInterpretation({ market }) {
 }
 
 const PROMPT_PROFILE_FILES = {
-  "gemini-clarification-response": [
-    "../../new-skills/gemini-clarification-response/SKILL.md",
-    "../../new-skills/gemini-clarification-response/references/clarification-heuristics.md"
+  "issue-clarification-response": [
+    "../../new-skills/issue-clarification-response/SKILL.md",
+    "../../new-skills/issue-clarification-response/references/clarification-heuristics.md"
   ],
-  "upcoming-market-review": [
-    "../../new-skills/upcoming-market-review/SKILL.md",
-    "../../new-skills/upcoming-market-review/references/review-heuristics.md"
+  "review-upcoming-market": [
+    "../../new-skills/review-upcoming-market/SKILL.md",
+    "../../new-skills/review-upcoming-market/references/review-heuristics.md"
   ]
 };
 

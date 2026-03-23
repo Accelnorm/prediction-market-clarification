@@ -1,0 +1,4 @@
+interface:
+  display_name: "Review Upcoming Market"
+  short_description: "Review upcoming markets for ambiguity"
+  default_prompt: "Use $review-upcoming-market to review an upcoming prediction market for ambiguity, issue severity, and clearer wording."

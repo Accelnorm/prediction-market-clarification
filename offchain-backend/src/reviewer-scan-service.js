@@ -101,7 +101,7 @@ export async function createReviewerMarketScan({
       },
       market,
       llmRuntime,
-      promptProfile: "upcoming-market-review"
+      promptProfile: "review-upcoming-market"
     });
     const reviewWindow = buildAdaptiveReviewWindow({
       clarification: {

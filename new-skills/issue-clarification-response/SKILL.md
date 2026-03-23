@@ -1,9 +1,9 @@
 ---
-name: gemini-clarification-response
+name: issue-clarification-response
 description: Answer a paid Gemini prediction-market clarification request by turning ambiguous market wording into a deterministic interpretation. Use when an LLM must respond to a concrete clarification question for an active or upcoming Gemini market, explain the highest-risk ambiguity, assign an ambiguity score, cite the operative clause, propose tighter market text, and write an operator note that makes the resolution rule binding.
 ---
 
-# Gemini Clarification Response
+# Issue Clarification Response
 
 ## Overview
 

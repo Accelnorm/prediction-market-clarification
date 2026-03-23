@@ -7,14 +7,14 @@ This repo currently centers on an API-first off-chain clarification service for 
 Repo-local skills now live under [`new-skills/`](/home/user/gemini-pm/new-skills).
 
 - [`new-skills/request-gemini-clarification/SKILL.md`](/home/user/gemini-pm/new-skills/request-gemini-clarification/SKILL.md) tells AI agents when Gemini market uncertainty should be escalated into a paid clarification request and how to use the API flow in [`new-skills/request-gemini-clarification/references/api-flow.md`](/home/user/gemini-pm/new-skills/request-gemini-clarification/references/api-flow.md).
-- [`new-skills/gemini-clarification-response/SKILL.md`](/home/user/gemini-pm/new-skills/gemini-clarification-response/SKILL.md) guides the paid-clarification LLM on how to answer a Gemini market clarification request with deterministic reasoning, a tighter rewrite, and an operator note.
-- [`new-skills/upcoming-market-review/SKILL.md`](/home/user/gemini-pm/new-skills/upcoming-market-review/SKILL.md) guides reviewer LLMs on how to detect ambiguity and other launch-blocking issues in upcoming markets and produce tighter replacement wording.
+- [`new-skills/issue-clarification-response/SKILL.md`](/home/user/gemini-pm/new-skills/issue-clarification-response/SKILL.md) guides the paid-clarification LLM on how to answer a Gemini market clarification request with deterministic reasoning, a tighter rewrite, and an operator note.
+- [`new-skills/review-upcoming-market/SKILL.md`](/home/user/gemini-pm/new-skills/review-upcoming-market/SKILL.md) guides reviewer LLMs on how to detect ambiguity and other launch-blocking issues in upcoming markets and produce tighter replacement wording.
 
 Use `$request-gemini-clarification` when an agent is unsure about Gemini market resolution criteria, price sources, timing, or settlement edge cases and needs a concrete clarification request path.
 
-Use `$gemini-clarification-response` when an agent or prompt needs to answer a paid Gemini clarification request by identifying the contract gap, citing the relevant clause, and proposing binding market wording.
+Use `$issue-clarification-response` when an agent or prompt needs to answer a paid Gemini clarification request by identifying the contract gap, citing the relevant clause, and proposing binding market wording.
 
-Use `$upcoming-market-review` when an agent is reviewing a proposed or upcoming market for ambiguity, unclear sources, time-boundary problems, missing conditional branches, or other issue patterns that could lead to a bad resolution.
+Use `$review-upcoming-market` when an agent is reviewing a proposed or upcoming market for ambiguity, unclear sources, time-boundary problems, missing conditional branches, or other issue patterns that could lead to a bad resolution.
 
 ## Phase 1 Scope
 

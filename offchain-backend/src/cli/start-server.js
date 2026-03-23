@@ -201,7 +201,7 @@ const server = createServer({
   clarificationFinalityConfig,
   llmTraceability: {
     promptTemplateVersion:
-      process.env.LLM_PROMPT_TEMPLATE_VERSION ?? "gemini-clarification-response-v1",
+      process.env.LLM_PROMPT_TEMPLATE_VERSION ?? "issue-clarification-response-v1",
     modelId: process.env.LLM_MODEL_ID ?? llmRuntime.model,
     processingVersion: process.env.LLM_PROCESSING_VERSION ?? "offchain-llm-pipeline-v1"
   },

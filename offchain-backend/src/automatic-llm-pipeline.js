@@ -65,7 +65,7 @@ export async function runAutomaticClarificationPipeline({
   llmRuntime,
   fetchTradesForSymbol,
   llmTraceability = {
-    promptTemplateVersion: "gemini-clarification-response-v1",
+    promptTemplateVersion: "issue-clarification-response-v1",
     modelId: "openrouter/auto",
     processingVersion: "offchain-llm-pipeline-v1"
   }
@@ -78,7 +78,7 @@ export async function runAutomaticClarificationPipeline({
     clarification,
     market,
     llmRuntime,
-    promptProfile: "gemini-clarification-response"
+    promptProfile: "issue-clarification-response"
   });
   const completedTimestamp = now().toISOString();
   const llmTrace = buildLlmTrace({ llmTraceability, requestedAt });

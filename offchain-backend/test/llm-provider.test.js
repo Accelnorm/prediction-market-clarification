@@ -100,7 +100,7 @@ test("generateMarketInterpretation uses an OpenAI-compatible provider response w
   }
 });
 
-test("generateMarketInterpretation loads the upcoming-market-review skill when requested", async () => {
+test("generateMarketInterpretation loads the review-upcoming-market skill when requested", async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];
 
@@ -145,13 +145,13 @@ test("generateMarketInterpretation loads the upcoming-market-review skill when r
         model: "openrouter/auto",
         baseUrl: "https://openrouter.test/api/v1"
       },
-      promptProfile: "upcoming-market-review"
+      promptProfile: "review-upcoming-market"
     });
 
     const requestBody = JSON.parse(requests[0].options.body);
     const systemPrompt = requestBody.messages[0].content;
 
-    assert.match(systemPrompt, /# Upcoming Market Review/);
+    assert.match(systemPrompt, /# Review Upcoming Market/);
     assert.match(systemPrompt, /Return output that fits the repo's reviewer scan shape/);
     assert.match(systemPrompt, /# Upcoming Market Review Heuristics/);
   } finally {
@@ -159,7 +159,7 @@ test("generateMarketInterpretation loads the upcoming-market-review skill when r
   }
 });
 
-test("generateMarketInterpretation loads the gemini-clarification-response skill when requested", async () => {
+test("generateMarketInterpretation loads the issue-clarification-response skill when requested", async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];
 
@@ -204,13 +204,13 @@ test("generateMarketInterpretation loads the gemini-clarification-response skill
         model: "openrouter/auto",
         baseUrl: "https://openrouter.test/api/v1"
       },
-      promptProfile: "gemini-clarification-response"
+      promptProfile: "issue-clarification-response"
     });
 
     const requestBody = JSON.parse(requests[0].options.body);
     const systemPrompt = requestBody.messages[0].content;
 
-    assert.match(systemPrompt, /# Gemini Clarification Response/);
+    assert.match(systemPrompt, /# Issue Clarification Response/);
     assert.match(systemPrompt, /Return output with these exact keys/);
     assert.match(systemPrompt, /# Gemini Clarification Heuristics/);
   } finally {

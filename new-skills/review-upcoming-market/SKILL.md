@@ -1,9 +1,9 @@
 ---
-name: upcoming-market-review
+name: review-upcoming-market
 description: Review proposed or upcoming prediction markets for ambiguity, unintelligibility, structural uncertainty, and resolver risk before launch. Use when an agent needs to decide whether a market is clear or needs clarification, identify the highest-risk issue in the market text, assign an ambiguity score, suggest tighter market wording, or draft an operator note for reviewer or prelaunch scan workflows.
 ---
 
-# Upcoming Market Review
+# Review Upcoming Market
 
 ## Overview
 
