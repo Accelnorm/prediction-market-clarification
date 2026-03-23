@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 function validationError(code, message, statusCode = 500) {
   const error = new Error(message);
   error.code = code;
@@ -22,7 +24,16 @@ export function buildDefaultInterpretation({ market }) {
   };
 }
 
-function buildSystemPrompt() {
+const PROMPT_PROFILE_FILES = {
+  "upcoming-market-review": [
+    "../../new-skills/upcoming-market-review/SKILL.md",
+    "../../new-skills/upcoming-market-review/references/review-heuristics.md"
+  ]
+};
+
+const promptProfileCache = new Map();
+
+function buildDefaultSystemPrompt() {
   return [
     "You are a prediction-market clarification reviewer.",
     "Analyze the market text and the user's question.",
@@ -34,6 +45,39 @@ function buildSystemPrompt() {
     "cited_clause must quote or restate the most relevant resolution clause.",
     "Do not include markdown fences or extra commentary."
   ].join(" ");
+}
+
+async function readPromptProfile(profile) {
+  if (!profile || !PROMPT_PROFILE_FILES[profile]) {
+    return buildDefaultSystemPrompt();
+  }
+
+  if (promptProfileCache.has(profile)) {
+    return promptProfileCache.get(profile);
+  }
+
+  const promptPromise = (async () => {
+    const sections = await Promise.all(
+      PROMPT_PROFILE_FILES[profile].map((relativePath) =>
+        readFile(new URL(relativePath, import.meta.url), "utf8")
+      )
+    );
+
+    return [
+      "You are a prediction-market clarification reviewer.",
+      "Use the following repo skill instructions as the system prompt for this review.",
+      ...sections
+    ].join("\n\n");
+  })();
+
+  promptProfileCache.set(profile, promptPromise);
+
+  try {
+    return await promptPromise;
+  } catch (error) {
+    promptProfileCache.delete(profile);
+    throw error;
+  }
 }
 
 function buildUserPrompt({ clarification, market }) {
@@ -326,7 +370,8 @@ function resolveRuntime(llmRuntime = {}) {
 export async function generateMarketInterpretation({
   clarification,
   market,
-  llmRuntime
+  llmRuntime,
+  promptProfile = null
 }) {
   const runtime = resolveRuntime(llmRuntime);
 
@@ -347,7 +392,7 @@ export async function generateMarketInterpretation({
     };
   }
 
-  const systemPrompt = buildSystemPrompt();
+  const systemPrompt = await readPromptProfile(promptProfile);
   const userPrompt = buildUserPrompt({ clarification, market });
   const response =
     runtime.provider === "anthropic-compatible"

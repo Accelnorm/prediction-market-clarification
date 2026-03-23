@@ -264,6 +264,12 @@ test("prelaunch scan-all only analyzes future upcoming markets and reuses identi
     assert.equal(scanAllPayload.ok, true);
     assert.equal(scanAllPayload.scans.length, 2);
     assert.equal(llmRequests.length, 1);
+    const llmRequestBody = JSON.parse(llmRequests[0].options.body);
+    assert.match(llmRequestBody.messages[0].content, /# Upcoming Market Review/);
+    assert.match(
+      llmRequestBody.messages[0].content,
+      /Return output that fits the repo's reviewer scan shape/
+    );
 
     const storedScans = await upcomingReviewerScanRepository.list();
     assert.equal(storedScans.length, 2);

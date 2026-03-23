@@ -100,6 +100,65 @@ test("generateMarketInterpretation uses an OpenAI-compatible provider response w
   }
 });
 
+test("generateMarketInterpretation loads the upcoming-market-review skill when requested", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url, options });
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          model: "openrouter/auto",
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  verdict: "needs_clarification",
+                  llm_status: "completed",
+                  reasoning: "The deadline semantics are underspecified.",
+                  cited_clause: MARKET.resolution,
+                  ambiguity_score: 0.74,
+                  ambiguity_summary: "The contract lacks a binding source and edge-case rule.",
+                  suggested_market_text:
+                    "Will Gemini BTC/USD spot trade above $100,000 on the primary Gemini BTC/USD order book before December 31 2026 23:59 UTC?",
+                  suggested_note:
+                    "Bind settlement to the primary Gemini BTC/USD order book and define the first qualifying trade."
+                })
+              }
+            }
+          ]
+        };
+      }
+    };
+  };
+
+  try {
+    await generateMarketInterpretation({
+      clarification: CLARIFICATION,
+      market: MARKET,
+      llmRuntime: {
+        provider: "openrouter",
+        apiKey: "openrouter-key",
+        model: "openrouter/auto",
+        baseUrl: "https://openrouter.test/api/v1"
+      },
+      promptProfile: "upcoming-market-review"
+    });
+
+    const requestBody = JSON.parse(requests[0].options.body);
+    const systemPrompt = requestBody.messages[0].content;
+
+    assert.match(systemPrompt, /# Upcoming Market Review/);
+    assert.match(systemPrompt, /Return output that fits the repo's reviewer scan shape/);
+    assert.match(systemPrompt, /# Upcoming Market Review Heuristics/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("generateMarketInterpretation uses an Anthropic-compatible provider response when configured", async () => {
   const originalFetch = globalThis.fetch;
   const requests = [];

@@ -100,7 +100,8 @@ export async function createReviewerMarketScan({
         question: `Review this market for ambiguity and suggest clarifying edits.`
       },
       market,
-      llmRuntime
+      llmRuntime,
+      promptProfile: "upcoming-market-review"
     });
     const reviewWindow = buildAdaptiveReviewWindow({
       clarification: {
