@@ -1,0 +1,4 @@
+interface:
+  display_name: "Request Gemini Clarification"
+  short_description: "Ask Gemini for market clarification guidance"
+  default_prompt: "Use $request-gemini-clarification to turn Gemini market uncertainty into a concrete clarification request."
