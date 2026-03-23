@@ -14,6 +14,13 @@ function validationError(message) {
   return error;
 }
 
+function hasPayAIApiKeys(x402PaymentConfig) {
+  return (
+    normalizeString(x402PaymentConfig?.payaiApiKeyId) &&
+    normalizeString(x402PaymentConfig?.payaiApiKeySecret)
+  );
+}
+
 export function isProductionRuntime(env = process.env) {
   return (
     normalizeString(env.APP_ENV).toLowerCase() === "production" ||
@@ -63,8 +70,10 @@ export function validateProductionRuntimeConfig({
     throw validationError("A real LLM API key is required in production.");
   }
 
-  if (!normalizeString(x402PaymentConfig?.facilitatorAuthToken)) {
-    throw validationError("X402_FACILITATOR_AUTH_TOKEN is required in production.");
+  if (!normalizeString(x402PaymentConfig?.facilitatorAuthToken) && !hasPayAIApiKeys(x402PaymentConfig)) {
+    throw validationError(
+      "PAYAI_API_KEY_ID and PAYAI_API_KEY_SECRET are required in production."
+    );
   }
 
   if (!normalizeString(x402PaymentConfig?.recipientAddress)) {

@@ -113,7 +113,7 @@ Useful environment variables:
 - `CLARIFICATION_PROCESSING_ACTIVITY_ENABLED`
 - `X402_VERSION`, `X402_SCHEME`, `X402_PRICE_USD`, `X402_MAX_AMOUNT_REQUIRED`
 - `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`
-- `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `X402_FACILITATOR_AUTH_TOKEN`
+- `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_API_BASE_URL`
 
 Clarification timing modes:
@@ -180,14 +180,15 @@ LLM_PROVIDER="openrouter"
 OPENROUTER_API_KEY="replace-me"
 LLM_MODEL="openrouter/auto"
 X402_RECIPIENT_ADDRESS="<YOUR_SOLANA_USDC_RECIPIENT>"
-X402_FACILITATOR_AUTH_TOKEN="replace-me"
+PAYAI_API_KEY_ID="replace-me"
+PAYAI_API_KEY_SECRET="payai_sk_replace-me"
 PORT="3000"
 ```
 
 That is enough for a hackathon demo as long as:
 
 - market sync has run successfully
-- the x402 facilitator token is valid
+- the PayAI facilitator credentials are valid
 - the LLM provider key is valid
 - your deployment points to a working Postgres instance
 

@@ -3,6 +3,7 @@ import {
   validationError
 } from "./x402-paid-clarification.js";
 import { buildClarificationPaymentRequirements } from "./x402-payment-challenge.js";
+import { createPayAIAuthHeaders } from "@payai/facilitator";
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -113,25 +114,30 @@ async function verifyWithFacilitator({
   requestUrl,
   fetchImpl
 }) {
-  if (!config.facilitatorAuthToken) {
-    throw paymentVerificationError(
-      503,
-      "PAYMENT_VERIFICATION_UNAVAILABLE",
-      "x402 payment verification is not configured on this server."
-    );
-  }
-
   const paymentRequirements = buildClarificationPaymentRequirements({
     eventId: requestContext.eventId,
     requesterId: requestContext.requesterId,
     config,
     requestUrl
   });
+  let authHeaders = {};
+
+  if (config.payaiApiKeyId && config.payaiApiKeySecret) {
+    authHeaders = (await createPayAIAuthHeaders(
+      config.payaiApiKeyId,
+      config.payaiApiKeySecret
+    )()).verify;
+  } else if (config.facilitatorAuthToken) {
+    authHeaders = {
+      authorization: `Bearer ${config.facilitatorAuthToken}`
+    };
+  }
+
   const verificationResponse = await fetchImpl(`${config.facilitatorUrl}/verify`, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${config.facilitatorAuthToken}`,
-      "content-type": "application/json"
+      "content-type": "application/json",
+      ...authHeaders
     },
     body: JSON.stringify({
       x402Version: config.x402Version,

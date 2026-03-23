@@ -90,7 +90,8 @@ LLM_PROVIDER="openrouter" \
 OPENROUTER_API_KEY="replace-me" \
 LLM_MODEL="openrouter/auto" \
 X402_RECIPIENT_ADDRESS="<YOUR_SOLANA_USDC_RECIPIENT>" \
-X402_FACILITATOR_AUTH_TOKEN="replace-me" \
+PAYAI_API_KEY_ID="replace-me" \
+PAYAI_API_KEY_SECRET="payai_sk_replace-me" \
 PORT=3000 \
 npm run start
 ```
@@ -125,7 +126,7 @@ Use `/health/ready` for deployment health checks. It verifies runtime readiness 
 - `PUBLIC_API_BASE_URL`
 - `X402_VERSION`, `X402_SCHEME`, `X402_PRICE_USD`, `X402_MAX_AMOUNT_REQUIRED`
 - `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`
-- `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `X402_FACILITATOR_AUTH_TOKEN`
+- `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_API_BASE_URL`
 
 Clarification timing config:
@@ -142,7 +143,7 @@ In production mode, startup fails closed if these are missing or invalid:
 
 - `DATABASE_URL`
 - a real LLM provider API key
-- `X402_FACILITATOR_AUTH_TOKEN`
+- `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
 - a non-placeholder `X402_RECIPIENT_ADDRESS`
 - complete Telegram webhook config when Telegram is enabled
 
@@ -197,7 +198,7 @@ For a hackathon demo, the backend is ready if you deploy it with:
 - Postgres enabled via `DATABASE_URL`
 - production mode enabled
 - a real LLM provider key
-- a real x402 facilitator token and recipient address
+- real PayAI facilitator credentials and a recipient address
 - Phase 2 routes disabled
 - Telegram disabled unless you explicitly want it in the demo
 

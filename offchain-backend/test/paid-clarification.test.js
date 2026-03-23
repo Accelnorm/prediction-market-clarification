@@ -24,7 +24,7 @@ const DEFAULT_X402_PAYMENT_CONFIG = {
   mintAddress: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
   recipientAddress: "11111111111111111111111111111111",
   maxTimeoutSeconds: 300,
-  facilitatorUrl: "https://api.cdp.coinbase.com/platform/v2/x402",
+  facilitatorUrl: "https://facilitator.payai.network",
   facilitatorAuthToken: "test-token",
   verificationSource: "test_verifier"
 };

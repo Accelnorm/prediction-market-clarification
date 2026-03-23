@@ -9,7 +9,8 @@ import {
 } from "../src/runtime-config.js";
 
 const VALID_X402_CONFIG = {
-  facilitatorAuthToken: "facilitator-token",
+  payaiApiKeyId: "payai-key-id",
+  payaiApiKeySecret: "payai_sk_test-secret",
   recipientAddress: "7Y9Yk3Lx4n1u4V7S1k4U6yWw2o1j9mA8Y7h6R5q4P3d2",
   network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
   mintAddress: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
@@ -36,6 +37,8 @@ test("production validation rejects missing critical configuration", () => {
         llmRuntime: { apiKey: null },
         x402PaymentConfig: {
           facilitatorAuthToken: null,
+          payaiApiKeyId: null,
+          payaiApiKeySecret: null,
           recipientAddress: "11111111111111111111111111111111",
           network: "",
           mintAddress: ""
@@ -44,6 +47,25 @@ test("production validation rejects missing critical configuration", () => {
         hasDatabase: false
       }),
     /DATABASE_URL is required in production/
+  );
+});
+
+test("production validation accepts legacy bearer-token auth while migrating", () => {
+  assert.doesNotThrow(() =>
+    validateProductionRuntimeConfig({
+      env: { NODE_ENV: "production" },
+      llmRuntime: { apiKey: "llm-key" },
+      x402PaymentConfig: {
+        facilitatorAuthToken: "legacy-token",
+        payaiApiKeyId: null,
+        payaiApiKeySecret: null,
+        recipientAddress: VALID_X402_CONFIG.recipientAddress,
+        network: VALID_X402_CONFIG.network,
+        mintAddress: VALID_X402_CONFIG.mintAddress
+      },
+      telegramEnabled: false,
+      hasDatabase: true
+    })
   );
 });
 

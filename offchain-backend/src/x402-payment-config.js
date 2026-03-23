@@ -7,6 +7,18 @@ function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function resolveFacilitatorAuthConfig(env) {
+  const payaiApiKeyId = normalizeString(env.PAYAI_API_KEY_ID) || null;
+  const payaiApiKeySecret = normalizeString(env.PAYAI_API_KEY_SECRET) || null;
+  const facilitatorAuthToken = normalizeString(env.X402_FACILITATOR_AUTH_TOKEN) || null;
+
+  return {
+    payaiApiKeyId,
+    payaiApiKeySecret,
+    facilitatorAuthToken
+  };
+}
+
 function resolveNetworkIdentifier(value) {
   const normalized = normalizeString(value).toLowerCase();
 
@@ -43,6 +55,7 @@ function resolveDefaultMint(network) {
 export function loadX402PaymentConfig(env = process.env) {
   const network = resolveNetworkIdentifier(env.X402_NETWORK);
   const cluster = resolveCluster(network);
+  const authConfig = resolveFacilitatorAuthConfig(env);
 
   return {
     x402Version: Number.parseInt(env.X402_VERSION ?? "2", 10),
@@ -60,10 +73,12 @@ export function loadX402PaymentConfig(env = process.env) {
     maxTimeoutSeconds: Number.parseInt(env.X402_MAX_TIMEOUT_SECONDS ?? "300", 10),
     facilitatorUrl:
       normalizeString(env.X402_FACILITATOR_URL) ||
-      "https://api.cdp.coinbase.com/platform/v2/x402",
-    facilitatorAuthToken: normalizeString(env.X402_FACILITATOR_AUTH_TOKEN) || null,
+      "https://facilitator.payai.network",
+    facilitatorAuthToken: authConfig.facilitatorAuthToken,
+    payaiApiKeyId: authConfig.payaiApiKeyId,
+    payaiApiKeySecret: authConfig.payaiApiKeySecret,
     verificationSource:
-      normalizeString(env.X402_VERIFICATION_SOURCE) || "coinbase_cdp_facilitator",
+      normalizeString(env.X402_VERIFICATION_SOURCE) || "payai_facilitator",
     resourceBaseUrl: normalizeString(env.PUBLIC_API_BASE_URL) || null
   };
 }
