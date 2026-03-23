@@ -41,6 +41,18 @@ const VALID_MARKET = {
   lastSyncedAt: "2026-03-21T18:59:00.000Z"
 };
 
+const UPCOMING_MARKET = {
+  marketId: "gm_sol_above_500",
+  title: "Will SOL trade above $500 before year end?",
+  resolution: "Resolves YES if Gemini SOL/USD prints above $500 before December 31 2026 23:59 UTC.",
+  closesAt: "2026-12-31T23:59:00.000Z",
+  effectiveDate: "2026-04-01T00:00:00.000Z",
+  slug: "sol-above-500-2026",
+  url: "https://example.com/markets/sol-above-500-2026",
+  status: "approved",
+  lastSyncedAt: "2026-03-21T18:59:00.000Z"
+};
+
 const EXPECTED_PAYMENT_FEE_PAYER = DEFAULT_X402_PAYMENT_CONFIG.feePayer;
 
 async function startTestServer(options) {
@@ -121,6 +133,12 @@ function createPaymentSignatureHeaders(paymentPayload, extraHeaders = {}) {
 
 async function createMarketCacheRepository(tempDir, markets = [VALID_MARKET]) {
   const repository = new FileMarketCacheRepository(path.join(tempDir, "market-cache.json"));
+  await repository.save(markets);
+  return repository;
+}
+
+async function createUpcomingMarketCacheRepository(tempDir, markets = [UPCOMING_MARKET]) {
+  const repository = new FileMarketCacheRepository(path.join(tempDir, "upcoming-market-cache.json"));
   await repository.save(markets);
   return repository;
 }
@@ -301,6 +319,7 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
       source: "paid_api",
       status: "processing",
       eventId: "gm_btc_above_100k",
+      marketStage: "active",
       question: "Should trades during a maintenance window count?",
       normalizedInput: {
         eventId: "gm_btc_above_100k",
@@ -353,6 +372,73 @@ test("POST /api/clarify/:eventId creates a processing clarification after verifi
         }
       ]
     });
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("POST /api/clarify/:eventId accepts synced upcoming markets and reviewer detail resolves the upcoming cache", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "paid-clarification-upcoming-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
+  const marketCacheRepository = await createMarketCacheRepository(tempDir, []);
+  const upcomingMarketCacheRepository = await createUpcomingMarketCacheRepository(tempDir);
+
+  const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
+    marketCacheRepository,
+    upcomingMarketCacheRepository,
+    now: () => new Date("2026-03-21T19:05:00.000Z"),
+    createClarificationId: () => "clar_upcoming_001",
+    reviewerAuthToken: "reviewer-secret",
+    runAutomaticClarificationPipeline: async () => {}
+  });
+
+  try {
+    const response = await fetch(`${baseUrl}/api/clarify/gm_sol_above_500`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        requesterId: "wallet_upcoming_001",
+        question: "If trading opens late, does the same expiry still apply?",
+        payment: {
+          proof: "pay_proof_upcoming_001",
+          amount: "1.00",
+          asset: "USDC",
+          reference: "x402_ref_upcoming_001",
+          verified: true
+        }
+      })
+    });
+
+    assert.equal(response.status, 202);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      clarificationId: "clar_upcoming_001",
+      status: "processing"
+    });
+
+    const storedClarification = await clarificationRequestRepository.findByClarificationId(
+      "clar_upcoming_001"
+    );
+    assert.equal(storedClarification.marketStage, "upcoming");
+
+    const reviewerResponse = await fetch(
+      `${baseUrl}/api/reviewer/clarifications/clar_upcoming_001`,
+      {
+        headers: createReviewerHeaders()
+      }
+    );
+
+    assert.equal(reviewerResponse.status, 200);
+    const reviewerPayload = await reviewerResponse.json();
+    assert.equal(reviewerPayload.clarification.eventId, "gm_sol_above_500");
+    assert.equal(reviewerPayload.clarification.market.marketId, "gm_sol_above_500");
+    assert.equal(reviewerPayload.clarification.market.title, UPCOMING_MARKET.title);
+    assert.equal(reviewerPayload.clarification.market.status, "approved");
   } finally {
     await stopTestServer(server);
   }
@@ -615,7 +701,7 @@ test("POST /api/clarify/:eventId rejects unsupported event ids", async () => {
       ok: false,
       error: {
         code: "UNSUPPORTED_EVENT_ID",
-        message: "Event id must match an active synced market before a clarification can be created."
+        message: "Event id must match an active or upcoming synced market before a clarification can be created."
       }
     });
 
@@ -2548,7 +2634,8 @@ test("POST /api/clarify/:eventId enqueues a retryable interpretation job and ret
         retryable: false,
         target: {
           clarificationId: "clar_paid_pipeline_fail_001",
-          eventId: "gm_btc_above_100k"
+          eventId: "gm_btc_above_100k",
+          marketStage: "active"
         }
       }
     });
@@ -2570,7 +2657,8 @@ test("POST /api/clarify/:eventId enqueues a retryable interpretation job and ret
       retryable: true,
       target: {
         clarificationId: "clar_paid_pipeline_fail_001",
-        eventId: "gm_btc_above_100k"
+        eventId: "gm_btc_above_100k",
+        marketStage: "active"
       },
       errorMessage: "LLM provider timeout",
       result: null
@@ -2614,7 +2702,8 @@ test("POST /api/clarify/:eventId enqueues a retryable interpretation job and ret
         retryable: true,
         target: {
           clarificationId: "clar_paid_pipeline_fail_001",
-          eventId: "gm_btc_above_100k"
+          eventId: "gm_btc_above_100k",
+          marketStage: "active"
         }
       }
     });
@@ -2637,7 +2726,8 @@ test("POST /api/clarify/:eventId enqueues a retryable interpretation job and ret
       retryable: false,
       target: {
         clarificationId: "clar_paid_pipeline_fail_001",
-        eventId: "gm_btc_above_100k"
+        eventId: "gm_btc_above_100k",
+        marketStage: "active"
       },
       errorMessage: null,
       result: {

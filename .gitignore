@@ -4,3 +4,4 @@ offchain-backend/node_modules/
 .agents/
 skills-lock.json
 **/.env
+.env.demo

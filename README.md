@@ -180,7 +180,7 @@ For a hackathon demo, the recommended path is one Docker Compose stack with:
 
 - one `offchain-backend` container
 - one bundled Postgres container
-- Phase 2 routes disabled
+- Phase 2 reviewer routes enabled for demo use
 - Telegram disabled unless you explicitly want it
 
 Minimal demo env:
@@ -188,7 +188,8 @@ Minimal demo env:
 ```bash
 APP_ENV="production"
 DATABASE_URL="postgres://<USER>:<PASS>@<HOST>:5432/<DB>"
-ENABLE_PHASE2_REVIEWER_ROUTES="0"
+ENABLE_PHASE2_REVIEWER_ROUTES="1"
+REVIEWER_AUTH_TOKEN="demo-reviewer-token"
 ENABLE_TELEGRAM_ROUTES="0"
 LLM_PROVIDER="openrouter"
 OPENROUTER_API_KEY="replace-me"
@@ -219,11 +220,19 @@ One-command demo deploy after creating root `.env`:
 ```
 
 The script runs `docker compose` against [`docker-compose.demo.yml`](/home/user/gemini-pm/docker-compose.demo.yml), starts a bundled Postgres instance, builds the backend image from [`offchain-backend/Dockerfile`](/home/user/gemini-pm/offchain-backend/Dockerfile), syncs Gemini markets on boot, and starts the API.
+It also prints the configured reviewer demo token after startup so you can immediately test the reviewer and prelaunch flows.
 
 Bootstrap the env file from [`.env.example`](/home/user/gemini-pm/.env.example) or [`.env.demo.example`](/home/user/gemini-pm/.env.demo.example):
 
 ```bash
 cp .env.example .env
+```
+
+For the bundled demo path, [`.env.demo.example`](/home/user/gemini-pm/.env.demo.example) enables reviewer routes by default and includes a demo reviewer token:
+
+```bash
+cp .env.demo.example .env.demo
+./scripts/deploy-demo.sh
 ```
 
 ## Telegram

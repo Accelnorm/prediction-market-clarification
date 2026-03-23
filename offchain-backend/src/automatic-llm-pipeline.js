@@ -58,6 +58,7 @@ export async function runAutomaticClarificationPipeline({
   artifactRepository,
   artifactPublisher,
   marketCacheRepository,
+  resolveMarketByClarification = null,
   tradeActivityRepository,
   clarificationFinalityConfig,
   now,
@@ -69,7 +70,9 @@ export async function runAutomaticClarificationPipeline({
     processingVersion: "offchain-llm-pipeline-v1"
   }
 }) {
-  const market = await marketCacheRepository.findByMarketId(clarification.eventId);
+  const market = resolveMarketByClarification
+    ? await resolveMarketByClarification(clarification)
+    : await marketCacheRepository.findByMarketId(clarification.eventId);
   const requestedAt = now().toISOString();
   const interpretation = await generateMarketInterpretation({
     clarification,

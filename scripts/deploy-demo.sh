@@ -16,7 +16,23 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-exec docker compose \
+REVIEWER_TOKEN="$(awk -F= '
+  $1 == "REVIEWER_AUTH_TOKEN" {
+    value = substr($0, index($0, "=") + 1)
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+    print value
+    exit
+  }
+' "$ENV_FILE" 2>/dev/null || true)"
+
+docker compose \
   --env-file "$ENV_FILE" \
   -f "$ROOT_DIR/docker-compose.demo.yml" \
   up -d --build
+
+echo "Demo deployment started with env file: $ENV_FILE"
+
+if [ -n "$REVIEWER_TOKEN" ]; then
+  echo "Reviewer demo auth token: $REVIEWER_TOKEN"
+  echo "Use it as the x-reviewer-token header or in the reviewer console session form."
+fi

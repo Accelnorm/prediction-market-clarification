@@ -824,6 +824,33 @@ export function createServer({
     return marketStage === "upcoming" ? upcomingReviewerScanRepository : reviewerScanRepository;
   }
 
+  async function findMarketByEventId(eventId, marketStage = "active") {
+    if (!eventId) {
+      return null;
+    }
+
+    return getMarketRepositoryForStage(marketStage)?.findByMarketId?.(eventId) ?? null;
+  }
+
+  async function findMarketForClarification(clarification) {
+    if (!clarification?.eventId) {
+      return null;
+    }
+
+    const preferredStage = clarification.marketStage ?? "active";
+    const preferredMarket = await findMarketByEventId(clarification.eventId, preferredStage);
+
+    if (preferredMarket) {
+      return preferredMarket;
+    }
+
+    if (preferredStage !== "upcoming") {
+      return findMarketByEventId(clarification.eventId, "upcoming");
+    }
+
+    return findMarketByEventId(clarification.eventId, "active");
+  }
+
   async function getAvailableCategoriesForStage(marketStage = "active") {
     const repository =
       marketStage === "upcoming" ? upcomingCategoryCatalogRepository : categoryCatalogRepository;
@@ -851,7 +878,7 @@ export function createServer({
 
   async function buildPublicClarificationResponse(clarification) {
     const market = clarification.eventId
-      ? await marketCacheRepository?.findByMarketId(clarification.eventId)
+      ? await findMarketForClarification(clarification)
       : null;
     const timing = await buildClarificationTimingForResponse({
       clarification,
@@ -961,7 +988,10 @@ export function createServer({
         clarificationRequestRepository,
         artifactRepository,
         artifactPublisher,
-        marketCacheRepository,
+        marketCacheRepository: getMarketRepositoryForStage(
+          clarification?.marketStage ?? job.target.marketStage ?? "active"
+        ),
+        resolveMarketByClarification: findMarketForClarification,
         tradeActivityRepository,
         clarificationFinalityConfig,
         now,
@@ -1238,11 +1268,14 @@ export function createServer({
         );
         const body = await readJsonBody(request);
         const payload = parseClarificationRequestInput(body);
-        const supportedMarket = await marketCacheRepository?.findByMarketId(eventId);
+        const activeMarket = await findMarketByEventId(eventId, "active");
+        const upcomingMarket = activeMarket ? null : await findMarketByEventId(eventId, "upcoming");
+        const supportedMarket = activeMarket ?? upcomingMarket;
+        const marketStage = upcomingMarket ? "upcoming" : "active";
 
         if (!supportedMarket) {
           const error = new Error(
-            "Event id must match an active synced market before a clarification can be created."
+            "Event id must match an active or upcoming synced market before a clarification can be created."
           );
           error.statusCode = 404;
           error.code = "UNSUPPORTED_EVENT_ID";
@@ -1319,6 +1352,7 @@ export function createServer({
           source: "paid_api",
           status: "queued",
           eventId,
+          marketStage,
           question: payload.question,
           normalizedInput: {
             eventId,
@@ -1350,7 +1384,8 @@ export function createServer({
           retryable: false,
           target: {
             clarificationId: clarificationPayload.clarificationId,
-            eventId
+            eventId,
+            marketStage
           },
           errorMessage: null,
           result: null
@@ -1430,7 +1465,10 @@ export function createServer({
                 clarificationRequestRepository,
                 artifactRepository,
                 artifactPublisher,
-                marketCacheRepository,
+                marketCacheRepository: getMarketRepositoryForStage(
+                  processingClarification?.marketStage ?? "active"
+                ),
+                resolveMarketByClarification: findMarketForClarification,
                 tradeActivityRepository,
                 clarificationFinalityConfig,
                 now,
@@ -2626,7 +2664,7 @@ export function createServer({
         }
 
         const market = clarification.eventId
-          ? await marketCacheRepository?.findByMarketId(clarification.eventId)
+          ? await findMarketForClarification(clarification)
           : null;
         const adaptiveReviewWindow = buildAdaptiveReviewWindow({
           clarification,

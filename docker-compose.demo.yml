@@ -29,7 +29,8 @@ services:
     environment:
       APP_ENV: production
       DATABASE_URL: "postgres://${POSTGRES_USER:-gemini_pm}:${POSTGRES_PASSWORD:-gemini_pm_demo_password}@postgres:5432/${POSTGRES_DB:-gemini_pm}"
-      ENABLE_PHASE2_REVIEWER_ROUTES: "${ENABLE_PHASE2_REVIEWER_ROUTES:-0}"
+      ENABLE_PHASE2_REVIEWER_ROUTES: "${ENABLE_PHASE2_REVIEWER_ROUTES:-1}"
+      REVIEWER_AUTH_TOKEN: "${REVIEWER_AUTH_TOKEN:-demo-reviewer-token}"
       ENABLE_TELEGRAM_ROUTES: "${ENABLE_TELEGRAM_ROUTES:-0}"
       HOST: 0.0.0.0
       PORT: 3000
