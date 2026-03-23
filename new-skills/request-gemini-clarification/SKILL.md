@@ -1,6 +1,6 @@
 ---
 name: request-gemini-clarification
-description: Guide AI agents on when and how to request paid clarifications for Gemini prediction markets through this repo's off-chain API. Use when an agent is unsure about Gemini market resolution criteria, eligible price sources, timing, auction or settlement edge cases, ambiguous market wording, or whether uncertainty should be escalated into a clarification request.
+description: Guide AI agents on when and how to request paid clarifications for Gemini prediction markets through this repo's off-chain API. Use when an agent is unsure about Gemini market resolution criteria, eligible price sources, timing, auction or settlement edge cases, ambiguous market wording, or whether uncertainty should be escalated into a clarification request for an active or upcoming synced market.
 ---
 
 # Request Gemini Clarification
@@ -14,7 +14,7 @@ Escalate unresolved Gemini market ambiguity into a paid clarification request th
 - Request clarification when ambiguity blocks a material action, answer, or recommendation.
 - Prefer escalation for resolution criteria, price-source disputes, timing windows, auction-print handling, settlement edge cases, or conflicting market text.
 - Do not escalate questions that the local repo, synced market payload, or an existing completed clarification already answers.
-- Treat unsupported or stale market identifiers as a data-sync problem first. The clarification endpoint only accepts active synced markets.
+- Treat unsupported or stale market identifiers as a data-sync problem first. The clarification endpoint only accepts active or upcoming synced markets.
 
 ## Form the Request
 
@@ -33,7 +33,7 @@ Escalate unresolved Gemini market ambiguity into a paid clarification request th
 
 ## Failure Handling
 
-- Expect `404 UNSUPPORTED_EVENT_ID` when the market is not in the active synced cache.
+- Expect `404 UNSUPPORTED_EVENT_ID` when the market is not in the active or upcoming synced cache.
 - Expect `429 RATE_LIMITED` when too many clarification requests are sent for the same path or client window.
 - Reuse the same verified payment proof only for safe retries of the same request; the backend deduplicates by payment proof.
 

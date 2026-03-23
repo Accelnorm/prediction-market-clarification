@@ -2,11 +2,16 @@
 
 This repo currently centers on an API-first off-chain clarification service for prediction markets. Phase 1 is the paid clarification primitive itself: x402-gated request creation, asynchronous LLM processing, public status lookup, market sync, and optional Telegram intake.
 
-## Custom Skill
+## Custom Skills
 
-A repo-local custom skill lives at [`request-gemini-clarification/SKILL.md`](/home/user/gemini-pm/request-gemini-clarification/SKILL.md). It tells AI agents when Gemini market uncertainty should be escalated into a paid clarification request and how to use the API flow in [`request-gemini-clarification/references/api-flow.md`](/home/user/gemini-pm/request-gemini-clarification/references/api-flow.md).
+Repo-local skills now live under [`new-skills/`](/home/user/gemini-pm/new-skills).
+
+- [`new-skills/request-gemini-clarification/SKILL.md`](/home/user/gemini-pm/new-skills/request-gemini-clarification/SKILL.md) tells AI agents when Gemini market uncertainty should be escalated into a paid clarification request and how to use the API flow in [`new-skills/request-gemini-clarification/references/api-flow.md`](/home/user/gemini-pm/new-skills/request-gemini-clarification/references/api-flow.md).
+- [`new-skills/upcoming-market-review/SKILL.md`](/home/user/gemini-pm/new-skills/upcoming-market-review/SKILL.md) guides reviewer LLMs on how to detect ambiguity and other launch-blocking issues in upcoming markets and produce tighter replacement wording.
 
 Use `$request-gemini-clarification` when an agent is unsure about Gemini market resolution criteria, price sources, timing, or settlement edge cases and needs a concrete clarification request path.
+
+Use `$upcoming-market-review` when an agent is reviewing a proposed or upcoming market for ambiguity, unclear sources, time-boundary problems, missing conditional branches, or other issue patterns that could lead to a bad resolution.
 
 ## Phase 1 Scope
 

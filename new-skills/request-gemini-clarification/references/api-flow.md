@@ -6,7 +6,7 @@ Load this file when an agent needs the exact request flow, endpoint behavior, or
 
 ## Preconditions
 
-- The backend must know the market as an active synced event.
+- The backend must know the market as an active or upcoming synced event.
 - `POST /api/clarify/:eventId` rejects unknown event ids with `404 UNSUPPORTED_EVENT_ID`.
 - The JSON body must include a non-empty `question`. The backend trims whitespace and enforces a 500-character maximum.
 
