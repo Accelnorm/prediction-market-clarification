@@ -96,6 +96,7 @@ X402_FEE_PAYER="CKPKJWNdJEqa81x7CkZ14BVPiY6y16Sxs7owznqtWYp5" \
 X402_FACILITATOR_URL="https://x402.org/facilitator" \
 PAYAI_API_KEY_ID="" \
 PAYAI_API_KEY_SECRET="" \
+ARTIFACT_PUBLICATION_PROVIDER="disabled" \
 PORT=3000 \
 npm run start
 ```
@@ -140,6 +141,7 @@ Use `/health/ready` for deployment health checks. It verifies runtime readiness 
 - `X402_VERSION`, `X402_SCHEME`, `X402_PRICE_USD`, `X402_MAX_AMOUNT_REQUIRED`
 - `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`, `X402_FEE_PAYER`
 - `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
+- `ARTIFACT_PUBLICATION_PROVIDER`, `IPFS_API_URL`, `IPFS_GATEWAY_BASE_URL`, `IPFS_AUTH_TOKEN`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_API_BASE_URL`
 
 Clarification timing config:
@@ -184,6 +186,18 @@ curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
   }'
 ```
 
+Optionally wait briefly for a completed clarification in the same request:
+
+```bash
+curl -X POST 'http://127.0.0.1:3000/api/clarify/gm_btc_above_100k?wait=true&timeoutMs=10000' \
+  -H 'content-type: application/json' \
+  -H 'PAYMENT-SIGNATURE: <base64-encoded-x402-payment-payload>' \
+  -d '{
+    "requesterId": "wallet_123",
+    "question": "Should auction prints count?"
+  }'
+```
+
 Poll clarification status:
 
 ```bash
@@ -216,3 +230,5 @@ For a hackathon demo, the backend is ready if you deploy it with:
 - Telegram disabled unless you explicitly want it in the demo
 
 The repo now ships with a Dockerized single-service demo path through [`docker-compose.demo.yml`](/home/user/gemini-pm/docker-compose.demo.yml) and [`scripts/deploy-demo.sh`](/home/user/gemini-pm/scripts/deploy-demo.sh).
+
+Artifact publication is prepared for a later phase. Keep `ARTIFACT_PUBLICATION_PROVIDER=disabled` unless you are explicitly enabling IPFS publishing.

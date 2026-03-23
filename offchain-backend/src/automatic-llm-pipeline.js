@@ -17,6 +17,7 @@ function buildLlmTrace({ llmTraceability, requestedAt }) {
 
 async function publishInterpretationArtifact({
   artifactRepository,
+  artifactPublisher,
   clarification,
   market,
   llmOutput,
@@ -26,13 +27,28 @@ async function publishInterpretationArtifact({
     return { cid: null, url: null };
   }
 
-  return artifactRepository.createArtifact({
+  const artifactPayload = {
     clarificationId: clarification.clarificationId,
     eventId: clarification.eventId,
     marketText: market.resolution,
     suggestedEditedMarketText: llmOutput.suggested_market_text,
     clarificationNote: llmOutput.suggested_note,
     generatedAtUtc
+  };
+  const publication =
+    (await artifactPublisher?.publishArtifact?.(artifactPayload)) ?? {
+      publicationProvider: "disabled",
+      publicationStatus: "disabled",
+      publishedCid: null,
+      publishedUrl: null,
+      publishedUri: null,
+      publishedAt: null,
+      publicationError: null
+    };
+
+  return artifactRepository.createArtifact({
+    ...artifactPayload,
+    ...publication
   });
 }
 
@@ -40,6 +56,7 @@ export async function runAutomaticClarificationPipeline({
   clarification,
   clarificationRequestRepository,
   artifactRepository,
+  artifactPublisher,
   marketCacheRepository,
   tradeActivityRepository,
   clarificationFinalityConfig,
@@ -63,6 +80,7 @@ export async function runAutomaticClarificationPipeline({
   const llmTrace = buildLlmTrace({ llmTraceability, requestedAt });
   const artifact = await publishInterpretationArtifact({
     artifactRepository,
+    artifactPublisher,
     clarification,
     market,
     llmOutput: interpretation.llmOutput,
@@ -88,6 +106,13 @@ export async function runAutomaticClarificationPipeline({
     timing,
     artifactCid: artifact.cid,
     artifactUrl: artifact.url,
+    artifactPublicationProvider: artifact.publicationProvider ?? null,
+    artifactPublicationStatus: artifact.publicationStatus ?? null,
+    artifactPublishedCid: artifact.publishedCid ?? null,
+    artifactPublishedUrl: artifact.publishedUrl ?? null,
+    artifactPublishedUri: artifact.publishedUri ?? null,
+    artifactPublishedAt: artifact.publishedAt ?? null,
+    artifactPublicationError: artifact.publicationError ?? null,
     errorMessage: null,
     retryable: false
   });

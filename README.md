@@ -150,7 +150,19 @@ curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
   }'
 ```
 
-3. Poll clarification status:
+3. Optionally wait briefly for a fast clarification:
+
+```bash
+curl -X POST 'http://127.0.0.1:3000/api/clarify/gm_btc_above_100k?wait=true&timeoutMs=10000' \
+  -H 'content-type: application/json' \
+  -H 'PAYMENT-SIGNATURE: <base64-encoded-x402-payment-payload>' \
+  -d '{
+    "requesterId": "wallet_123",
+    "question": "Should auction prints count?"
+  }'
+```
+
+4. Poll clarification status or fetch the completed inline result:
 
 ```bash
 curl http://127.0.0.1:3000/api/clarifications/<CLARIFICATION_ID>
@@ -182,6 +194,7 @@ X402_FEE_PAYER="CKPKJWNdJEqa81x7CkZ14BVPiY6y16Sxs7owznqtWYp5"
 X402_FACILITATOR_URL="https://x402.org/facilitator"
 PAYAI_API_KEY_ID=""
 PAYAI_API_KEY_SECRET=""
+ARTIFACT_PUBLICATION_PROVIDER="disabled"
 PORT="3000"
 ```
 
@@ -191,6 +204,7 @@ That is enough for a hackathon demo as long as:
 - the facilitator accepts unauthenticated low-volume verification or valid facilitator credentials are supplied
 - the recipient wallet has a USDC token account on the selected network
 - the Postgres volume can persist data
+- artifact publication remains disabled unless you explicitly configure IPFS later
 
 One-command demo deploy after creating root `.env`:
 

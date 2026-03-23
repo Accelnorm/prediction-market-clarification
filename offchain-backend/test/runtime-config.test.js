@@ -99,9 +99,32 @@ test("production validation accepts complete phase 1 configuration", () => {
       },
       llmRuntime: { apiKey: "llm-key" },
       x402PaymentConfig: VALID_X402_CONFIG,
+      artifactPublicationConfig: {
+        provider: "disabled",
+        enabled: false
+      },
       telegramEnabled: true,
       hasDatabase: true
     })
+  );
+});
+
+test("production validation rejects missing IPFS API configuration when IPFS publication is enabled", () => {
+  assert.throws(
+    () =>
+      validateProductionRuntimeConfig({
+        env: { NODE_ENV: "production" },
+        llmRuntime: { apiKey: "llm-key" },
+        x402PaymentConfig: VALID_X402_CONFIG,
+        artifactPublicationConfig: {
+          provider: "ipfs",
+          enabled: true,
+          ipfsApiUrl: null
+        },
+        telegramEnabled: false,
+        hasDatabase: true
+      }),
+    /IPFS_API_URL is required/
   );
 });
 

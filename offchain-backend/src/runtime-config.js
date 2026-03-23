@@ -55,6 +55,7 @@ export function validateProductionRuntimeConfig({
   env = process.env,
   llmRuntime,
   x402PaymentConfig,
+  artifactPublicationConfig = { provider: "disabled", enabled: false },
   telegramEnabled = false,
   hasDatabase = false
 }) {
@@ -84,6 +85,12 @@ export function validateProductionRuntimeConfig({
 
   if (!normalizeString(x402PaymentConfig?.mintAddress)) {
     throw validationError("X402_MINT_ADDRESS is required in production.");
+  }
+
+  if (artifactPublicationConfig?.provider === "ipfs") {
+    if (!normalizeString(artifactPublicationConfig.ipfsApiUrl)) {
+      throw validationError("IPFS_API_URL is required when ARTIFACT_PUBLICATION_PROVIDER=ipfs.");
+    }
   }
 
   if (telegramEnabled) {

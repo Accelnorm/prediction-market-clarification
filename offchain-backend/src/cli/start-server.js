@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
 
 import { FileArtifactRepository } from "../artifact-repository.js";
+import { loadArtifactPublicationConfig } from "../artifact-publication-config.js";
+import {
+  createDisabledArtifactPublisher,
+  createIpfsArtifactPublisher
+} from "../artifact-publisher.js";
 import { FileBackgroundJobRepository } from "../background-job-repository.js";
 import { FileCategoryCatalogRepository } from "../category-catalog-repository.js";
 import { FileClarificationRequestRepository } from "../clarification-request-repository.js";
+import { loadLlmRuntime } from "../llm-runtime-config.js";
 import { FileMarketCacheRepository } from "../market-cache-repository.js";
 import {
   checkPostgresReadiness,
@@ -41,42 +47,6 @@ function resolvePathFromEnv(name, fallback) {
 
 function createId(prefix) {
   return `${prefix}_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-}
-
-function resolveLlmRuntime() {
-  const provider = process.env.LLM_PROVIDER ?? "openrouter";
-
-  if (provider === "openrouter") {
-    return {
-      provider,
-      apiKey: process.env.OPENROUTER_API_KEY ?? null,
-      model: process.env.LLM_MODEL ?? "openrouter/auto",
-      baseUrl: process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
-      appUrl: process.env.OPENROUTER_APP_URL ?? null,
-      appName: process.env.OPENROUTER_APP_NAME ?? "gemini-pm"
-    };
-  }
-
-  if (provider === "openai-compatible") {
-    return {
-      provider,
-      apiKey: process.env.OPENAI_COMPATIBLE_API_KEY ?? null,
-      model: process.env.LLM_MODEL ?? "gpt-4.1-mini",
-      baseUrl: process.env.OPENAI_COMPATIBLE_BASE_URL ?? "https://api.openai.com/v1"
-    };
-  }
-
-  if (provider === "anthropic-compatible") {
-    return {
-      provider,
-      apiKey: process.env.ANTHROPIC_API_KEY ?? null,
-      model: process.env.LLM_MODEL ?? "claude-sonnet-4-20250514",
-      baseUrl: process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com",
-      anthropicVersion: process.env.ANTHROPIC_VERSION ?? "2023-06-01"
-    };
-  }
-
-  throw new Error(`Unsupported LLM_PROVIDER: ${provider}`);
 }
 
 async function createStorageRuntime() {
@@ -191,17 +161,23 @@ async function maybeRegisterTelegramWebhook({ enabled, logger }) {
 
 const host = process.env.HOST ?? "0.0.0.0";
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
-const llmRuntime = resolveLlmRuntime();
+const llmRuntime = loadLlmRuntime(process.env);
 const x402PaymentConfig = loadX402PaymentConfig();
+const artifactPublicationConfig = loadArtifactPublicationConfig();
 const enablePhase2Routes = resolvePhase2RoutesEnabled(process.env);
 const enableTelegramRoutes = resolveTelegramEnabled(process.env);
 const clarificationFinalityConfig = resolveClarificationFinalityConfig(process.env);
 const storageRuntime = await createStorageRuntime();
+const artifactPublisher =
+  artifactPublicationConfig.provider === "ipfs"
+    ? createIpfsArtifactPublisher(artifactPublicationConfig)
+    : createDisabledArtifactPublisher();
 
 validateProductionRuntimeConfig({
   env: process.env,
   llmRuntime,
   x402PaymentConfig,
+  artifactPublicationConfig,
   telegramEnabled: enableTelegramRoutes,
   hasDatabase: Boolean(storageRuntime.pool)
 });
@@ -221,6 +197,7 @@ const server = createServer({
   telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
   telegramBotApiBaseUrl: process.env.TELEGRAM_BOT_API_BASE_URL,
   x402PaymentConfig,
+  artifactPublisher,
   clarificationFinalityConfig,
   llmTraceability: {
     promptTemplateVersion:

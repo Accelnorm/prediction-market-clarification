@@ -136,7 +136,38 @@ function buildPublicClarificationPayload(clarification) {
     payload.timing = clarification.timing;
   }
 
+  if (clarification.status === "completed" && clarification.llmOutput) {
+    payload.llmOutput = clarification.llmOutput;
+  }
+
+  if (clarification.status === "failed") {
+    payload.errorMessage = clarification.errorMessage ?? null;
+    payload.retryable = clarification.retryable ?? false;
+  }
+
   return payload;
+}
+
+function parseBoundedWaitOptions(requestUrl) {
+  const waitValue = String(requestUrl.searchParams.get("wait") ?? "").toLowerCase();
+
+  if (!["1", "true"].includes(waitValue)) {
+    return null;
+  }
+
+  const rawTimeoutMs = Number.parseInt(requestUrl.searchParams.get("timeoutMs") ?? "", 10);
+
+  return {
+    timeoutMs: Number.isFinite(rawTimeoutMs)
+      ? Math.max(0, Math.min(rawTimeoutMs, 15_000))
+      : 10_000
+  };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function formatWorkflowLabel(state) {
@@ -735,6 +766,7 @@ async function readJsonBody(request) {
 export function createServer({
   clarificationRequestRepository,
   artifactRepository,
+  artifactPublisher = null,
   backgroundJobRepository,
   reviewerScanRepository,
   categoryCatalogRepository,
@@ -817,6 +849,84 @@ export function createServer({
     });
   }
 
+  async function buildPublicClarificationResponse(clarification) {
+    const market = clarification.eventId
+      ? await marketCacheRepository?.findByMarketId(clarification.eventId)
+      : null;
+    const timing = await buildClarificationTimingForResponse({
+      clarification,
+      market
+    });
+
+    return {
+      ...buildPublicClarificationPayload(clarification),
+      ...(timing ? { timing } : {})
+    };
+  }
+
+  async function waitForClarificationSettlement(clarificationId, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let clarification =
+      await clarificationRequestRepository.findByClarificationId(clarificationId);
+
+    while (
+      clarification &&
+      ["queued", "processing"].includes(clarification.status) &&
+      Date.now() < deadline
+    ) {
+      const remainingMs = deadline - Date.now();
+
+      if (remainingMs <= 0) {
+        break;
+      }
+
+      await sleep(Math.min(250, remainingMs));
+      clarification = await clarificationRequestRepository.findByClarificationId(clarificationId);
+    }
+
+    return clarification;
+  }
+
+  async function sendClarificationCreationResponse({
+    response,
+    clarification,
+    waitOptions,
+    job = null,
+    headers = {}
+  }) {
+    if (waitOptions) {
+      const settledClarification = await waitForClarificationSettlement(
+        clarification.clarificationId,
+        waitOptions.timeoutMs
+      );
+
+      if (settledClarification && !["queued", "processing"].includes(settledClarification.status)) {
+        sendJson(
+          response,
+          200,
+          {
+            ok: true,
+            clarification: await buildPublicClarificationResponse(settledClarification)
+          },
+          headers
+        );
+        return;
+      }
+    }
+
+    sendJson(
+      response,
+      202,
+      {
+        ok: true,
+        clarificationId: clarification.clarificationId,
+        status: "processing",
+        ...(job ? { job: buildBackgroundJobPayload(job) } : {})
+      },
+      headers
+    );
+  }
+
   async function markJobProcessing(job) {
     const processingTimestamp = now().toISOString();
 
@@ -850,6 +960,7 @@ export function createServer({
         clarification,
         clarificationRequestRepository,
         artifactRepository,
+        artifactPublisher,
         marketCacheRepository,
         tradeActivityRepository,
         clarificationFinalityConfig,
@@ -974,6 +1085,7 @@ export function createServer({
         ? request.headers.host
         : "127.0.0.1";
     const requestUrl = new URL(request.url, `${requestProtocol}://${requestHost}`);
+    const waitOptions = parseBoundedWaitOptions(requestUrl);
     response.setHeader("x-request-id", requestContext.requestId);
 
     response.on("finish", () => {
@@ -1172,11 +1284,19 @@ export function createServer({
           await clarificationRequestRepository.findByPaymentProof(verifiedPayment.paymentProof);
 
         if (existingClarification) {
-          sendJson(response, 200, {
-            ok: true,
-            clarificationId: existingClarification.clarificationId,
-            status: existingClarification.status
-          });
+          if (waitOptions) {
+            await sendClarificationCreationResponse({
+              response,
+              clarification: existingClarification,
+              waitOptions
+            });
+          } else {
+            sendJson(response, 200, {
+              ok: true,
+              clarificationId: existingClarification.clarificationId,
+              status: existingClarification.status
+            });
+          }
           return;
         }
 
@@ -1250,11 +1370,19 @@ export function createServer({
           });
 
           if (!coordinatedResult.created) {
-            sendJson(response, 200, {
-              ok: true,
-              clarificationId: coordinatedResult.clarification.clarificationId,
-              status: coordinatedResult.clarification.status
-            });
+            if (waitOptions) {
+              await sendClarificationCreationResponse({
+                response,
+                clarification: coordinatedResult.clarification,
+                waitOptions
+              });
+            } else {
+              sendJson(response, 200, {
+                ok: true,
+                clarificationId: coordinatedResult.clarification.clarificationId,
+                status: coordinatedResult.clarification.status
+              });
+            }
             return;
           }
 
@@ -1301,6 +1429,7 @@ export function createServer({
                 clarification: processingClarification,
                 clarificationRequestRepository,
                 artifactRepository,
+                artifactPublisher,
                 marketCacheRepository,
                 tradeActivityRepository,
                 clarificationFinalityConfig,
@@ -1324,21 +1453,17 @@ export function createServer({
             });
         }
 
-        sendJson(
+        await sendClarificationCreationResponse({
           response,
-          202,
-          {
-            ok: true,
-            clarificationId: clarification.clarificationId,
-            status: "processing",
-            ...(processingJob ? { job: buildBackgroundJobPayload(processingJob) } : {})
-          },
-          verifiedPayment.paymentResponseHeader
+          clarification,
+          waitOptions,
+          job: processingJob,
+          headers: verifiedPayment.paymentResponseHeader
             ? {
                 "payment-response": verifiedPayment.paymentResponseHeader
               }
             : {}
-        );
+        });
       } catch (error) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
@@ -2029,25 +2154,9 @@ export function createServer({
           return;
         }
 
-        const market = clarification.eventId
-          ? await marketCacheRepository?.findByMarketId(clarification.eventId)
-          : null;
-        const adaptiveReviewWindow = buildAdaptiveReviewWindow({
-          clarification,
-          market,
-          now: now()
-        });
-        const timing = await buildClarificationTimingForResponse({
-          clarification,
-          market
-        });
-
         sendJson(response, 200, {
           ok: true,
-          clarification: {
-            ...buildPublicClarificationPayload(clarification),
-            ...(timing ? { timing } : {})
-          }
+          clarification: await buildPublicClarificationResponse(clarification)
         });
       } catch (error) {
         sendJson(response, 500, {
