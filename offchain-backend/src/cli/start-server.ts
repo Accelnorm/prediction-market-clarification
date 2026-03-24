@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { randomUUID } from "node:crypto";
 
 import { FileArtifactRepository } from "../artifact-repository.js";
@@ -230,7 +229,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, async () => {
     server.markShuttingDown();
 
-    await new Promise((resolve) => {
+    await new Promise<void>((resolve) => {
       server.close(() => resolve());
     });
 

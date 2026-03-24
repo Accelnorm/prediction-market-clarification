@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   buildDefaultInterpretation,
   generateMarketInterpretation
@@ -59,7 +58,7 @@ export async function runAutomaticClarificationPipeline({
   artifactRepository,
   artifactPublisher,
   marketCacheRepository,
-  resolveMarketByClarification = null,
+  resolveMarketByClarification = null as ((c: any) => Promise<any>) | null,
   tradeActivityRepository,
   clarificationFinalityConfig,
   now,
@@ -110,7 +109,7 @@ export async function runAutomaticClarificationPipeline({
     llmTrace,
     timing,
     artifactCid: artifact.cid,
-    artifactUrl: artifact.url,
+    artifactUrl: artifact.url ?? null,
     artifactPublicationProvider: artifact.publicationProvider ?? null,
     artifactPublicationStatus: artifact.publicationStatus ?? null,
     artifactPublishedCid: artifact.publishedCid ?? null,

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   normalizeGeminiMarket,
   sameNormalizedMarketShape
@@ -12,7 +11,7 @@ function isMarketWithStatus(market, status) {
   return false;
 }
 
-function uniqueMarkets(markets = []) {
+function uniqueMarkets(markets: any[] = []) {
   const dedupedById = new Map();
 
   for (const market of Array.isArray(markets) ? markets : []) {
@@ -77,7 +76,7 @@ async function syncMarketSet({
   repository,
   fetchMarkets,
   now = () => new Date(),
-  includeMarket = () => true,
+  includeMarket = (() => true) as (market: any) => boolean,
   totalKey
 }) {
   const sourceMarkets = uniqueMarkets(await fetchMarkets());
@@ -108,7 +107,7 @@ async function syncMarketSet({
     );
   }
 
-  const markets = [...marketsById.values()].sort((left, right) =>
+  const markets = [...marketsById.values()].sort((left: any, right: any) =>
     left.marketId.localeCompare(right.marketId)
   );
 

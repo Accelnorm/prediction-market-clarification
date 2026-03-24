@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   mergeNormalizedMarket,
   normalizeGeminiMarket
@@ -13,26 +12,17 @@ export async function refreshReviewerMarketData({
   const existingMarket = await marketCacheRepository.findByMarketId(eventId);
 
   if (!existingMarket) {
-    const error = new Error("Market not found in the local cache.");
-    error.statusCode = 404;
-    error.code = "MARKET_NOT_FOUND";
-    throw error;
+    throw Object.assign(new Error("Market not found in the local cache."), { statusCode: 404, code: "MARKET_NOT_FOUND" });
   }
 
   if (typeof fetchReviewerMarketSource !== "function") {
-    const error = new Error("Reviewer market refresh source is not configured.");
-    error.statusCode = 503;
-    error.code = "MARKET_REFRESH_UNAVAILABLE";
-    throw error;
+    throw Object.assign(new Error("Reviewer market refresh source is not configured."), { statusCode: 503, code: "MARKET_REFRESH_UNAVAILABLE" });
   }
 
   const sourceMarket = await fetchReviewerMarketSource(eventId);
 
   if (!sourceMarket) {
-    const error = new Error("Market was not returned by the configured refresh source.");
-    error.statusCode = 404;
-    error.code = "MARKET_SOURCE_NOT_FOUND";
-    throw error;
+    throw Object.assign(new Error("Market was not returned by the configured refresh source."), { statusCode: 404, code: "MARKET_SOURCE_NOT_FOUND" });
   }
 
   const refreshedAt = now().toISOString();
@@ -42,10 +32,7 @@ export async function refreshReviewerMarketData({
   );
 
   if (sourceMarketId !== eventId) {
-    const error = new Error("Configured refresh source returned a mismatched market identifier.");
-    error.statusCode = 502;
-    error.code = "MARKET_SOURCE_MISMATCH";
-    throw error;
+    throw Object.assign(new Error("Configured refresh source returned a mismatched market identifier."), { statusCode: 502, code: "MARKET_SOURCE_MISMATCH" });
   }
 
   const refreshedMarket = mergeNormalizedMarket(

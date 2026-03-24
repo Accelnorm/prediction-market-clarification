@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { fetchTradesForSymbol } from "./gemini-markets-source.js";
 
 const DEFAULT_FINALITY_CONFIG = {
@@ -7,7 +6,7 @@ const DEFAULT_FINALITY_CONFIG = {
   processingActivityEnabled: false
 };
 
-function normalizeFinalityConfig(config = {}) {
+function normalizeFinalityConfig(config: any = {}) {
   const mode = config.mode === "dynamic" ? "dynamic" : "static";
   const staticWindowSecs = Number.isFinite(config.staticWindowSecs)
     ? Math.max(3600, Math.min(86400, Math.round(config.staticWindowSecs)))
@@ -33,12 +32,12 @@ function getTradeTimestampMs(trade) {
   return Number.isFinite(timestampMs) ? timestampMs : null;
 }
 
-function computeTradeMetrics(trades = [], nowDate) {
+function computeTradeMetrics(trades: any[] = [], nowDate) {
   const nowMs = nowDate.getTime();
   const oneDayAgoMs = nowMs - 24 * 60 * 60 * 1000;
   let tradeCountWindow = 0;
   let shareVolumeWindow = 0;
-  let lastTradeMs = null;
+  let lastTradeMs: number | null = null;
 
   for (const trade of trades) {
     const timestampMs = getTradeTimestampMs(trade);
@@ -88,7 +87,7 @@ function computeProcessingUrgency({ market, activity, nowDate }) {
     : null;
   const volumeUsd = Number.parseFloat(String(market?.volumeUsd ?? ""));
   let urgency = "normal";
-  const reasons = [];
+  const reasons: string[] = [];
 
   if (hoursToClose !== null && hoursToClose <= 24) {
     urgency = "high";
@@ -130,7 +129,7 @@ function computeDynamicFinalityWindow({ clarification, market, activity, nowDate
   const volumeUsd = Number.parseFloat(String(market?.volumeUsd ?? ""));
   const liquidityUsd = Number.parseFloat(String(market?.liquidityUsd ?? ""));
   let score = 0;
-  const reasons = [];
+  const reasons: string[] = [];
 
   if (hoursToClose !== null && hoursToClose <= 24) {
     score += 3;
@@ -225,8 +224,8 @@ export async function refreshTradeActivityForMarket({
       instruments: {}
     };
   const nowDate = now();
-  const instruments = {};
-  let combinedTrades = [];
+  const instruments: Record<string, any> = {};
+  let combinedTrades: any[] = [];
 
   for (const contract of market.contracts) {
     if (typeof contract?.instrumentSymbol !== "string" || contract.instrumentSymbol === "") {

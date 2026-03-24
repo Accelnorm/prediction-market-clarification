@@ -1,19 +1,12 @@
-// @ts-nocheck
 const MARKET_ID_PATTERN = /^gm[a-z0-9_-]*[a-z0-9]$/i;
 const CLARIFY_COMMAND_PATTERN = /^\/clarify(?:@\w+)?\s+/i;
 
 function invalidTelegramPayload(message) {
-  const error = new Error(message);
-  error.statusCode = 400;
-  error.code = "INVALID_TELEGRAM_UPDATE";
-  return error;
+  return Object.assign(new Error(message), { statusCode: 400, code: "INVALID_TELEGRAM_UPDATE" });
 }
 
 function validationError(code, message) {
-  const error = new Error(message);
-  error.statusCode = 400;
-  error.code = code;
-  return error;
+  return Object.assign(new Error(message), { statusCode: 400, code });
 }
 
 function parseClarifyCommand(text) {

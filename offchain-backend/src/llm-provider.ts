@@ -1,11 +1,7 @@
-// @ts-nocheck
 import { readFile } from "node:fs/promises";
 
 function validationError(code, message, statusCode = 500) {
-  const error = new Error(message);
-  error.code = code;
-  error.statusCode = statusCode;
-  return error;
+  return Object.assign(new Error(message), { code, statusCode });
 }
 
 export function buildDefaultInterpretation({ market }) {
@@ -349,7 +345,7 @@ async function callAnthropicCompatibleProvider({
   };
 }
 
-function resolveRuntime(llmRuntime = {}) {
+function resolveRuntime(llmRuntime: any = {}) {
   const provider = llmRuntime.provider ?? "openrouter";
 
   if (provider === "openrouter") {
@@ -392,7 +388,7 @@ export async function generateMarketInterpretation({
   clarification,
   market,
   llmRuntime,
-  promptProfile = null
+  promptProfile = null as string | null
 }) {
   const runtime = resolveRuntime(llmRuntime);
 

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { generateMarketInterpretation } from "./llm-provider.js";
 import { buildAdaptiveReviewWindow } from "./review-window-policy.js";
 
@@ -48,26 +47,24 @@ export async function createReviewerMarketScan({
   llmRuntime,
   requireUpcomingOpenMarket = false,
   dedupeByMarketText = false,
-  inFlightMarketTextScans = null
+  inFlightMarketTextScans = null as Map<any, any> | null
 }) {
   const market = await marketCacheRepository.findByMarketId(eventId);
 
   if (!market) {
-    const error = new Error("Event id must match an active synced market before a scan can run.");
-    error.statusCode = 404;
-    error.code = "UNSUPPORTED_EVENT_ID";
-    throw error;
+    throw Object.assign(
+      new Error("Event id must match an active synced market before a scan can run."),
+      { statusCode: 404, code: "UNSUPPORTED_EVENT_ID" }
+    );
   }
 
   const scanNow = now();
 
   if (requireUpcomingOpenMarket && !isUpcomingMarket(market, scanNow)) {
-    const error = new Error(
-      "Event id must match an upcoming market that has not expired before a scan can run."
+    throw Object.assign(
+      new Error("Event id must match an upcoming market that has not expired before a scan can run."),
+      { statusCode: 409, code: "MARKET_NOT_UPCOMING" }
     );
-    error.statusCode = 409;
-    error.code = "MARKET_NOT_UPCOMING";
-    throw error;
   }
 
   const marketTextKey = buildMarketTextKey(market);

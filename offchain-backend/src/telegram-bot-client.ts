@@ -1,9 +1,5 @@
-// @ts-nocheck
 function validationError(code, message, statusCode = 400) {
-  const error = new Error(message);
-  error.code = code;
-  error.statusCode = statusCode;
-  return error;
+  return Object.assign(new Error(message), { code, statusCode });
 }
 
 async function readJsonResponse(response) {
@@ -57,7 +53,7 @@ export async function sendTelegramMessage({
     })
   });
 
-  let payload = null;
+  let payload: any = null;
 
   try {
     payload = await response.json();
@@ -83,7 +79,7 @@ export async function sendTelegramMessage({
 export async function registerTelegramWebhook({
   botToken,
   webhookUrl,
-  secretToken = null,
+  secretToken = null as string | null,
   apiBaseUrl = "https://api.telegram.org"
 }) {
   if (!webhookUrl) {

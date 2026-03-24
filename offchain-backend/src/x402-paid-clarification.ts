@@ -1,14 +1,9 @@
-// @ts-nocheck
 function createError({ statusCode, code, message, details = null }) {
-  const error = new Error(message);
-  error.statusCode = statusCode;
-  error.code = code;
-
+  const extra: Record<string, any> = { statusCode, code };
   if (details !== null) {
-    error.details = details;
+    extra.details = details;
   }
-
-  return error;
+  return Object.assign(new Error(message), extra);
 }
 
 export function paymentRequiredError(details = null) {

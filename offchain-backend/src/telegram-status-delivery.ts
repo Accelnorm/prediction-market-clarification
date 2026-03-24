@@ -1,11 +1,7 @@
-// @ts-nocheck
 const TELEGRAM_STATUSES = new Set(["pending", "processing", "completed", "failed"]);
 
 function validationError(code, message, statusCode = 400) {
-  const error = new Error(message);
-  error.code = code;
-  error.statusCode = statusCode;
-  return error;
+  return Object.assign(new Error(message), { code, statusCode });
 }
 
 function sanitizeFailureMessage() {

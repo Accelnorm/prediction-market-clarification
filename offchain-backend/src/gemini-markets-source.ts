@@ -1,4 +1,3 @@
-// @ts-nocheck
 const GEMINI_API_BASE_URL = "https://api.gemini.com";
 const DEFAULT_PAGE_LIMIT = "500";
 
@@ -98,21 +97,21 @@ export async function fetchConfiguredMarkets({
   return fetchMarketsFromEndpoint(sourceUrl, fetchImpl);
 }
 
-export async function fetchActiveMarkets(options = {}) {
+export async function fetchActiveMarkets(options: any = {}) {
   return fetchConfiguredMarkets({
     ...options,
     sourceUrl: options.sourceUrl ?? DEFAULT_GEMINI_ACTIVE_MARKETS_SOURCE_URL
   });
 }
 
-export async function fetchUpcomingMarkets(options = {}) {
+export async function fetchUpcomingMarkets(options: any = {}) {
   return fetchConfiguredMarkets({
     ...options,
     sourceUrl: options.sourceUrl ?? DEFAULT_GEMINI_UPCOMING_MARKETS_SOURCE_URL
   });
 }
 
-export async function fetchNewlyListedMarkets(options = {}) {
+export async function fetchNewlyListedMarkets(options: any = {}) {
   return fetchConfiguredMarkets({
     ...options,
     sourceUrl: options.sourceUrl ?? DEFAULT_GEMINI_NEWLY_LISTED_MARKETS_SOURCE_URL
@@ -132,10 +131,10 @@ export async function fetchPredictionMarketEventByTicker(eventTicker, { fetchImp
 }
 
 export async function fetchPredictionMarketCategories({
-  status = [],
+  status = [] as string[],
   sourceUrl = DEFAULT_GEMINI_CATEGORIES_SOURCE_URL,
   fetchImpl = fetch
-} = {}) {
+}: { status?: string[]; sourceUrl?: string; fetchImpl?: typeof fetch } = {}) {
   const nextUrl = new URL(sourceUrl);
 
   for (const statusValue of Array.isArray(status) ? status : []) {
@@ -158,7 +157,7 @@ export async function fetchPredictionMarketCategories({
 
 export async function fetchTradesForSymbol(
   symbol,
-  { timestamp, sinceTid, limitTrades = 500, includeBreaks = false, fetchImpl = fetch } = {}
+  { timestamp = undefined as any, sinceTid = undefined as any, limitTrades = 500, includeBreaks = false, fetchImpl = fetch } = {}
 ) {
   const nextUrl = new URL(`${GEMINI_API_BASE_URL}/v1/trades/${encodeURIComponent(symbol)}`);
 
@@ -193,7 +192,7 @@ export async function fetchEnrichedPredictionMarkets({
   fetchEventByTicker = fetchPredictionMarketEventByTicker
 } = {}) {
   const markets = await fetchMarkets();
-  const enrichedMarkets = [];
+  const enrichedMarkets: any[] = [];
 
   for (const market of markets) {
     if (typeof market?.ticker !== "string" || market.ticker.trim() === "") {

@@ -1,4 +1,3 @@
-// @ts-nocheck
 function buildIpfsGatewayUrl(baseUrl, cid) {
   if (!baseUrl) {
     return null;
@@ -23,7 +22,7 @@ function parseIpfsAddResponseBody(body) {
     return null;
   }
 
-  return JSON.parse(lines.at(-1));
+  return JSON.parse(lines.at(-1) as string);
 }
 
 function buildPublicationSourcePayload(artifact) {
@@ -56,8 +55,8 @@ export function createDisabledArtifactPublisher() {
 
 export function createIpfsArtifactPublisher({
   ipfsApiUrl,
-  ipfsGatewayBaseUrl = null,
-  ipfsAuthToken = null,
+  ipfsGatewayBaseUrl = null as string | null,
+  ipfsAuthToken = null as string | null,
   fetchImpl = fetch
 }) {
   return {
@@ -83,10 +82,11 @@ export function createIpfsArtifactPublisher({
       const parsed = parseIpfsAddResponseBody(responseBody);
 
       if (!response.ok || !parsed?.Hash) {
-        const error = new Error("IPFS artifact publication failed.");
-        error.code = "ARTIFACT_PUBLICATION_FAILED";
-        error.statusCode = 502;
-        error.details = parsed ?? responseBody;
+        const error = Object.assign(new Error("IPFS artifact publication failed."), {
+          code: "ARTIFACT_PUBLICATION_FAILED",
+          statusCode: 502,
+          details: parsed ?? responseBody
+        });
         throw error;
       }
 

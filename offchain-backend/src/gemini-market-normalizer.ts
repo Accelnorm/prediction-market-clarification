@@ -1,4 +1,3 @@
-// @ts-nocheck
 function extractRichTextText(value) {
   if (typeof value === "string") {
     return value;

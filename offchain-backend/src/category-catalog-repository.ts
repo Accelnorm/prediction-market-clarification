@@ -1,10 +1,9 @@
-// @ts-nocheck
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const EMPTY_STORE = { catalogs: {} };
 
-function normalizeCategories(categories = []) {
+function normalizeCategories(categories: string[] = []) {
   return [...new Set(
     categories
       .filter((value) => typeof value === "string")
@@ -14,6 +13,8 @@ function normalizeCategories(categories = []) {
 }
 
 export class FileCategoryCatalogRepository {
+  private filePath: string;
+  private writeChain: Promise<void>;
   constructor(filePath) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
@@ -27,7 +28,8 @@ export class FileCategoryCatalogRepository {
         catalogs: parsed?.catalogs && typeof parsed.catalogs === "object" ? parsed.catalogs : {}
       };
     } catch (error) {
-      if (error.code === "ENOENT") {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
         return { ...EMPTY_STORE };
       }
 

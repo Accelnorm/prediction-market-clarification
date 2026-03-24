@@ -1,10 +1,11 @@
-// @ts-nocheck
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const EMPTY_STORE = { scans: [] };
 
 export class FileReviewerScanRepository {
+  private filePath: string;
+  private writeChain: Promise<void>;
   constructor(filePath) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
@@ -19,7 +20,8 @@ export class FileReviewerScanRepository {
         scans: Array.isArray(parsed.scans) ? parsed.scans : []
       };
     } catch (error) {
-      if (error.code === "ENOENT") {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
         return { ...EMPTY_STORE };
       }
 

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 
@@ -124,7 +123,7 @@ function sendReviewerAuthRequired(response) {
 }
 
 function buildPublicClarificationPayload(clarification) {
-  const payload = {
+  const payload: any = {
     clarificationId: clarification.clarificationId,
     status: clarification.status,
     eventId: clarification.eventId,
@@ -178,7 +177,7 @@ function formatWorkflowLabel(state) {
     .join(" ");
 }
 
-function normalizeFundingHistory(history = []) {
+function normalizeFundingHistory(history: any[] = []) {
   return history
     .filter(
       (entry) =>
@@ -199,7 +198,7 @@ function normalizeFundingHistory(history = []) {
     .sort((left, right) => right.timestamp.localeCompare(left.timestamp));
 }
 
-function buildFundingDetailsFromHistory(history = [], targetAmount = "1.00") {
+function buildFundingDetailsFromHistory(history: any[] = [], targetAmount = "1.00") {
   const normalizedHistory = normalizeFundingHistory(history);
 
   if (normalizedHistory.length === 0) {
@@ -232,7 +231,7 @@ function buildFundingDetailsFromHistory(history = [], targetAmount = "1.00") {
   };
 }
 
-function buildFundingDetailsFromClarifications(clarifications = []) {
+function buildFundingDetailsFromClarifications(clarifications: any[] = []) {
   const fundingProgress = buildFundingProgress(clarifications);
   const history = clarifications
     .filter(
@@ -253,7 +252,7 @@ function buildFundingDetailsFromClarifications(clarifications = []) {
   };
 }
 
-function buildFundingDetails(clarification, relatedClarifications = []) {
+function buildFundingDetails(clarification, relatedClarifications: any[] = []) {
   if (clarification?.funding && Array.isArray(clarification.funding.history)) {
     return buildFundingDetailsFromHistory(
       clarification.funding.history,
@@ -322,8 +321,8 @@ function buildReviewerClarificationPayload({
   return clarificationPayload;
 }
 
-function buildReviewerMarketPayload(market, fallbackMarketId = null) {
-  const payload = {
+function buildReviewerMarketPayload(market, fallbackMarketId: any = null) {
+  const payload: any = {
     marketId: market?.marketId ?? fallbackMarketId ?? null,
     title: market?.title ?? null,
     resolutionText: market?.resolution ?? market?.resolutionText ?? null,
@@ -398,7 +397,7 @@ function buildReviewerActionDetails(action) {
 }
 
 function buildClarificationAuditTimeline({ clarification, artifact }) {
-  const timeline = [];
+  const timeline: any[] = [];
 
   for (const entry of Array.isArray(clarification.statusHistory)
     ? clarification.statusHistory
@@ -527,7 +526,7 @@ const REVIEWER_QUEUE_FILTERS = [
   { key: "finalized", label: "Finalized" }
 ];
 
-function buildFundingProgress(clarifications = []) {
+function buildFundingProgress(clarifications: any[] = []) {
   const fundedClarifications = clarifications.filter(
     (clarification) =>
       typeof clarification.paymentAmount === "string" && clarification.paymentAmount !== ""
@@ -564,7 +563,7 @@ function buildFundingProgress(clarifications = []) {
   };
 }
 
-function buildQueueFundingProgress(latestClarification, clarifications = []) {
+function buildQueueFundingProgress(latestClarification, clarifications: any[] = []) {
   return latestClarification?.funding
     ? buildFundingDetails(latestClarification, clarifications)
     : buildFundingProgress(clarifications);
@@ -579,19 +578,13 @@ function parseReviewerFundingContributionPayload(payload) {
       : String(payload.reference).trim() || null;
 
   if (!contributor) {
-    const error = new Error("Contributor is required.");
-    error.statusCode = 400;
-    error.code = "INVALID_FUNDING_CONTRIBUTOR";
-    throw error;
+    throw Object.assign(new Error("Contributor is required."), { statusCode: 400, code: "INVALID_FUNDING_CONTRIBUTOR" });
   }
 
   const parsedAmount = Number.parseFloat(amount);
 
   if (!amount || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-    const error = new Error("Funding amount must be a positive decimal string.");
-    error.statusCode = 400;
-    error.code = "INVALID_FUNDING_AMOUNT";
-    throw error;
+    throw Object.assign(new Error("Funding amount must be a positive decimal string."), { statusCode: 400, code: "INVALID_FUNDING_AMOUNT" });
   }
 
   return {
@@ -602,7 +595,7 @@ function parseReviewerFundingContributionPayload(payload) {
 }
 
 function buildQueueStates({ latestScan, fundingProgress, reviewWindow, voteStatus }) {
-  const queueStates = [];
+  const queueStates: string[] = [];
 
   if (!latestScan) {
     queueStates.push("needs_scan");
@@ -695,24 +688,15 @@ function parseReviewerFinalizationPayload(payload) {
   const reviewerId = String(payload?.reviewerId ?? "system").trim();
 
   if (!finalEditedText) {
-    const error = new Error("Final edited text is required.");
-    error.statusCode = 400;
-    error.code = "INVALID_FINAL_EDITED_TEXT";
-    throw error;
+    throw Object.assign(new Error("Final edited text is required."), { statusCode: 400, code: "INVALID_FINAL_EDITED_TEXT" });
   }
 
   if (!finalNote) {
-    const error = new Error("Final note is required.");
-    error.statusCode = 400;
-    error.code = "INVALID_FINAL_NOTE";
-    throw error;
+    throw Object.assign(new Error("Final note is required."), { statusCode: 400, code: "INVALID_FINAL_NOTE" });
   }
 
   if (!reviewerId) {
-    const error = new Error("Reviewer identity is required.");
-    error.statusCode = 400;
-    error.code = "INVALID_REVIEWER_ID";
-    throw error;
+    throw Object.assign(new Error("Reviewer identity is required."), { statusCode: 400, code: "INVALID_REVIEWER_ID" });
   }
 
   return {
@@ -726,10 +710,7 @@ function parseReviewerWorkflowPayload(payload) {
   const reviewerId = String(payload?.reviewerId ?? "system").trim();
 
   if (!reviewerId) {
-    const error = new Error("Reviewer identity is required.");
-    error.statusCode = 400;
-    error.code = "INVALID_REVIEWER_ID";
-    throw error;
+    throw Object.assign(new Error("Reviewer identity is required."), { statusCode: 400, code: "INVALID_REVIEWER_ID" });
   }
 
   return {
@@ -749,7 +730,7 @@ function buildBackgroundJobPayload(job) {
 }
 
 async function readJsonBody(request) {
-  const chunks = [];
+  const chunks: any[] = [];
 
   for await (const chunk of request) {
     chunks.push(chunk);
@@ -767,7 +748,7 @@ async function readJsonBody(request) {
 export function createServer({
   clarificationRequestRepository,
   artifactRepository,
-  artifactPublisher = null,
+  artifactPublisher = null as any,
   backgroundJobRepository,
   reviewerScanRepository,
   categoryCatalogRepository,
@@ -777,9 +758,9 @@ export function createServer({
   upcomingCategoryCatalogRepository,
   tradeActivityRepository,
   now,
-  createRequestId,
+  createRequestId = (() => randomUUID()) as () => string,
   createClarificationId,
-  createBackgroundJobId = () => randomUUID(),
+  createBackgroundJobId = (() => randomUUID()) as () => string,
   llmTraceability,
   llmRuntime,
   reviewerAuthToken,
@@ -788,10 +769,10 @@ export function createServer({
   telegramBotApiBaseUrl,
   x402PaymentConfig = loadX402PaymentConfig(),
   verifiedPaymentRepository,
-  phase1Coordinator = null,
+  phase1Coordinator = null as any,
   verifyX402Payment = verifyDefaultClarificationPayment,
   buildX402PaymentChallenge = buildX402PaymentRequiredPayload,
-  fetchReviewerMarketSource,
+  fetchReviewerMarketSource = null as any,
   fetchTradesForSymbol = fetchDefaultTradesForSymbol,
   sendTelegramMessage = sendDefaultTelegramMessage,
   runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline,
@@ -805,12 +786,12 @@ export function createServer({
   enableTelegramRoutes = true,
   logger = console,
   clarifyRateLimiter = null,
-  readinessCheck = async () => ({
+  readinessCheck = (async () => ({
     ok: true,
     checks: {
       runtime: "ok"
     }
-  })
+  })) as (() => Promise<{ ok: boolean; checks: Record<string, string> }>)
 }) {
   const log = buildLogger(logger);
   const rateLimiter = clarifyRateLimiter ?? createInMemoryRateLimiter();
@@ -1011,7 +992,7 @@ export function createServer({
           artifactCid: artifact?.artifact?.cid ?? null
         }
       });
-    } catch (pipelineError) {
+    } catch (pipelineError: any) {
       const failedAt = now().toISOString();
 
       await clarificationRequestRepository.updateByClarificationId(job.target.clarificationId, {
@@ -1057,7 +1038,7 @@ export function createServer({
           scanId: scan.scanId
         }
       });
-    } catch (scanError) {
+    } catch (scanError: any) {
       await backgroundJobRepository?.updateByJobId?.(job.jobId, {
         status: "failed",
         updatedAt: now().toISOString(),
@@ -1115,7 +1096,7 @@ export function createServer({
       typeof request.headers.host === "string" && request.headers.host.trim() !== ""
         ? request.headers.host
         : "127.0.0.1";
-    const requestUrl = new URL(request.url, `${requestProtocol}://${requestHost}`);
+    const requestUrl = new URL(request.url ?? "/", `${requestProtocol}://${requestHost}`);
     const waitOptions = parseBoundedWaitOptions(requestUrl);
     response.setHeader("x-request-id", requestContext.requestId);
 
@@ -1147,7 +1128,7 @@ export function createServer({
             shuttingDown: isShuttingDown ? "draining" : "ok"
           }
         });
-      } catch (error) {
+      } catch (error: any) {
         log.error("readiness.failed", {
           requestId: requestContext.requestId,
           errorMessage: error.message
@@ -1194,7 +1175,7 @@ export function createServer({
           requestId: result.requestId,
           status: result.status
         });
-      } catch (error) {
+      } catch (error: any) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -1275,12 +1256,10 @@ export function createServer({
         const marketStage = upcomingMarket ? "upcoming" : "active";
 
         if (!supportedMarket) {
-          const error = new Error(
-            "Event id must match an active or upcoming synced market before a clarification can be created."
+          throw Object.assign(
+            new Error("Event id must match an active or upcoming synced market before a clarification can be created."),
+            { statusCode: 404, code: "UNSUPPORTED_EVENT_ID" }
           );
-          error.statusCode = 404;
-          error.code = "UNSUPPORTED_EVENT_ID";
-          throw error;
         }
 
         const paymentCandidate = extractX402PaymentCandidate(request, body);
@@ -1310,8 +1289,7 @@ export function createServer({
             eventId,
             requesterId: payload.requesterId
           },
-          requestUrl,
-          verifiedPaymentRepository
+          requestUrl
         });
 
         const existingClarification =
@@ -1391,7 +1369,7 @@ export function createServer({
           errorMessage: null,
           result: null
         };
-        let clarification = null;
+        let clarification: any = null;
         let queuedJob = null;
 
         if (phase1Coordinator) {
@@ -1503,7 +1481,7 @@ export function createServer({
               }
             : {}
         });
-      } catch (error) {
+      } catch (error: any) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -1548,7 +1526,7 @@ export function createServer({
       try {
         const markets = (await marketCacheRepository?.list?.()) ?? [];
         const clarifications = (await clarificationRequestRepository?.list?.()) ?? [];
-        const queue = [];
+        const queue: any[] = [];
 
         for (const market of markets) {
           const latestScan =
@@ -1613,7 +1591,7 @@ export function createServer({
           queue: filteredQueue,
           availableCategories: availableCategories.categories
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -1634,7 +1612,7 @@ export function createServer({
 
       try {
         const markets = (await upcomingMarketCacheRepository?.list?.()) ?? [];
-        const queue = [];
+        const queue: any[] = [];
 
         for (const market of markets) {
           const latestScan =
@@ -1655,7 +1633,7 @@ export function createServer({
           queue,
           availableCategories: availableCategories.categories
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -1702,7 +1680,7 @@ export function createServer({
           market: buildReviewerMarketPayload(market, eventId),
           latestScan: latestScan ? buildReviewerScanListItem(latestScan) : null
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -1730,7 +1708,7 @@ export function createServer({
           ok: true,
           scans
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -1787,6 +1765,7 @@ export function createServer({
           };
         if (!backgroundJobRepository) {
         const scan = await runReviewerMarketScan({
+          jobId: queuedJob.jobId,
           eventId,
           marketCacheRepository,
           reviewerScanRepository,
@@ -1807,7 +1786,7 @@ export function createServer({
           ok: true,
           job: buildBackgroundJobPayload(processingJob)
         });
-      } catch (error) {
+      } catch (error: any) {
         if (error.statusCode) {
           sendJson(response, error.statusCode, {
             ok: false,
@@ -1878,6 +1857,7 @@ export function createServer({
 
         if (!backgroundJobRepository) {
           const scan = await runReviewerMarketScan({
+            jobId: queuedJob.jobId,
             eventId,
             marketCacheRepository: upcomingMarketCacheRepository,
             reviewerScanRepository: upcomingReviewerScanRepository,
@@ -1901,7 +1881,7 @@ export function createServer({
           ok: true,
           job: buildBackgroundJobPayload(processingJob)
         });
-      } catch (error) {
+      } catch (error: any) {
         if (error.statusCode) {
           sendJson(response, error.statusCode, {
             ok: false,
@@ -1933,7 +1913,7 @@ export function createServer({
 
       try {
         const markets = (await marketCacheRepository?.list?.()) ?? [];
-        const jobs = [];
+        const jobs: any[] = [];
 
         for (const market of markets) {
           const timestamp = now().toISOString();
@@ -1958,10 +1938,12 @@ export function createServer({
           } else {
             jobs.push(
               await runReviewerMarketScan({
+                jobId: createBackgroundJobId(),
                 eventId: market.marketId,
                 marketCacheRepository,
                 reviewerScanRepository,
-                now
+                now,
+                llmRuntime
               })
             );
           }
@@ -1973,7 +1955,7 @@ export function createServer({
             ? { jobs: jobs.map(buildBackgroundJobPayload) }
             : { scans: jobs })
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -1996,7 +1978,7 @@ export function createServer({
         const markets = ((await upcomingMarketCacheRepository?.list?.()) ?? []).filter((market) =>
           isFutureUpcomingMarket(market, now())
         );
-        const jobs = [];
+        const jobs: any[] = [];
 
         for (const market of markets) {
           const timestamp = now().toISOString();
@@ -2022,6 +2004,7 @@ export function createServer({
           } else {
             jobs.push(
               await runReviewerMarketScan({
+                jobId: createBackgroundJobId(),
                 eventId: market.marketId,
                 marketCacheRepository: upcomingMarketCacheRepository,
                 reviewerScanRepository: upcomingReviewerScanRepository,
@@ -2041,7 +2024,7 @@ export function createServer({
             ? { jobs: jobs.map(buildBackgroundJobPayload) }
             : { scans: jobs })
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2097,7 +2080,7 @@ export function createServer({
           ok: true,
           job: buildBackgroundJobPayload(processingJob)
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2128,10 +2111,10 @@ export function createServer({
           fetchReviewerMarketSource ??
           (async (requestedEventId) => {
             if (!cachedMarket?.ticker) {
-              const error = new Error("Cached market does not include a Gemini ticker.");
-              error.statusCode = 503;
-              error.code = "MARKET_REFRESH_UNAVAILABLE";
-              throw error;
+              throw Object.assign(new Error("Cached market does not include a Gemini ticker."), {
+                statusCode: 503,
+                code: "MARKET_REFRESH_UNAVAILABLE"
+              });
             }
 
             return fetchPredictionMarketEventByTicker(cachedMarket.ticker);
@@ -2147,7 +2130,7 @@ export function createServer({
           ok: true,
           market
         });
-      } catch (error) {
+      } catch (error: any) {
         if (error.statusCode) {
           sendJson(response, error.statusCode, {
             ok: false,
@@ -2197,7 +2180,7 @@ export function createServer({
           ok: true,
           clarification: await buildPublicClarificationResponse(clarification)
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2280,7 +2263,7 @@ export function createServer({
             vote: buildReviewerVotePayload(updatedClarification)
           }
         });
-      } catch (error) {
+      } catch (error: any) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -2394,7 +2377,7 @@ export function createServer({
             }
           }
         });
-      } catch (error) {
+      } catch (error: any) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -2463,7 +2446,7 @@ export function createServer({
           ok: true,
           funding: buildStoredFundingDetails(clarification)
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2548,7 +2531,7 @@ export function createServer({
           ok: true,
           funding: updatedClarification.funding
         });
-      } catch (error) {
+      } catch (error: any) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -2624,7 +2607,7 @@ export function createServer({
             artifact
           })
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2689,7 +2672,7 @@ export function createServer({
             relatedClarifications
           })
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2732,7 +2715,7 @@ export function createServer({
           ok: true,
           artifact
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2782,7 +2765,7 @@ export function createServer({
             updatedAt: storedRequest.updatedAt ?? storedRequest.createdAt
           }))
         });
-      } catch (error) {
+      } catch (error: any) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2821,7 +2804,7 @@ export function createServer({
         }
 
         const delivery = buildTelegramDeliveryPayload(storedRequest);
-        let deliveryResult = {
+        let deliveryResult: any = {
           attempted: false,
           sent: false
         };
@@ -2848,7 +2831,7 @@ export function createServer({
           delivery,
           deliveryResult
         });
-      } catch (error) {
+      } catch (error: any) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -2886,10 +2869,10 @@ export function createServer({
     sendNotFound(response);
   });
 
-  server.resumeRecoverableBackgroundJobs = resumeRecoverableBackgroundJobs;
-  server.markShuttingDown = () => {
+  (server as any).resumeRecoverableBackgroundJobs = resumeRecoverableBackgroundJobs;
+  (server as any).markShuttingDown = () => {
     isShuttingDown = true;
   };
 
-  return server;
+  return server as any;
 }

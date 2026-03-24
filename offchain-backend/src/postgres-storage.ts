@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { Pool } from "pg";
 
 import { createArtifactCid } from "./artifact-repository.js";
@@ -7,7 +6,7 @@ function normalizeClient(clientOrPool) {
   return clientOrPool ?? null;
 }
 
-async function query(clientOrPool, sql, params = []) {
+async function query(clientOrPool, sql, params: any[] = []) {
   return clientOrPool.query(sql, params);
 }
 
@@ -15,7 +14,7 @@ function parsePayloadRow(row) {
   return row?.payload ?? null;
 }
 
-function uniqueMarkets(markets = []) {
+function uniqueMarkets(markets: any[] = []) {
   const dedupedById = new Map();
 
   for (const market of Array.isArray(markets) ? markets : []) {
@@ -159,11 +158,12 @@ export async function checkPostgresReadiness(pool) {
 }
 
 export class PostgresClarificationRequestRepository {
+  private pool: Pool;
   constructor(pool) {
     this.pool = pool;
   }
 
-  async create(request, client = null) {
+  async create(request, client: any = null) {
     const db = normalizeClient(client) ?? this.pool;
     const payload = {
       ...request,
@@ -220,8 +220,8 @@ export class PostgresClarificationRequestRepository {
   }
 
   async findByTelegramIdentifiers({ telegramChatId, telegramUserId }) {
-    const conditions = [];
-    const params = [];
+    const conditions: string[] = [];
+    const params: any[] = [];
 
     if (telegramChatId) {
       params.push(telegramChatId);
@@ -419,11 +419,12 @@ export class PostgresClarificationRequestRepository {
 }
 
 export class PostgresVerifiedPaymentRepository {
+  private pool: Pool;
   constructor(pool) {
     this.pool = pool;
   }
 
-  async create(payment, client = null) {
+  async create(payment, client: any = null) {
     const db = normalizeClient(client) ?? this.pool;
     const payload = {
       ...payment,
@@ -475,7 +476,7 @@ export class PostgresVerifiedPaymentRepository {
     return parsePayloadRow(result.rows[0]);
   }
 
-  async updateByPaymentProof(paymentProof, updates, client = null) {
+  async updateByPaymentProof(paymentProof, updates, client: any = null) {
     const db = normalizeClient(client) ?? this.pool;
     const existingPaymentResult = await query(
       db,
@@ -525,11 +526,12 @@ export class PostgresVerifiedPaymentRepository {
 }
 
 export class PostgresBackgroundJobRepository {
+  private pool: Pool;
   constructor(pool) {
     this.pool = pool;
   }
 
-  async saveJob(job, client = null) {
+  async saveJob(job, client: any = null) {
     const db = normalizeClient(client) ?? this.pool;
     await query(
       db,
@@ -573,7 +575,7 @@ export class PostgresBackgroundJobRepository {
     );
   }
 
-  async create(job, client = null) {
+  async create(job, client: any = null) {
     await this.saveJob(job, client);
     return job;
   }
@@ -622,6 +624,7 @@ export class PostgresBackgroundJobRepository {
 }
 
 export class PostgresArtifactRepository {
+  private pool: Pool;
   constructor(pool) {
     this.pool = pool;
   }
@@ -674,6 +677,8 @@ export class PostgresArtifactRepository {
 }
 
 export class PostgresMarketCacheRepository {
+  private pool: Pool;
+  private marketStage: string;
   constructor(pool, marketStage = "active") {
     this.pool = pool;
     this.marketStage = marketStage;
@@ -779,6 +784,8 @@ export class PostgresMarketCacheRepository {
 }
 
 export class PostgresReviewerScanRepository {
+  private pool: Pool;
+  private marketStage: string;
   constructor(pool, marketStage = "active") {
     this.pool = pool;
     this.marketStage = marketStage;
@@ -843,6 +850,7 @@ export class PostgresReviewerScanRepository {
 }
 
 export class PostgresSyncStateRepository {
+  private pool: Pool;
   constructor(pool) {
     this.pool = pool;
   }
@@ -871,6 +879,7 @@ export class PostgresSyncStateRepository {
 }
 
 export class PostgresCategoryCatalogRepository {
+  private pool: Pool;
   constructor(pool) {
     this.pool = pool;
   }
@@ -885,7 +894,7 @@ export class PostgresCategoryCatalogRepository {
 
   async setCatalog(scope, value) {
     const payload = {
-      categories: [...new Set((value?.categories ?? []).filter((entry) => typeof entry === "string"))].sort(
+      categories: [...new Set((value?.categories ?? [] as string[]).filter((entry) => typeof entry === "string") as string[])].sort(
         (left, right) => left.localeCompare(right)
       ),
       updatedAt: value?.updatedAt ?? null
@@ -906,6 +915,7 @@ export class PostgresCategoryCatalogRepository {
 }
 
 export class PostgresTradeActivityRepository {
+  private pool: Pool;
   constructor(pool) {
     this.pool = pool;
   }
@@ -940,6 +950,10 @@ export class PostgresTradeActivityRepository {
 }
 
 export class PostgresPhase1Coordinator {
+  private pool: Pool;
+  private clarificationRequestRepository: PostgresClarificationRequestRepository;
+  private verifiedPaymentRepository: PostgresVerifiedPaymentRepository;
+  private backgroundJobRepository: PostgresBackgroundJobRepository;
   constructor({
     pool,
     clarificationRequestRepository,

@@ -1,10 +1,9 @@
-// @ts-nocheck
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const EMPTY_CACHE = { markets: [] };
 
-function normalizeMarkets(markets = []) {
+function normalizeMarkets(markets: any[] = []) {
   const dedupedById = new Map();
 
   for (const market of Array.isArray(markets) ? markets : []) {
@@ -19,6 +18,8 @@ function normalizeMarkets(markets = []) {
 }
 
 export class FileMarketCacheRepository {
+  private filePath: string;
+  private writeChain: Promise<void>;
   constructor(filePath) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
@@ -32,7 +33,8 @@ export class FileMarketCacheRepository {
         markets: normalizeMarkets(parsed.markets)
       };
     } catch (error) {
-      if (error.code === "ENOENT") {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
         return { ...EMPTY_CACHE };
       }
 

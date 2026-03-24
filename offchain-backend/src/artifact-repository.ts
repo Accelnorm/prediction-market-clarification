@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -11,6 +10,8 @@ export function createArtifactCid(artifact) {
 }
 
 export class FileArtifactRepository {
+  private filePath: string;
+  private writeChain: Promise<void>;
   constructor(filePath) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
@@ -25,7 +26,8 @@ export class FileArtifactRepository {
         artifacts: Array.isArray(parsed.artifacts) ? parsed.artifacts : []
       };
     } catch (error) {
-      if (error.code === "ENOENT") {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") {
         return { ...EMPTY_STORE };
       }
 

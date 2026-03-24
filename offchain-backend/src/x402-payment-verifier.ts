@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   paymentRequiredError,
   validationError
@@ -30,16 +29,12 @@ function tryDecodeBase64Json(value) {
   }
 }
 
-function paymentVerificationError(statusCode, code, message, details = null) {
-  const error = new Error(message);
-  error.statusCode = statusCode;
-  error.code = code;
-
+function paymentVerificationError(statusCode, code, message, details: any = null) {
+  const extra: Record<string, any> = { statusCode, code };
   if (details !== null) {
-    error.details = details;
+    extra.details = details;
   }
-
-  return error;
+  return Object.assign(new Error(message), extra);
 }
 
 function parsePaymentPayload(rawValue) {
@@ -70,7 +65,7 @@ function parsePaymentPayload(rawValue) {
   return null;
 }
 
-export function extractX402PaymentCandidate(request, body = null) {
+export function extractX402PaymentCandidate(request, body: any = null) {
   const paymentSignatureHeader = normalizeString(request.headers["payment-signature"]);
   const legacyPaymentHeader = normalizeString(request.headers["x-payment"]);
   const headerPayload = parsePaymentPayload(paymentSignatureHeader || legacyPaymentHeader);

@@ -1,4 +1,3 @@
-// @ts-nocheck
 const PLACEHOLDER_SOLANA_RECIPIENT = "11111111111111111111111111111111";
 
 function normalizeString(value) {
@@ -10,9 +9,7 @@ function isTruthyEnv(value) {
 }
 
 function validationError(message) {
-  const error = new Error(message);
-  error.code = "INVALID_RUNTIME_CONFIG";
-  return error;
+  return Object.assign(new Error(message), { code: "INVALID_RUNTIME_CONFIG" });
 }
 
 function hasPayAIApiKeys(x402PaymentConfig) {
@@ -56,7 +53,7 @@ export function validateProductionRuntimeConfig({
   env = process.env,
   llmRuntime,
   x402PaymentConfig,
-  artifactPublicationConfig = { provider: "disabled", enabled: false },
+  artifactPublicationConfig = { provider: "disabled", enabled: false } as { provider: string; enabled: boolean; ipfsApiUrl?: string | null },
   telegramEnabled = false,
   hasDatabase = false
 }) {
