@@ -1,17 +1,18 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { VerifiedPayment } from "./types.js";
 
-const EMPTY_STORE = { payments: [] };
+const EMPTY_STORE: { payments: VerifiedPayment[] } = { payments: [] };
 
 export class FileVerifiedPaymentRepository {
   private filePath: string;
-  private writeChain: Promise<void>;
-  constructor(filePath: any) {
+  private writeChain: Promise<unknown>;
+  constructor(filePath: string) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
 
-  async load() {
+  async load(): Promise<{ payments: VerifiedPayment[] }> {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
@@ -29,12 +30,12 @@ export class FileVerifiedPaymentRepository {
     }
   }
 
-  async save(payments: any) {
+  async save(payments: VerifiedPayment[]) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ payments }, null, 2) + "\n", "utf8");
   }
 
-  async create(payment: any) {
+  async create(payment: VerifiedPayment) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const payments = [
@@ -51,32 +52,32 @@ export class FileVerifiedPaymentRepository {
     });
   }
 
-  async findByPaymentProof(paymentProof: any) {
+  async findByPaymentProof(paymentProof: string): Promise<VerifiedPayment | null> {
     const store = await this.load();
     return (
       store.payments.find(
-        (payment: any) =>
+        (payment: VerifiedPayment) =>
           typeof payment.paymentProof === "string" && payment.paymentProof === paymentProof
       ) ?? null
     );
   }
 
-  async findByPaymentReference(paymentReference: any) {
+  async findByPaymentReference(paymentReference: string): Promise<VerifiedPayment | null> {
     const store = await this.load();
     return (
       store.payments.find(
-        (payment: any) =>
+        (payment: VerifiedPayment) =>
           typeof payment.paymentReference === "string" &&
           payment.paymentReference === paymentReference
       ) ?? null
     );
   }
 
-  async updateByPaymentProof(paymentProof: any, updates: any) {
+  async updateByPaymentProof(paymentProof: string, updates: Partial<VerifiedPayment>) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const paymentIndex = store.payments.findIndex(
-        (payment: any) => payment.paymentProof === paymentProof
+        (payment: VerifiedPayment) => payment.paymentProof === paymentProof
       );
 
       if (paymentIndex === -1) {
@@ -101,7 +102,7 @@ export class FileVerifiedPaymentRepository {
     return store.payments;
   }
 
-  async withWriteLock(work: any) {
+  async withWriteLock<T>(work: () => Promise<T>): Promise<T> {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

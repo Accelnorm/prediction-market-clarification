@@ -1,17 +1,18 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { BackgroundJob } from "./types.js";
 
-const EMPTY_STORE = { jobs: [] };
+const EMPTY_STORE: { jobs: BackgroundJob[] } = { jobs: [] };
 
 export class FileBackgroundJobRepository {
   private filePath: string;
-  private writeChain: Promise<void>;
-  constructor(filePath: any) {
+  private writeChain: Promise<unknown>;
+  constructor(filePath: string) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
 
-  async load() {
+  async load(): Promise<{ jobs: BackgroundJob[] }> {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
@@ -29,7 +30,7 @@ export class FileBackgroundJobRepository {
     }
   }
 
-  async save(jobs: any) {
+  async save(jobs: BackgroundJob[]) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ jobs }, null, 2) + "\n", "utf8");
   }
@@ -39,7 +40,7 @@ export class FileBackgroundJobRepository {
     return store.jobs;
   }
 
-  async create(job: any) {
+  async create(job: BackgroundJob) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const jobs = [...store.jobs, job];
@@ -48,20 +49,20 @@ export class FileBackgroundJobRepository {
     });
   }
 
-  async findByJobId(jobId: any) {
+  async findByJobId(jobId: string): Promise<BackgroundJob | null> {
     const store = await this.load();
-    return store.jobs.find((job: any) => job.jobId === jobId) ?? null;
+    return store.jobs.find((job: BackgroundJob) => job.jobId === jobId) ?? null;
   }
 
   async listRecoverable() {
     const store = await this.load();
-    return store.jobs.filter((job: any) => ["queued", "processing"].includes(job.status));
+    return store.jobs.filter((job: BackgroundJob) => ["queued", "processing"].includes(job.status));
   }
 
-  async updateByJobId(jobId: any, updates: any) {
+  async updateByJobId(jobId: string, updates: Partial<BackgroundJob>) {
     return this.withWriteLock(async () => {
       const store = await this.load();
-      const jobIndex = store.jobs.findIndex((job: any) => job.jobId === jobId);
+      const jobIndex = store.jobs.findIndex((job: BackgroundJob) => job.jobId === jobId);
 
       if (jobIndex === -1) {
         return null;
@@ -78,7 +79,7 @@ export class FileBackgroundJobRepository {
     });
   }
 
-  async withWriteLock(work: any) {
+  async withWriteLock<T>(work: () => Promise<T>): Promise<T> {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

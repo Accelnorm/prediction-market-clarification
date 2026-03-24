@@ -1,17 +1,18 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { SyncStateMap } from "./types.js";
 
-const EMPTY_STORE = { states: {} };
+const EMPTY_STORE: { states: SyncStateMap } = { states: {} };
 
 export class FileSyncStateRepository {
   private filePath: string;
-  private writeChain: Promise<void>;
-  constructor(filePath: any) {
+  private writeChain: Promise<unknown>;
+  constructor(filePath: string) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
 
-  async load() {
+  async load(): Promise<{ states: SyncStateMap }> {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
@@ -28,17 +29,17 @@ export class FileSyncStateRepository {
     }
   }
 
-  async save(states: any) {
+  async save(states: SyncStateMap) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ states }, null, 2) + "\n", "utf8");
   }
 
-  async getState(scope: any) {
+  async getState(scope: string) {
     const store = await this.load();
     return store.states[scope] ?? null;
   }
 
-  async setState(scope: any, value: any) {
+  async setState(scope: string, value: unknown) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const states = {
@@ -50,7 +51,7 @@ export class FileSyncStateRepository {
     });
   }
 
-  async withWriteLock(work: any) {
+  async withWriteLock<T>(work: () => Promise<T>): Promise<T> {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

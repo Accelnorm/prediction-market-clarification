@@ -1,17 +1,18 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { ReviewerScan } from "./types.js";
 
-const EMPTY_STORE = { scans: [] };
+const EMPTY_STORE: { scans: ReviewerScan[] } = { scans: [] };
 
 export class FileReviewerScanRepository {
   private filePath: string;
-  private writeChain: Promise<void>;
-  constructor(filePath: any) {
+  private writeChain: Promise<unknown>;
+  constructor(filePath: string) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
 
-  async load() {
+  async load(): Promise<{ scans: ReviewerScan[] }> {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
@@ -29,33 +30,35 @@ export class FileReviewerScanRepository {
     }
   }
 
-  async save(scans: any) {
+  async save(scans: ReviewerScan[]) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ scans }, null, 2) + "\n", "utf8");
   }
 
-  async list() {
+  async list(): Promise<ReviewerScan[]> {
     const store = await this.load();
     return store.scans;
   }
 
-  async findLatestByEventId(eventId: any) {
+  async findLatestByEventId(eventId: string) {
     const scans = await this.list();
 
     return (
       scans
-        .filter((scan: any) => scan.eventId === eventId)
-        .sort((left: any, right: any) => right.createdAt.localeCompare(left.createdAt))
+        .filter((scan: ReviewerScan) => scan.eventId === eventId)
+        .sort((left: ReviewerScan, right: ReviewerScan) =>
+          right.createdAt.localeCompare(left.createdAt)
+        )
         .at(0) ?? null
     );
   }
 
-  async create(scan: any) {
+  async create(scan: ReviewerScan) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const existingIndex =
         typeof scan.jobId === "string"
-          ? store.scans.findIndex((existingScan: any) => existingScan.jobId === scan.jobId)
+          ? store.scans.findIndex((existingScan: ReviewerScan) => existingScan.jobId === scan.jobId)
           : -1;
 
       if (existingIndex !== -1) {
@@ -74,7 +77,7 @@ export class FileReviewerScanRepository {
     });
   }
 
-  async withWriteLock(work: any) {
+  async withWriteLock<T>(work: () => Promise<T>): Promise<T> {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

@@ -43,14 +43,17 @@ async function createRepositories() {
   }
 
   const activeCachePath =
-    process.env.MARKET_CACHE_PATH ?? new URL("../../data/market-cache.json", import.meta.url);
+    process.env.MARKET_CACHE_PATH ??
+    fileURLToPath(new URL("../../data/market-cache.json", import.meta.url));
   const upcomingCachePath =
     process.env.UPCOMING_MARKET_CACHE_PATH ??
-    new URL("../../data/upcoming-market-cache.json", import.meta.url);
+    fileURLToPath(new URL("../../data/upcoming-market-cache.json", import.meta.url));
   const syncStatePath =
-    process.env.SYNC_STATE_PATH ?? new URL("../../data/sync-state.json", import.meta.url);
+    process.env.SYNC_STATE_PATH ??
+    fileURLToPath(new URL("../../data/sync-state.json", import.meta.url));
   const categoryCatalogPath =
-    process.env.CATEGORY_CATALOG_PATH ?? new URL("../../data/category-catalog.json", import.meta.url);
+    process.env.CATEGORY_CATALOG_PATH ??
+    fileURLToPath(new URL("../../data/category-catalog.json", import.meta.url));
 
   return {
     pool: null,
@@ -147,3 +150,4 @@ main().catch((error: any) => {
   process.stderr.write(`${error.message}\n`);
   process.exitCode = 1;
 });
+import { fileURLToPath } from "node:url";

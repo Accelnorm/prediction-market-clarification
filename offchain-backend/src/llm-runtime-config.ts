@@ -1,8 +1,8 @@
-function normalizeString(value: any) {
+function normalizeString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-export function loadLlmRuntime(env: any = process.env) {
+export function loadLlmRuntime(env: NodeJS.ProcessEnv = process.env) {
   const provider = normalizeString(env.LLM_PROVIDER) || "openrouter";
 
   if (provider === "openrouter") {

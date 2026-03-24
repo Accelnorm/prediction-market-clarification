@@ -1,40 +1,40 @@
 const PLACEHOLDER_SOLANA_RECIPIENT = "11111111111111111111111111111111";
 
-function normalizeString(value: any) {
+function normalizeString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function isTruthyEnv(value: any) {
+function isTruthyEnv(value: string): boolean {
   return value === "1" || value === "true";
 }
 
-function validationError(message: any) {
+function validationError(message: string) {
   return Object.assign(new Error(message), { code: "INVALID_RUNTIME_CONFIG" });
 }
 
-function hasPayAIApiKeys(x402PaymentConfig: any) {
+function hasPayAIApiKeys(x402PaymentConfig: { payaiApiKeyId?: unknown; payaiApiKeySecret?: unknown }) {
   return (
     normalizeString(x402PaymentConfig?.payaiApiKeyId) &&
     normalizeString(x402PaymentConfig?.payaiApiKeySecret)
   );
 }
 
-export function isProductionRuntime(env: any = process.env) {
+export function isProductionRuntime(env: NodeJS.ProcessEnv = process.env) {
   return (
     normalizeString(env.APP_ENV).toLowerCase() === "production" ||
     normalizeString(env.NODE_ENV).toLowerCase() === "production"
   );
 }
 
-export function resolvePhase2RoutesEnabled(env: any = process.env) {
+export function resolvePhase2RoutesEnabled(env: NodeJS.ProcessEnv = process.env) {
   return isTruthyEnv(normalizeString(env.ENABLE_PHASE2_REVIEWER_ROUTES).toLowerCase());
 }
 
-export function resolveTelegramEnabled(env: any = process.env) {
+export function resolveTelegramEnabled(env: NodeJS.ProcessEnv = process.env) {
   return isTruthyEnv(normalizeString(env.ENABLE_TELEGRAM_ROUTES).toLowerCase());
 }
 
-export function resolveClarificationFinalityConfig(env: any = process.env) {
+export function resolveClarificationFinalityConfig(env: NodeJS.ProcessEnv = process.env) {
   const mode = normalizeString(env.CLARIFICATION_FINALITY_MODE).toLowerCase() === "dynamic"
     ? "dynamic"
     : "static";

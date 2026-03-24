@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 import { FileArtifactRepository } from "../artifact-repository.js";
 import { loadArtifactPublicationConfig } from "../artifact-publication-config.js";
@@ -41,11 +42,11 @@ import { FileTradeActivityRepository } from "../trade-activity-repository.js";
 import { FileVerifiedPaymentRepository } from "../verified-payment-repository.js";
 import { loadX402PaymentConfig } from "../x402-payment-config.js";
 
-function resolvePathFromEnv(name: any, fallback: any) {
-  return process.env[name] ?? new URL(fallback, import.meta.url);
+function resolvePathFromEnv(name: string, fallback: string): string {
+  return process.env[name] ?? fileURLToPath(new URL(fallback, import.meta.url));
 }
 
-function createId(prefix: any) {
+function createId(prefix: string): string {
   return `${prefix}_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }
 

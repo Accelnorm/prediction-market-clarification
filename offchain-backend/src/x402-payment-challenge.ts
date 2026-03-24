@@ -1,8 +1,8 @@
-function normalizeString(value: any) {
+function normalizeString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function toUsdcBaseUnits(amount: any) {
+function toUsdcBaseUnits(amount: unknown): string {
   const normalized = normalizeString(amount);
 
   if (!normalized) {
@@ -16,7 +16,7 @@ function toUsdcBaseUnits(amount: any) {
   return combined || "0";
 }
 
-function joinUrl(baseUrl: any, pathname: any) {
+function joinUrl(baseUrl: string | null | undefined, pathname: string): string {
   if (!baseUrl) {
     return pathname;
   }
@@ -88,12 +88,13 @@ export function buildX402PaymentRequiredPayload({ eventId, requesterId, config, 
   };
 }
 
-export function buildX402PaymentRequiredHeader(payload: any) {
-  const primaryRequirement = payload.paymentRequirements[0] ?? null;
+export function buildX402PaymentRequiredHeader(payload: { paymentRequirements?: Array<Record<string, unknown>> }) {
+  const paymentRequirements = payload.paymentRequirements ?? [];
+  const primaryRequirement = paymentRequirements[0] ?? null;
 
   return {
     x402Version: primaryRequirement?.x402Version ?? 2,
-    accepts: payload.paymentRequirements,
+    accepts: paymentRequirements,
     resource: primaryRequirement?.resource ?? null,
     extensions: {}
   };

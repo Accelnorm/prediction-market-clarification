@@ -1,23 +1,24 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { ArtifactInput, ArtifactRecord } from "./types.js";
 
-const EMPTY_STORE = { artifacts: [] };
+const EMPTY_STORE: { artifacts: ArtifactRecord[] } = { artifacts: [] };
 
-export function createArtifactCid(artifact: any) {
+export function createArtifactCid(artifact: ArtifactInput): string {
   const digest = createHash("sha256").update(JSON.stringify(artifact)).digest("hex");
   return `bafy${digest.slice(0, 32)}`;
 }
 
 export class FileArtifactRepository {
   private filePath: string;
-  private writeChain: Promise<void>;
-  constructor(filePath: any) {
+  private writeChain: Promise<unknown>;
+  constructor(filePath: string) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
 
-  async load() {
+  async load(): Promise<{ artifacts: ArtifactRecord[] }> {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
@@ -35,22 +36,22 @@ export class FileArtifactRepository {
     }
   }
 
-  async save(artifacts: any) {
+  async save(artifacts: ArtifactRecord[]) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ artifacts }, null, 2) + "\n", "utf8");
   }
 
-  async createArtifact(input: any) {
+  async createArtifact(input: ArtifactInput) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const cid = createArtifactCid(input);
-      const existingArtifact = store.artifacts.find((artifact: any) => artifact.cid === cid);
+      const existingArtifact = store.artifacts.find((artifact: ArtifactRecord) => artifact.cid === cid);
 
       if (existingArtifact) {
         return existingArtifact;
       }
 
-      const artifact = {
+      const artifact: ArtifactRecord = {
         ...input,
         cid,
         url: `ipfs://${cid}`
@@ -61,12 +62,12 @@ export class FileArtifactRepository {
     });
   }
 
-  async findByCid(cid: any) {
+  async findByCid(cid: string): Promise<ArtifactRecord | null> {
     const store = await this.load();
-    return store.artifacts.find((artifact: any) => artifact.cid === cid) ?? null;
+    return store.artifacts.find((artifact: ArtifactRecord) => artifact.cid === cid) ?? null;
   }
 
-  async withWriteLock(work: any) {
+  async withWriteLock<T>(work: () => Promise<T>): Promise<T> {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

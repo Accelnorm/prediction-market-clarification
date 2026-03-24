@@ -1,10 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { MarketRecord } from "./types.js";
 
-const EMPTY_CACHE = { markets: [] };
+const EMPTY_CACHE: { markets: MarketRecord[] } = { markets: [] };
 
-function normalizeMarkets(markets: any[] = []) {
-  const dedupedById = new Map();
+function normalizeMarkets(markets: MarketRecord[] = []): MarketRecord[] {
+  const dedupedById = new Map<string, MarketRecord>();
 
   for (const market of Array.isArray(markets) ? markets : []) {
     if (!market || typeof market.marketId !== "string" || market.marketId === "") {
@@ -14,18 +15,18 @@ function normalizeMarkets(markets: any[] = []) {
     dedupedById.set(market.marketId, market);
   }
 
-  return [...dedupedById.values()].sort((left: any, right: any) => left.marketId.localeCompare(right.marketId));
+  return [...dedupedById.values()].sort((left, right) => left.marketId.localeCompare(right.marketId));
 }
 
 export class FileMarketCacheRepository {
   private filePath: string;
-  private writeChain: Promise<void>;
-  constructor(filePath: any) {
+  private writeChain: Promise<unknown>;
+  constructor(filePath: string) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
 
-  async load() {
+  async load(): Promise<{ markets: MarketRecord[] }> {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
@@ -42,7 +43,7 @@ export class FileMarketCacheRepository {
     }
   }
 
-  async save(markets: any) {
+  async save(markets: MarketRecord[]) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(
       this.filePath,
@@ -56,17 +57,15 @@ export class FileMarketCacheRepository {
     return cache.markets;
   }
 
-  async findByMarketId(marketId: any) {
+  async findByMarketId(marketId: string) {
     const cache = await this.load();
-    return cache.markets.find((market: any) => market.marketId === marketId) ?? null;
+    return cache.markets.find((market) => market.marketId === marketId) ?? null;
   }
 
-  async upsert(market: any) {
+  async upsert(market: MarketRecord) {
     return this.withWriteLock(async () => {
       const cache = await this.load();
-      const marketIndex = cache.markets.findIndex(
-        (existingMarket: any) => existingMarket.marketId === market.marketId
-      );
+      const marketIndex = cache.markets.findIndex((existingMarket) => existingMarket.marketId === market.marketId);
       const nextMarkets = [...cache.markets];
 
       if (marketIndex === -1) {
@@ -80,7 +79,7 @@ export class FileMarketCacheRepository {
     });
   }
 
-  async withWriteLock(work: any) {
+  async withWriteLock<T>(work: () => Promise<T>): Promise<T> {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

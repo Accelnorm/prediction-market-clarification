@@ -3,11 +3,11 @@ const SOLANA_DEVNET_CAIP2 = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
 const SOLANA_MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SOLANA_DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 
-function normalizeString(value: any) {
+function normalizeString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function resolveFacilitatorAuthConfig(env: any) {
+function resolveFacilitatorAuthConfig(env: NodeJS.ProcessEnv) {
   const payaiApiKeyId = normalizeString(env.PAYAI_API_KEY_ID) || null;
   const payaiApiKeySecret = normalizeString(env.PAYAI_API_KEY_SECRET) || null;
   const facilitatorAuthToken = normalizeString(env.X402_FACILITATOR_AUTH_TOKEN) || null;
@@ -19,7 +19,7 @@ function resolveFacilitatorAuthConfig(env: any) {
   };
 }
 
-function resolveNetworkIdentifier(value: any) {
+function resolveNetworkIdentifier(value: unknown): string {
   const normalized = normalizeString(value).toLowerCase();
 
   if (!normalized || normalized === "solana:devnet" || normalized === "devnet") {
@@ -38,7 +38,7 @@ function resolveNetworkIdentifier(value: any) {
   return normalizeString(value);
 }
 
-function resolveCluster(network: any) {
+function resolveCluster(network: string): "mainnet" | "devnet" {
   if (network === SOLANA_MAINNET_CAIP2) {
     return "mainnet";
   }
@@ -46,13 +46,13 @@ function resolveCluster(network: any) {
   return "devnet";
 }
 
-function resolveDefaultMint(network: any) {
+function resolveDefaultMint(network: string): string {
   return network === SOLANA_MAINNET_CAIP2
     ? SOLANA_MAINNET_USDC_MINT
     : SOLANA_DEVNET_USDC_MINT;
 }
 
-export function loadX402PaymentConfig(env: any = process.env) {
+export function loadX402PaymentConfig(env: NodeJS.ProcessEnv = process.env) {
   const network = resolveNetworkIdentifier(env.X402_NETWORK);
   const cluster = resolveCluster(network);
   const authConfig = resolveFacilitatorAuthConfig(env);
