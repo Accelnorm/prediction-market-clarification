@@ -48,6 +48,8 @@ function buildDefaultSystemPrompt() {
     'Use llm_status "completed".',
     "ambiguity_score must be a number between 0 and 1.",
     "cited_clause must quote or restate the most relevant resolution clause.",
+    'When verdict is "clear", suggested_market_text and suggested_note may be omitted or null.',
+    'When verdict is "needs_clarification", suggested_market_text and suggested_note are required.',
     "Do not include markdown fences or extra commentary."
   ].join(" ");
 }
@@ -178,6 +180,15 @@ function normalizeString(value, fallback = "") {
   return trimmed === "" ? fallback : trimmed;
 }
 
+function normalizeOptionalString(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
 function normalizeScore(value, fallback = 0.5) {
   const numeric =
     typeof value === "number"
@@ -202,6 +213,17 @@ export function normalizeInterpretation(payload, { market }) {
       .replace(/\s+/g, "_") === "clear"
       ? "clear"
       : "needs_clarification";
+  const suggestedMarketText =
+    verdict === "clear"
+      ? normalizeOptionalString(payload?.suggested_market_text)
+      : normalizeString(payload?.suggested_market_text, market.title ?? resolutionText);
+  const suggestedNote =
+    verdict === "clear"
+      ? normalizeOptionalString(payload?.suggested_note)
+      : normalizeString(
+          payload?.suggested_note,
+          "Clarify the exact Gemini source, qualifying trade condition, and time boundary."
+        );
 
   return {
     verdict,
@@ -216,14 +238,8 @@ export function normalizeInterpretation(payload, { market }) {
       payload?.ambiguity_summary,
       "The current market wording may leave important interpretation details unspecified."
     ),
-    suggested_market_text: normalizeString(
-      payload?.suggested_market_text,
-      market.title ?? resolutionText
-    ),
-    suggested_note: normalizeString(
-      payload?.suggested_note,
-      "Clarify the exact Gemini source, qualifying trade condition, and time boundary."
-    )
+    suggested_market_text: suggestedMarketText,
+    suggested_note: suggestedNote
   };
 }
 

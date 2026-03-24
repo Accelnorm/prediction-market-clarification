@@ -275,6 +275,32 @@ test("generateMarketInterpretation uses an Anthropic-compatible provider respons
   }
 });
 
+test("normalizeInterpretation keeps rewrite fields optional for clear verdicts", () => {
+  const normalized = normalizeInterpretation(
+    {
+      verdict: "clear",
+      ambiguity_score: 0.18,
+      reasoning: "The current rule already answers the question.",
+      cited_clause: MARKET.resolution,
+      ambiguity_summary: "The contract is already specific enough.",
+      suggested_market_text: "",
+      suggested_note: ""
+    },
+    { market: MARKET }
+  );
+
+  assert.deepEqual(normalized, {
+    verdict: "clear",
+    llm_status: "completed",
+    reasoning: "The current rule already answers the question.",
+    cited_clause: MARKET.resolution,
+    ambiguity_score: 0.18,
+    ambiguity_summary: "The contract is already specific enough.",
+    suggested_market_text: null,
+    suggested_note: null
+  });
+});
+
 test("normalizeInterpretation clamps malformed model output into the expected schema", () => {
   const normalized = normalizeInterpretation(
     {

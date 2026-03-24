@@ -17,8 +17,8 @@ Return output with these exact keys:
 - `cited_clause`
 - `ambiguity_score`
 - `ambiguity_summary`
-- `suggested_market_text`
-- `suggested_note`
+- `suggested_market_text`: optional when `verdict` is `clear`
+- `suggested_note`: optional when `verdict` is `clear`
 
 ## Response Workflow
 
@@ -45,7 +45,8 @@ Return output with these exact keys:
 - Use `ambiguity_score` to reflect contract precision, not forecasting difficulty.
 - Make `suggested_market_text` executable as a resolution rule. Name the binding source, threshold, and time boundary explicitly.
 - Make `suggested_note` useful to an operator or reviewer. State the single policy choice or edge-case rule that should be locked in.
-- If the market is already precise enough, return `clear` and keep the rewrite minimal.
+- If the market is already precise enough, return `clear`.
+- Only include `suggested_market_text` or `suggested_note` for a `clear` verdict when a small wording tweak is still useful.
 
 ## Scoring Bands
 

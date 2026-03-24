@@ -94,8 +94,8 @@ type ReviewerClarificationDetail = {
     cited_clause: string;
     ambiguity_score: number;
     ambiguity_summary: string;
-    suggested_market_text: string;
-    suggested_note: string;
+    suggested_market_text: string | null;
+    suggested_note: string | null;
   } | null;
   llmTrace: {
     promptTemplateVersion: string;
@@ -189,8 +189,8 @@ type ReviewerArtifactRecord = {
   clarificationId: string;
   eventId: string;
   marketText: string;
-  suggestedEditedMarketText: string;
-  clarificationNote: string;
+  suggestedEditedMarketText: string | null;
+  clarificationNote: string | null;
   generatedAtUtc: string;
   cid: string;
   url: string;
@@ -261,6 +261,10 @@ function saveStoredSession(
   }
 
   window.localStorage.setItem(key, JSON.stringify(session));
+}
+
+function hasVisibleText(value: string | null | undefined) {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 function clearStoredSession(key: string) {
@@ -1437,22 +1441,26 @@ function ReviewerConsole() {
                               {detail.llmOutput.ambiguity_summary}
                             </p>
                           </div>
-                          <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
-                            <p className="text-xs uppercase tracking-[0.14em] text-muted">
-                              Suggested wording
-                            </p>
-                            <p className="mt-2 text-sm leading-6 text-foreground">
-                              {detail.llmOutput.suggested_market_text}
-                            </p>
-                          </div>
-                          <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
-                            <p className="text-xs uppercase tracking-[0.14em] text-muted">
-                              Note
-                            </p>
-                            <p className="mt-2 text-sm leading-6 text-foreground">
-                              {detail.llmOutput.suggested_note}
-                            </p>
-                          </div>
+                          {hasVisibleText(detail.llmOutput.suggested_market_text) ? (
+                            <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                              <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                                Suggested wording
+                              </p>
+                              <p className="mt-2 text-sm leading-6 text-foreground">
+                                {detail.llmOutput.suggested_market_text}
+                              </p>
+                            </div>
+                          ) : null}
+                          {hasVisibleText(detail.llmOutput.suggested_note) ? (
+                            <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                              <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                                Note
+                              </p>
+                              <p className="mt-2 text-sm leading-6 text-foreground">
+                                {detail.llmOutput.suggested_note}
+                              </p>
+                            </div>
+                          ) : null}
                         </div>
                       ) : (
                         <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-sm text-muted">
@@ -1514,12 +1522,22 @@ function ReviewerConsole() {
                           <p className="mt-3 text-sm text-muted">{artifactPreviewError}</p>
                         ) : artifactPreview ? (
                           <div className="mt-3 space-y-3">
-                            <p className="text-sm text-foreground">
-                              {artifactPreview.suggestedEditedMarketText}
-                            </p>
-                            <p className="text-sm text-muted">
-                              {artifactPreview.clarificationNote}
-                            </p>
+                            {hasVisibleText(artifactPreview.suggestedEditedMarketText) ? (
+                              <p className="text-sm text-foreground">
+                                {artifactPreview.suggestedEditedMarketText}
+                              </p>
+                            ) : null}
+                            {hasVisibleText(artifactPreview.clarificationNote) ? (
+                              <p className="text-sm text-muted">
+                                {artifactPreview.clarificationNote}
+                              </p>
+                            ) : null}
+                            {!hasVisibleText(artifactPreview.suggestedEditedMarketText) &&
+                            !hasVisibleText(artifactPreview.clarificationNote) ? (
+                              <p className="text-sm text-muted">
+                                This clarification answered the question without proposing an edit.
+                              </p>
+                            ) : null}
                           </div>
                         ) : (
                           <p className="mt-3 text-sm text-muted">

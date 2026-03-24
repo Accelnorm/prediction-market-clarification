@@ -98,5 +98,5 @@ When the market is ambiguous:
 When the market is already clear:
 
 - explain the binding clause that answers the user's question
-- keep the suggested rewrite minimal
+- omit `suggested_market_text` and `suggested_note` unless a small wording tweak would still help
 - use a lower ambiguity score
