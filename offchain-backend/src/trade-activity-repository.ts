@@ -6,7 +6,7 @@ const EMPTY_STORE = { activities: {} };
 export class FileTradeActivityRepository {
   private filePath: string;
   private writeChain: Promise<void>;
-  constructor(filePath) {
+  constructor(filePath: any) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
@@ -29,17 +29,17 @@ export class FileTradeActivityRepository {
     }
   }
 
-  async save(activities) {
+  async save(activities: any) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ activities }, null, 2) + "\n", "utf8");
   }
 
-  async findByEventId(eventId) {
+  async findByEventId(eventId: any) {
     const store = await this.load();
     return store.activities[eventId] ?? null;
   }
 
-  async upsert(activity) {
+  async upsert(activity: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const activities = {
@@ -51,7 +51,7 @@ export class FileTradeActivityRepository {
     });
   }
 
-  async withWriteLock(work) {
+  async withWriteLock(work: any) {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

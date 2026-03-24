@@ -19,7 +19,7 @@ import {
 
 test("fetchActiveMarkets defaults to the live Gemini active markets endpoint", async () => {
   const requests = [];
-  const fetchImpl = async (url) => {
+  const fetchImpl = async (url: any) => {
     requests.push(url);
     return {
       ok: true,
@@ -38,7 +38,7 @@ test("fetchActiveMarkets defaults to the live Gemini active markets endpoint", a
 
 test("fetchConfiguredMarkets follows paginated Gemini event responses", async () => {
   const requests = [];
-  const fetchImpl = async (url) => {
+  const fetchImpl = async (url: any) => {
     requests.push(url);
 
     if (url.endsWith("offset=0")) {
@@ -74,7 +74,7 @@ test("fetchConfiguredMarkets follows paginated Gemini event responses", async ()
 
 test("fetchUpcomingMarkets defaults to the live Gemini upcoming markets endpoint", async () => {
   const requests = [];
-  const fetchImpl = async (url) => {
+  const fetchImpl = async (url: any) => {
     requests.push(url);
     return {
       ok: true,
@@ -93,7 +93,7 @@ test("fetchUpcomingMarkets defaults to the live Gemini upcoming markets endpoint
 
 test("fetchNewlyListedMarkets defaults to the live Gemini newly-listed endpoint", async () => {
   const requests = [];
-  const fetchImpl = async (url) => {
+  const fetchImpl = async (url: any) => {
     requests.push(url);
     return {
       ok: true,
@@ -112,7 +112,7 @@ test("fetchNewlyListedMarkets defaults to the live Gemini newly-listed endpoint"
 
 test("fetchPredictionMarketEventByTicker requests the Gemini detail endpoint", async () => {
   const requests = [];
-  const fetchImpl = async (url) => {
+  const fetchImpl = async (url: any) => {
     requests.push(url);
     return {
       ok: true,
@@ -138,7 +138,7 @@ test("fetchPredictionMarketCategories requests Gemini categories with status fil
   const requests = [];
   const categories = await fetchPredictionMarketCategories({
     status: ["active", "approved"],
-    fetchImpl: async (url) => {
+    fetchImpl: async (url: any) => {
       requests.push(url);
       return {
         ok: true,
@@ -161,7 +161,7 @@ test("fetchTradesForSymbol requests Gemini trades with cursor params", async () 
   const trades = await fetchTradesForSymbol("GEMI-BTC-YES", {
     sinceTid: 123,
     limitTrades: 250,
-    fetchImpl: async (url) => {
+    fetchImpl: async (url: any) => {
       requests.push(url);
       return {
         ok: true,
@@ -183,7 +183,7 @@ test("fetchEnrichedPredictionMarkets hydrates list results with per-event Gemini
       { id: "evt_1", ticker: "BTC100K2025" },
       { id: "evt_2", ticker: "ETH5K2025" }
     ],
-    fetchEventByTicker: async (ticker) => ({
+    fetchEventByTicker: async (ticker: any) => ({
       id: ticker === "BTC100K2025" ? "evt_1" : "evt_2",
       ticker,
       title: `${ticker} detail`

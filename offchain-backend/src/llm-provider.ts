@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
 
-function validationError(code, message, statusCode = 500) {
+function validationError(code: any, message: any, statusCode: any = 500) {
   return Object.assign(new Error(message), { code, statusCode });
 }
 
-export function buildDefaultInterpretation({ market }) {
+export function buildDefaultInterpretation({ market }: any) {
   return {
     verdict: "needs_clarification",
     llm_status: "completed",
@@ -21,7 +21,7 @@ export function buildDefaultInterpretation({ market }) {
   };
 }
 
-const PROMPT_PROFILE_FILES = {
+const PROMPT_PROFILE_FILES: Record<string, string[]> = {
   "issue-clarification-response": [
     "../../new-skills/issue-clarification-response/SKILL.md",
     "../../new-skills/issue-clarification-response/references/clarification-heuristics.md"
@@ -50,7 +50,7 @@ function buildDefaultSystemPrompt() {
   ].join(" ");
 }
 
-async function readPromptProfile(profile) {
+async function readPromptProfile(profile: any) {
   if (!profile || !PROMPT_PROFILE_FILES[profile]) {
     return buildDefaultSystemPrompt();
   }
@@ -61,7 +61,7 @@ async function readPromptProfile(profile) {
 
   const promptPromise = (async () => {
     const sections = await Promise.all(
-      PROMPT_PROFILE_FILES[profile].map((relativePath) =>
+      PROMPT_PROFILE_FILES[profile].map((relativePath: any) =>
         readFile(new URL(relativePath, import.meta.url), "utf8")
       )
     );
@@ -83,7 +83,7 @@ async function readPromptProfile(profile) {
   }
 }
 
-function buildUserPrompt({ clarification, market }) {
+function buildUserPrompt({ clarification, market }: any) {
   return JSON.stringify(
     {
       task: "analyze_prediction_market_clarification",
@@ -109,7 +109,7 @@ function buildUserPrompt({ clarification, market }) {
   );
 }
 
-function extractJsonObject(text) {
+function extractJsonObject(text: any) {
   if (typeof text !== "string") {
     throw validationError("LLM_INVALID_RESPONSE", "LLM response did not contain text.");
   }
@@ -167,7 +167,7 @@ function extractJsonObject(text) {
   throw validationError("LLM_INVALID_RESPONSE", "LLM response JSON could not be parsed.");
 }
 
-function normalizeString(value, fallback = "") {
+function normalizeString(value: any, fallback: any = "") {
   if (typeof value !== "string") {
     return fallback;
   }
@@ -176,7 +176,7 @@ function normalizeString(value, fallback = "") {
   return trimmed === "" ? fallback : trimmed;
 }
 
-function normalizeOptionalString(value) {
+function normalizeOptionalString(value: any) {
   if (typeof value !== "string") {
     return null;
   }
@@ -185,7 +185,7 @@ function normalizeOptionalString(value) {
   return trimmed === "" ? null : trimmed;
 }
 
-function normalizeScore(value, fallback = 0.5) {
+function normalizeScore(value: any, fallback: any = 0.5) {
   const numeric =
     typeof value === "number"
       ? value
@@ -200,7 +200,7 @@ function normalizeScore(value, fallback = 0.5) {
   return Math.max(0, Math.min(1, Number.parseFloat(numeric.toFixed(2))));
 }
 
-export function normalizeInterpretation(payload, { market }) {
+export function normalizeInterpretation(payload: any, { market }: any) {
   const resolutionText = market.resolution ?? market.resolutionText ?? "";
   const ambiguityScore = normalizeScore(payload?.ambiguity_score, 0.5);
   const verdict =
@@ -239,7 +239,7 @@ export function normalizeInterpretation(payload, { market }) {
   };
 }
 
-async function readJsonResponse(response) {
+async function readJsonResponse(response: any) {
   try {
     return await response.json();
   } catch {
@@ -254,7 +254,7 @@ async function callOpenAiCompatibleProvider({
   systemPrompt,
   userPrompt,
   defaultHeaders = {}
-}) {
+}: any) {
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: {
@@ -303,7 +303,7 @@ async function callAnthropicCompatibleProvider({
   anthropicVersion,
   systemPrompt,
   userPrompt
-}) {
+}: any) {
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/messages`, {
     method: "POST",
     headers: {
@@ -337,8 +337,8 @@ async function callAnthropicCompatibleProvider({
   return {
     text: Array.isArray(payload?.content)
       ? payload.content
-          .filter((item) => item?.type === "text" && typeof item.text === "string")
-          .map((item) => item.text)
+          .filter((item: any) => item?.type === "text" && typeof item.text === "string")
+          .map((item: any) => item.text)
           .join("\n")
       : null,
     modelId: payload?.model ?? model
@@ -389,7 +389,7 @@ export async function generateMarketInterpretation({
   market,
   llmRuntime,
   promptProfile = null as string | null
-}) {
+}: any) {
   const runtime = resolveRuntime(llmRuntime);
 
   if (!runtime.apiKey) {

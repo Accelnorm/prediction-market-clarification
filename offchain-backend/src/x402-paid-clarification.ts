@@ -1,4 +1,4 @@
-function createError({ statusCode, code, message, details = null }) {
+function createError({ statusCode, code, message, details = null }: any) {
   const extra: Record<string, any> = { statusCode, code };
   if (details !== null) {
     extra.details = details;
@@ -6,7 +6,7 @@ function createError({ statusCode, code, message, details = null }) {
   return Object.assign(new Error(message), extra);
 }
 
-export function paymentRequiredError(details = null) {
+export function paymentRequiredError(details: any = null) {
   return createError({
     statusCode: 402,
     code: "PAYMENT_REQUIRED",
@@ -15,7 +15,7 @@ export function paymentRequiredError(details = null) {
   });
 }
 
-export function validationError(code, message, details = null) {
+export function validationError(code: any, message: any, details: any = null) {
   return createError({
     statusCode: 400,
     code,
@@ -24,17 +24,17 @@ export function validationError(code, message, details = null) {
   });
 }
 
-function normalizeString(value) {
+function normalizeString(value: any) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function normalizeQuestion(value) {
+function normalizeQuestion(value: any) {
   return normalizeString(value).replace(/\s+/g, " ");
 }
 
 export const MAX_QUESTION_LENGTH = 500;
 
-export function parseClarificationRequestInput(payload) {
+export function parseClarificationRequestInput(payload: any) {
   const requesterId = normalizeString(payload?.requesterId);
   const question = normalizeQuestion(payload?.question);
 

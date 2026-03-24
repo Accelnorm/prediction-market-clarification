@@ -1,4 +1,4 @@
-function buildIpfsGatewayUrl(baseUrl, cid) {
+function buildIpfsGatewayUrl(baseUrl: any, cid: any) {
   if (!baseUrl) {
     return null;
   }
@@ -6,7 +6,7 @@ function buildIpfsGatewayUrl(baseUrl, cid) {
   return `${baseUrl.replace(/\/$/, "")}/ipfs/${encodeURIComponent(cid)}`;
 }
 
-function parseIpfsAddResponseBody(body) {
+function parseIpfsAddResponseBody(body: any) {
   const normalized = String(body ?? "").trim();
 
   if (!normalized) {
@@ -15,7 +15,7 @@ function parseIpfsAddResponseBody(body) {
 
   const lines = normalized
     .split("\n")
-    .map((line) => line.trim())
+    .map((line: any) => line.trim())
     .filter(Boolean);
 
   if (lines.length === 0) {
@@ -25,7 +25,7 @@ function parseIpfsAddResponseBody(body) {
   return JSON.parse(lines.at(-1) as string);
 }
 
-function buildPublicationSourcePayload(artifact) {
+function buildPublicationSourcePayload(artifact: any) {
   return {
     clarificationId: artifact.clarificationId ?? null,
     eventId: artifact.eventId ?? null,
@@ -58,10 +58,10 @@ export function createIpfsArtifactPublisher({
   ipfsGatewayBaseUrl = null as string | null,
   ipfsAuthToken = null as string | null,
   fetchImpl = fetch
-}) {
+}: any) {
   return {
     provider: "ipfs",
-    async publishArtifact(artifact) {
+    async publishArtifact(artifact: any) {
       const formData = new FormData();
       const body = JSON.stringify(buildPublicationSourcePayload(artifact), null, 2);
       formData.set(

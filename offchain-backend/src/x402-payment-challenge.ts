@@ -1,8 +1,8 @@
-function normalizeString(value) {
+function normalizeString(value: any) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function toUsdcBaseUnits(amount) {
+function toUsdcBaseUnits(amount: any) {
   const normalized = normalizeString(amount);
 
   if (!normalized) {
@@ -16,7 +16,7 @@ function toUsdcBaseUnits(amount) {
   return combined || "0";
 }
 
-function joinUrl(baseUrl, pathname) {
+function joinUrl(baseUrl: any, pathname: any) {
   if (!baseUrl) {
     return pathname;
   }
@@ -29,7 +29,7 @@ export function buildClarificationPaymentRequirements({
   requesterId,
   config,
   requestUrl
-}) {
+}: any) {
   const resource = joinUrl(
     config.resourceBaseUrl ?? requestUrl?.origin ?? null,
     `/api/clarify/${encodeURIComponent(eventId)}`
@@ -68,7 +68,7 @@ export function buildClarificationPaymentRequirements({
   };
 }
 
-export function buildX402PaymentRequiredPayload({ eventId, requesterId, config, requestUrl }) {
+export function buildX402PaymentRequiredPayload({ eventId, requesterId, config, requestUrl }: any) {
   const paymentRequirements = [
     buildClarificationPaymentRequirements({
       eventId,
@@ -88,7 +88,7 @@ export function buildX402PaymentRequiredPayload({ eventId, requesterId, config, 
   };
 }
 
-export function buildX402PaymentRequiredHeader(payload) {
+export function buildX402PaymentRequiredHeader(payload: any) {
   const primaryRequirement = payload.paymentRequirements[0] ?? null;
 
   return {

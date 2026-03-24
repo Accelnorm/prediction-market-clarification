@@ -2,15 +2,15 @@ import { Pool } from "pg";
 
 import { createArtifactCid } from "./artifact-repository.js";
 
-function normalizeClient(clientOrPool) {
+function normalizeClient(clientOrPool: any) {
   return clientOrPool ?? null;
 }
 
-async function query(clientOrPool, sql, params: any[] = []) {
+async function query(clientOrPool: any, sql: any, params: any[] = []) {
   return clientOrPool.query(sql, params);
 }
 
-function parsePayloadRow(row) {
+function parsePayloadRow(row: any) {
   return row?.payload ?? null;
 }
 
@@ -25,20 +25,20 @@ function uniqueMarkets(markets: any[] = []) {
     dedupedById.set(market.marketId, market);
   }
 
-  return [...dedupedById.values()].sort((left, right) => left.marketId.localeCompare(right.marketId));
+  return [...dedupedById.values()].sort((left: any, right: any) => left.marketId.localeCompare(right.marketId));
 }
 
-function parseBooleanEnv(value) {
+function parseBooleanEnv(value: any) {
   return value === "1" || value === "true";
 }
 
-export function createPostgresPool(connectionString) {
+export function createPostgresPool(connectionString: any) {
   return new Pool({
     connectionString
   });
 }
 
-export async function initializePostgresSchema(pool) {
+export async function initializePostgresSchema(pool: any) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS clarifications (
       clarification_id TEXT PRIMARY KEY,
@@ -147,7 +147,7 @@ export async function initializePostgresSchema(pool) {
   `);
 }
 
-export async function checkPostgresReadiness(pool) {
+export async function checkPostgresReadiness(pool: any) {
   await pool.query("SELECT 1");
   return {
     ok: true,
@@ -159,11 +159,11 @@ export async function checkPostgresReadiness(pool) {
 
 export class PostgresClarificationRequestRepository {
   private pool: Pool;
-  constructor(pool) {
+  constructor(pool: any) {
     this.pool = pool;
   }
 
-  async create(request, client: any = null) {
+  async create(request: any, client: any = null) {
     const db = normalizeClient(client) ?? this.pool;
     const payload = {
       ...request,
@@ -219,7 +219,7 @@ export class PostgresClarificationRequestRepository {
     return payload;
   }
 
-  async findByTelegramIdentifiers({ telegramChatId, telegramUserId }) {
+  async findByTelegramIdentifiers({ telegramChatId, telegramUserId }: any) {
     const conditions: string[] = [];
     const params: any[] = [];
 
@@ -242,7 +242,7 @@ export class PostgresClarificationRequestRepository {
     return result.rows.map(parsePayloadRow);
   }
 
-  async findByRequestId(requestId) {
+  async findByRequestId(requestId: any) {
     const result = await this.pool.query(
       `SELECT payload FROM clarifications WHERE request_id = $1 LIMIT 1`,
       [requestId]
@@ -250,7 +250,7 @@ export class PostgresClarificationRequestRepository {
     return parsePayloadRow(result.rows[0]);
   }
 
-  async findByClarificationId(clarificationId) {
+  async findByClarificationId(clarificationId: any) {
     const result = await this.pool.query(
       `SELECT payload FROM clarifications WHERE clarification_id = $1 LIMIT 1`,
       [clarificationId]
@@ -258,7 +258,7 @@ export class PostgresClarificationRequestRepository {
     return parsePayloadRow(result.rows[0]);
   }
 
-  async findByPaymentProof(paymentProof) {
+  async findByPaymentProof(paymentProof: any) {
     const result = await this.pool.query(
       `SELECT payload FROM clarifications WHERE payment_proof = $1 LIMIT 1`,
       [paymentProof]
@@ -273,7 +273,7 @@ export class PostgresClarificationRequestRepository {
     return result.rows.map(parsePayloadRow);
   }
 
-  async findByEventId(eventId) {
+  async findByEventId(eventId: any) {
     const result = await this.pool.query(
       `SELECT payload FROM clarifications WHERE event_id = $1 ORDER BY created_at DESC NULLS LAST`,
       [eventId]
@@ -281,7 +281,7 @@ export class PostgresClarificationRequestRepository {
     return result.rows.map(parsePayloadRow);
   }
 
-  async updateStatus(requestId, updates) {
+  async updateStatus(requestId: any, updates: any) {
     const existingRequest = await this.findByRequestId(requestId);
 
     if (!existingRequest) {
@@ -323,7 +323,7 @@ export class PostgresClarificationRequestRepository {
     return nextRequest;
   }
 
-  async updateByClarificationId(clarificationId, updates) {
+  async updateByClarificationId(clarificationId: any, updates: any) {
     const existingRequest = await this.findByClarificationId(clarificationId);
 
     if (!existingRequest) {
@@ -420,11 +420,11 @@ export class PostgresClarificationRequestRepository {
 
 export class PostgresVerifiedPaymentRepository {
   private pool: Pool;
-  constructor(pool) {
+  constructor(pool: any) {
     this.pool = pool;
   }
 
-  async create(payment, client: any = null) {
+  async create(payment: any, client: any = null) {
     const db = normalizeClient(client) ?? this.pool;
     const payload = {
       ...payment,
@@ -460,7 +460,7 @@ export class PostgresVerifiedPaymentRepository {
     return payload;
   }
 
-  async findByPaymentProof(paymentProof) {
+  async findByPaymentProof(paymentProof: any) {
     const result = await this.pool.query(
       `SELECT payload FROM verified_payments WHERE payment_proof = $1 LIMIT 1`,
       [paymentProof]
@@ -468,7 +468,7 @@ export class PostgresVerifiedPaymentRepository {
     return parsePayloadRow(result.rows[0]);
   }
 
-  async findByPaymentReference(paymentReference) {
+  async findByPaymentReference(paymentReference: any) {
     const result = await this.pool.query(
       `SELECT payload FROM verified_payments WHERE payment_reference = $1 LIMIT 1`,
       [paymentReference]
@@ -476,7 +476,7 @@ export class PostgresVerifiedPaymentRepository {
     return parsePayloadRow(result.rows[0]);
   }
 
-  async updateByPaymentProof(paymentProof, updates, client: any = null) {
+  async updateByPaymentProof(paymentProof: any, updates: any, client: any = null) {
     const db = normalizeClient(client) ?? this.pool;
     const existingPaymentResult = await query(
       db,
@@ -527,11 +527,11 @@ export class PostgresVerifiedPaymentRepository {
 
 export class PostgresBackgroundJobRepository {
   private pool: Pool;
-  constructor(pool) {
+  constructor(pool: any) {
     this.pool = pool;
   }
 
-  async saveJob(job, client: any = null) {
+  async saveJob(job: any, client: any = null) {
     const db = normalizeClient(client) ?? this.pool;
     await query(
       db,
@@ -575,7 +575,7 @@ export class PostgresBackgroundJobRepository {
     );
   }
 
-  async create(job, client: any = null) {
+  async create(job: any, client: any = null) {
     await this.saveJob(job, client);
     return job;
   }
@@ -587,7 +587,7 @@ export class PostgresBackgroundJobRepository {
     return result.rows.map(parsePayloadRow);
   }
 
-  async findByJobId(jobId) {
+  async findByJobId(jobId: any) {
     const result = await this.pool.query(
       `SELECT payload FROM background_jobs WHERE job_id = $1 LIMIT 1`,
       [jobId]
@@ -595,7 +595,7 @@ export class PostgresBackgroundJobRepository {
     return parsePayloadRow(result.rows[0]);
   }
 
-  async updateByJobId(jobId, updates) {
+  async updateByJobId(jobId: any, updates: any) {
     const existingJob = await this.findByJobId(jobId);
 
     if (!existingJob) {
@@ -625,11 +625,11 @@ export class PostgresBackgroundJobRepository {
 
 export class PostgresArtifactRepository {
   private pool: Pool;
-  constructor(pool) {
+  constructor(pool: any) {
     this.pool = pool;
   }
 
-  async createArtifact(input) {
+  async createArtifact(input: any) {
     const cid = input.cid ?? createArtifactCid(input);
     const existingArtifact = cid ? await this.findByCid(cid) : null;
 
@@ -667,7 +667,7 @@ export class PostgresArtifactRepository {
     return (await this.findByCid(artifact.cid)) ?? artifact;
   }
 
-  async findByCid(cid) {
+  async findByCid(cid: any) {
     const result = await this.pool.query(
       `SELECT payload FROM artifacts WHERE cid = $1 LIMIT 1`,
       [cid]
@@ -679,7 +679,7 @@ export class PostgresArtifactRepository {
 export class PostgresMarketCacheRepository {
   private pool: Pool;
   private marketStage: string;
-  constructor(pool, marketStage = "active") {
+  constructor(pool: any, marketStage: any = "active") {
     this.pool = pool;
     this.marketStage = marketStage;
   }
@@ -690,7 +690,7 @@ export class PostgresMarketCacheRepository {
     };
   }
 
-  async save(markets) {
+  async save(markets: any) {
     const unique = uniqueMarkets(markets);
     const client = await this.pool.connect();
 
@@ -742,7 +742,7 @@ export class PostgresMarketCacheRepository {
     return uniqueMarkets(result.rows.map(parsePayloadRow));
   }
 
-  async findByMarketId(marketId) {
+  async findByMarketId(marketId: any) {
     const result = await this.pool.query(
       `
         SELECT payload
@@ -755,7 +755,7 @@ export class PostgresMarketCacheRepository {
     return parsePayloadRow(result.rows[0]);
   }
 
-  async upsert(market) {
+  async upsert(market: any) {
     await this.pool.query(
       `
         INSERT INTO market_cache (
@@ -786,7 +786,7 @@ export class PostgresMarketCacheRepository {
 export class PostgresReviewerScanRepository {
   private pool: Pool;
   private marketStage: string;
-  constructor(pool, marketStage = "active") {
+  constructor(pool: any, marketStage: any = "active") {
     this.pool = pool;
     this.marketStage = marketStage;
   }
@@ -804,7 +804,7 @@ export class PostgresReviewerScanRepository {
     return result.rows.map(parsePayloadRow);
   }
 
-  async findLatestByEventId(eventId) {
+  async findLatestByEventId(eventId: any) {
     const result = await this.pool.query(
       `
         SELECT payload
@@ -818,7 +818,7 @@ export class PostgresReviewerScanRepository {
     return parsePayloadRow(result.rows[0]);
   }
 
-  async create(scan) {
+  async create(scan: any) {
     await this.pool.query(
       `
         INSERT INTO reviewer_scans (
@@ -851,11 +851,11 @@ export class PostgresReviewerScanRepository {
 
 export class PostgresSyncStateRepository {
   private pool: Pool;
-  constructor(pool) {
+  constructor(pool: any) {
     this.pool = pool;
   }
 
-  async getState(scope) {
+  async getState(scope: any) {
     const result = await this.pool.query(
       `SELECT payload FROM market_sync_state WHERE scope = $1 LIMIT 1`,
       [scope]
@@ -863,7 +863,7 @@ export class PostgresSyncStateRepository {
     return parsePayloadRow(result.rows[0]);
   }
 
-  async setState(scope, value) {
+  async setState(scope: any, value: any) {
     await this.pool.query(
       `
         INSERT INTO market_sync_state (scope, updated_at, payload)
@@ -880,11 +880,11 @@ export class PostgresSyncStateRepository {
 
 export class PostgresCategoryCatalogRepository {
   private pool: Pool;
-  constructor(pool) {
+  constructor(pool: any) {
     this.pool = pool;
   }
 
-  async getCatalog(scope) {
+  async getCatalog(scope: any) {
     const result = await this.pool.query(
       `SELECT payload FROM category_catalogs WHERE scope = $1 LIMIT 1`,
       [scope]
@@ -892,10 +892,10 @@ export class PostgresCategoryCatalogRepository {
     return parsePayloadRow(result.rows[0]) ?? { categories: [], updatedAt: null };
   }
 
-  async setCatalog(scope, value) {
+  async setCatalog(scope: any, value: any) {
     const payload = {
-      categories: [...new Set((value?.categories ?? [] as string[]).filter((entry) => typeof entry === "string") as string[])].sort(
-        (left, right) => left.localeCompare(right)
+      categories: [...new Set((value?.categories ?? [] as string[]).filter((entry: any) => typeof entry === "string") as string[])].sort(
+        (left: any, right: any) => left.localeCompare(right)
       ),
       updatedAt: value?.updatedAt ?? null
     };
@@ -916,11 +916,11 @@ export class PostgresCategoryCatalogRepository {
 
 export class PostgresTradeActivityRepository {
   private pool: Pool;
-  constructor(pool) {
+  constructor(pool: any) {
     this.pool = pool;
   }
 
-  async findByEventId(eventId) {
+  async findByEventId(eventId: any) {
     const result = await this.pool.query(
       `SELECT payload FROM trade_activity WHERE event_id = $1 LIMIT 1`,
       [eventId]
@@ -928,7 +928,7 @@ export class PostgresTradeActivityRepository {
     return parsePayloadRow(result.rows[0]);
   }
 
-  async upsert(activity) {
+  async upsert(activity: any) {
     await this.pool.query(
       `
         INSERT INTO trade_activity (event_id, last_trade_at, last_fetched_at, payload)
@@ -959,14 +959,14 @@ export class PostgresPhase1Coordinator {
     clarificationRequestRepository,
     verifiedPaymentRepository,
     backgroundJobRepository
-  }) {
+  }: any) {
     this.pool = pool;
     this.clarificationRequestRepository = clarificationRequestRepository;
     this.verifiedPaymentRepository = verifiedPaymentRepository;
     this.backgroundJobRepository = backgroundJobRepository;
   }
 
-  async createPaidClarification({ clarification, verifiedPayment, backgroundJob }) {
+  async createPaidClarification({ clarification, verifiedPayment, backgroundJob }: any) {
     const client = await this.pool.connect();
 
     try {
@@ -1021,7 +1021,7 @@ export class PostgresPhase1Coordinator {
   }
 }
 
-export function loadPostgresRuntimeConfig(env = process.env) {
+export function loadPostgresRuntimeConfig(env: any = process.env) {
   return {
     connectionString: env.DATABASE_URL ?? null,
     ssl: env.PGSSLMODE === "require" || parseBooleanEnv(String(env.PGSSL ?? "").toLowerCase())

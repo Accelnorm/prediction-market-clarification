@@ -10,11 +10,11 @@ export const DEFAULT_GEMINI_UPCOMING_MARKETS_SOURCE_URL =
 export const DEFAULT_GEMINI_CATEGORIES_SOURCE_URL =
   `${GEMINI_API_BASE_URL}/v1/prediction-markets/categories`;
 
-function isFileUrl(sourceUrl) {
+function isFileUrl(sourceUrl: any) {
   return sourceUrl.startsWith("file://");
 }
 
-function isPaginatedPayload(payload) {
+function isPaginatedPayload(payload: any) {
   return (
     payload &&
     typeof payload === "object" &&
@@ -24,7 +24,7 @@ function isPaginatedPayload(payload) {
   );
 }
 
-function extractMarkets(payload) {
+function extractMarkets(payload: any) {
   if (Array.isArray(payload)) {
     return payload;
   }
@@ -36,7 +36,7 @@ function extractMarkets(payload) {
   return [];
 }
 
-async function fetchJson(sourceUrl, fetchImpl) {
+async function fetchJson(sourceUrl: any, fetchImpl: any) {
   const response = await fetchImpl(sourceUrl);
 
   if (!response.ok) {
@@ -46,7 +46,7 @@ async function fetchJson(sourceUrl, fetchImpl) {
   return response.json();
 }
 
-function buildPaginatedUrl(sourceUrl, offset) {
+function buildPaginatedUrl(sourceUrl: any, offset: any) {
   const nextUrl = new URL(sourceUrl);
 
   if (!nextUrl.searchParams.has("limit")) {
@@ -57,7 +57,7 @@ function buildPaginatedUrl(sourceUrl, offset) {
   return nextUrl.toString();
 }
 
-async function fetchMarketsFromEndpoint(sourceUrl, fetchImpl) {
+async function fetchMarketsFromEndpoint(sourceUrl: any, fetchImpl: any) {
   const firstPageUrl = buildPaginatedUrl(sourceUrl, Number(new URL(sourceUrl).searchParams.get("offset") ?? 0));
   const firstPayload = await fetchJson(firstPageUrl, fetchImpl);
   const firstBatch = extractMarkets(firstPayload);
@@ -89,7 +89,7 @@ async function fetchMarketsFromEndpoint(sourceUrl, fetchImpl) {
 export async function fetchConfiguredMarkets({
   sourceUrl = DEFAULT_GEMINI_ACTIVE_MARKETS_SOURCE_URL,
   fetchImpl = fetch
-} = {}) {
+}: any = {}) {
   if (isFileUrl(sourceUrl)) {
     throw new Error("Fixture file sources are no longer supported. Use the live Gemini API.");
   }
@@ -118,7 +118,7 @@ export async function fetchNewlyListedMarkets(options: any = {}) {
   });
 }
 
-export async function fetchPredictionMarketEventByTicker(eventTicker, { fetchImpl = fetch } = {}) {
+export async function fetchPredictionMarketEventByTicker(eventTicker: any, { fetchImpl = fetch }: any = {}) {
   const response = await fetchImpl(
     `${GEMINI_API_BASE_URL}/v1/prediction-markets/events/${encodeURIComponent(eventTicker)}`
   );
@@ -156,8 +156,8 @@ export async function fetchPredictionMarketCategories({
 }
 
 export async function fetchTradesForSymbol(
-  symbol,
-  { timestamp = undefined as any, sinceTid = undefined as any, limitTrades = 500, includeBreaks = false, fetchImpl = fetch } = {}
+  symbol: any,
+  { timestamp = undefined as any, sinceTid = undefined as any, limitTrades = 500, includeBreaks = false, fetchImpl = fetch }: any = {}
 ) {
   const nextUrl = new URL(`${GEMINI_API_BASE_URL}/v1/trades/${encodeURIComponent(symbol)}`);
 
@@ -190,7 +190,7 @@ export async function fetchTradesForSymbol(
 export async function fetchEnrichedPredictionMarkets({
   fetchMarkets = fetchActiveMarkets,
   fetchEventByTicker = fetchPredictionMarketEventByTicker
-} = {}) {
+}: any = {}) {
   const markets = await fetchMarkets();
   const enrichedMarkets: any[] = [];
 

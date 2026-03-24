@@ -6,7 +6,7 @@ const EMPTY_STORE = { jobs: [] };
 export class FileBackgroundJobRepository {
   private filePath: string;
   private writeChain: Promise<void>;
-  constructor(filePath) {
+  constructor(filePath: any) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
@@ -29,7 +29,7 @@ export class FileBackgroundJobRepository {
     }
   }
 
-  async save(jobs) {
+  async save(jobs: any) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ jobs }, null, 2) + "\n", "utf8");
   }
@@ -39,7 +39,7 @@ export class FileBackgroundJobRepository {
     return store.jobs;
   }
 
-  async create(job) {
+  async create(job: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const jobs = [...store.jobs, job];
@@ -48,20 +48,20 @@ export class FileBackgroundJobRepository {
     });
   }
 
-  async findByJobId(jobId) {
+  async findByJobId(jobId: any) {
     const store = await this.load();
-    return store.jobs.find((job) => job.jobId === jobId) ?? null;
+    return store.jobs.find((job: any) => job.jobId === jobId) ?? null;
   }
 
   async listRecoverable() {
     const store = await this.load();
-    return store.jobs.filter((job) => ["queued", "processing"].includes(job.status));
+    return store.jobs.filter((job: any) => ["queued", "processing"].includes(job.status));
   }
 
-  async updateByJobId(jobId, updates) {
+  async updateByJobId(jobId: any, updates: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
-      const jobIndex = store.jobs.findIndex((job) => job.jobId === jobId);
+      const jobIndex = store.jobs.findIndex((job: any) => job.jobId === jobId);
 
       if (jobIndex === -1) {
         return null;
@@ -78,7 +78,7 @@ export class FileBackgroundJobRepository {
     });
   }
 
-  async withWriteLock(work) {
+  async withWriteLock(work: any) {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

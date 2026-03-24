@@ -41,11 +41,11 @@ import { FileTradeActivityRepository } from "../trade-activity-repository.js";
 import { FileVerifiedPaymentRepository } from "../verified-payment-repository.js";
 import { loadX402PaymentConfig } from "../x402-payment-config.js";
 
-function resolvePathFromEnv(name, fallback) {
+function resolvePathFromEnv(name: any, fallback: any) {
   return process.env[name] ?? new URL(fallback, import.meta.url);
 }
 
-function createId(prefix) {
+function createId(prefix: any) {
   return `${prefix}_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }
 
@@ -144,7 +144,7 @@ async function createStorageRuntime() {
   };
 }
 
-async function maybeRegisterTelegramWebhook({ enabled, logger }) {
+async function maybeRegisterTelegramWebhook({ enabled, logger }: any) {
   if (!enabled) {
     return;
   }
@@ -215,7 +215,7 @@ await maybeRegisterTelegramWebhook({
   logger: console
 });
 
-await new Promise((resolve) => {
+await new Promise((resolve: any) => {
   server.listen(port, host, resolve);
 });
 
@@ -229,7 +229,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, async () => {
     server.markShuttingDown();
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve: any) => {
       server.close(() => resolve());
     });
 

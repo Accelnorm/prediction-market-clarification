@@ -19,10 +19,10 @@ const VALID_MARKET = {
   lastSyncedAt: "2026-03-21T18:59:00.000Z"
 };
 
-async function startTestServer(options) {
+async function startTestServer(options: any) {
   const server = createServer(options);
 
-  await new Promise((resolve) => {
+  await new Promise((resolve: any) => {
     server.listen(0, "127.0.0.1", resolve);
   });
 
@@ -34,9 +34,9 @@ async function startTestServer(options) {
   };
 }
 
-async function stopTestServer(server) {
-  await new Promise((resolve, reject) => {
-    server.close((error) => {
+async function stopTestServer(server: any) {
+  await new Promise((resolve: any, reject: any) => {
+    server.close((error: any) => {
       if (error) {
         reject(error);
         return;

@@ -6,7 +6,7 @@ const EMPTY_STORE = { states: {} };
 export class FileSyncStateRepository {
   private filePath: string;
   private writeChain: Promise<void>;
-  constructor(filePath) {
+  constructor(filePath: any) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
@@ -28,17 +28,17 @@ export class FileSyncStateRepository {
     }
   }
 
-  async save(states) {
+  async save(states: any) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ states }, null, 2) + "\n", "utf8");
   }
 
-  async getState(scope) {
+  async getState(scope: any) {
     const store = await this.load();
     return store.states[scope] ?? null;
   }
 
-  async setState(scope, value) {
+  async setState(scope: any, value: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const states = {
@@ -50,7 +50,7 @@ export class FileSyncStateRepository {
     });
   }
 
-  async withWriteLock(work) {
+  async withWriteLock(work: any) {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

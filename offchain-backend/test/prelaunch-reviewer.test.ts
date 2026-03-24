@@ -55,7 +55,7 @@ const UPCOMING_MARKET = {
   lastSyncedAt: "2026-03-21T20:00:00.000Z"
 };
 
-function buildUpcomingMarket(overrides = {}) {
+function buildUpcomingMarket(overrides: any = {}) {
   return {
     ...UPCOMING_MARKET,
     ...overrides,
@@ -63,10 +63,10 @@ function buildUpcomingMarket(overrides = {}) {
   };
 }
 
-async function startTestServer(options) {
+async function startTestServer(options: any) {
   const server = createServer(options);
 
-  await new Promise((resolve) => {
+  await new Promise((resolve: any) => {
     server.listen(0, "127.0.0.1", resolve);
   });
 
@@ -78,9 +78,9 @@ async function startTestServer(options) {
   };
 }
 
-async function stopTestServer(server) {
-  await new Promise((resolve, reject) => {
-    server.close((error) => {
+async function stopTestServer(server: any) {
+  await new Promise((resolve: any, reject: any) => {
+    server.close((error: any) => {
       if (error) {
         reject(error);
         return;
@@ -91,19 +91,19 @@ async function stopTestServer(server) {
   });
 }
 
-function createReviewerHeaders(token = "reviewer-secret") {
+function createReviewerHeaders(token: any = "reviewer-secret") {
   return {
     "x-reviewer-token": token
   };
 }
 
-async function createUpcomingMarketCacheRepository(tempDir, markets = [UPCOMING_MARKET]) {
+async function createUpcomingMarketCacheRepository(tempDir: any, markets: any = [UPCOMING_MARKET]) {
   const repository = new FileMarketCacheRepository(path.join(tempDir, "upcoming-market-cache.json"));
   await repository.save(markets);
   return repository;
 }
 
-async function createUpcomingReviewerScanRepository(tempDir) {
+async function createUpcomingReviewerScanRepository(tempDir: any) {
   const repository = new FileReviewerScanRepository(path.join(tempDir, "upcoming-reviewer-scans.json"));
   await repository.save([]);
   return repository;
@@ -205,7 +205,7 @@ test("prelaunch scan-all only analyzes future upcoming markets and reuses identi
   const originalFetch = globalThis.fetch;
   const llmRequests = [];
 
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = async (url: any, options: any) => {
     if (String(url).startsWith("https://openrouter.test/api/v1/")) {
       llmRequests.push({ url, options });
 
@@ -275,16 +275,16 @@ test("prelaunch scan-all only analyzes future upcoming markets and reuses identi
     const storedScans = await upcomingReviewerScanRepository.list();
     assert.equal(storedScans.length, 2);
     assert.deepEqual(
-      storedScans.map((scan) => scan.eventId).sort(),
+      storedScans.map((scan: any) => scan.eventId).sort(),
       ["9058", "9059"]
     );
     assert.equal(
-      storedScans.filter((scan) => scan.eventId === "9060").length,
+      storedScans.filter((scan: any) => scan.eventId === "9060").length,
       0
     );
 
-    const primaryScan = storedScans.find((scan) => scan.eventId === "9058");
-    const reusedScan = storedScans.find((scan) => scan.eventId === "9059");
+    const primaryScan = storedScans.find((scan: any) => scan.eventId === "9058");
+    const reusedScan = storedScans.find((scan: any) => scan.eventId === "9059");
 
     assert.equal(primaryScan.ambiguity_score, 0.81);
     assert.equal(reusedScan.ambiguity_score, 0.81);

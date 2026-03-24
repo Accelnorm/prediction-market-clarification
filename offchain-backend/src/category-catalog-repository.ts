@@ -6,16 +6,16 @@ const EMPTY_STORE = { catalogs: {} };
 function normalizeCategories(categories: string[] = []) {
   return [...new Set(
     categories
-      .filter((value) => typeof value === "string")
-      .map((value) => value.trim())
+      .filter((value: any) => typeof value === "string")
+      .map((value: any) => value.trim())
       .filter(Boolean)
-  )].sort((left, right) => left.localeCompare(right));
+  )].sort((left: any, right: any) => left.localeCompare(right));
 }
 
 export class FileCategoryCatalogRepository {
   private filePath: string;
   private writeChain: Promise<void>;
-  constructor(filePath) {
+  constructor(filePath: any) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
@@ -37,17 +37,17 @@ export class FileCategoryCatalogRepository {
     }
   }
 
-  async save(catalogs) {
+  async save(catalogs: any) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ catalogs }, null, 2) + "\n", "utf8");
   }
 
-  async getCatalog(scope) {
+  async getCatalog(scope: any) {
     const store = await this.load();
     return store.catalogs[scope] ?? { categories: [], updatedAt: null };
   }
 
-  async setCatalog(scope, { categories = [], updatedAt = null }) {
+  async setCatalog(scope: any, { categories = [], updatedAt = null }: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const nextCatalog = {
@@ -63,7 +63,7 @@ export class FileCategoryCatalogRepository {
     });
   }
 
-  async withWriteLock(work) {
+  async withWriteLock(work: any) {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

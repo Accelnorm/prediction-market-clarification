@@ -1,4 +1,4 @@
-function extractRichTextText(value) {
+function extractRichTextText(value: any): string {
   if (typeof value === "string") {
     return value;
   }
@@ -22,7 +22,7 @@ function extractRichTextText(value) {
   return "";
 }
 
-function normalizeNullableString(value) {
+function normalizeNullableString(value: any) {
   if (value === undefined || value === null) {
     return null;
   }
@@ -31,12 +31,12 @@ function normalizeNullableString(value) {
   return normalized === "" ? null : normalized;
 }
 
-function normalizeOptionalString(value) {
+function normalizeOptionalString(value: any) {
   const normalized = normalizeNullableString(value);
   return normalized === null ? undefined : normalized;
 }
 
-function normalizeOptionalNumberString(value) {
+function normalizeOptionalNumberString(value: any) {
   if (value === undefined || value === null || value === "") {
     return undefined;
   }
@@ -45,17 +45,17 @@ function normalizeOptionalNumberString(value) {
   return normalized === "" ? undefined : normalized;
 }
 
-function normalizeArray(values) {
+function normalizeArray(values: any) {
   if (!Array.isArray(values)) {
     return [];
   }
 
   return values
-    .map((value) => normalizeNullableString(value))
-    .filter((value) => typeof value === "string");
+    .map((value: any) => normalizeNullableString(value))
+    .filter((value: any) => typeof value === "string");
 }
 
-function normalizeSubcategory(subcategory) {
+function normalizeSubcategory(subcategory: any) {
   if (!subcategory || typeof subcategory !== "object") {
     return null;
   }
@@ -71,7 +71,7 @@ function normalizeSubcategory(subcategory) {
   };
 }
 
-function normalizeContract(contract) {
+function normalizeContract(contract: any) {
   return {
     id: normalizeNullableString(contract?.id),
     label: normalizeNullableString(contract?.label),
@@ -95,7 +95,7 @@ function normalizeContract(contract) {
   };
 }
 
-function buildGeminiMarketUrl(market) {
+function buildGeminiMarketUrl(market: any) {
   if (typeof market?.url === "string" && market.url.trim() !== "") {
     return market.url;
   }
@@ -107,7 +107,7 @@ function buildGeminiMarketUrl(market) {
   return null;
 }
 
-export function normalizeGeminiMarket(market, lastSyncedAt) {
+export function normalizeGeminiMarket(market: any, lastSyncedAt: any) {
   const description = extractRichTextText(market?.description);
   const resolutionText = String(
     market?.resolution ?? market?.resolutionText ?? description ?? market?.title ?? ""
@@ -150,7 +150,7 @@ export function normalizeGeminiMarket(market, lastSyncedAt) {
   };
 }
 
-export function mergeNormalizedMarket(existingMarket, normalizedMarket, refreshedAt) {
+export function mergeNormalizedMarket(existingMarket: any, normalizedMarket: any, refreshedAt: any) {
   return {
     ...existingMarket,
     ...normalizedMarket,
@@ -159,6 +159,6 @@ export function mergeNormalizedMarket(existingMarket, normalizedMarket, refreshe
   };
 }
 
-export function sameNormalizedMarketShape(left, right) {
+export function sameNormalizedMarketShape(left: any, right: any) {
   return JSON.stringify(left) === JSON.stringify(right);
 }

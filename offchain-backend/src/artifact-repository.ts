@@ -4,7 +4,7 @@ import path from "node:path";
 
 const EMPTY_STORE = { artifacts: [] };
 
-export function createArtifactCid(artifact) {
+export function createArtifactCid(artifact: any) {
   const digest = createHash("sha256").update(JSON.stringify(artifact)).digest("hex");
   return `bafy${digest.slice(0, 32)}`;
 }
@@ -12,7 +12,7 @@ export function createArtifactCid(artifact) {
 export class FileArtifactRepository {
   private filePath: string;
   private writeChain: Promise<void>;
-  constructor(filePath) {
+  constructor(filePath: any) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
@@ -35,16 +35,16 @@ export class FileArtifactRepository {
     }
   }
 
-  async save(artifacts) {
+  async save(artifacts: any) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ artifacts }, null, 2) + "\n", "utf8");
   }
 
-  async createArtifact(input) {
+  async createArtifact(input: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const cid = createArtifactCid(input);
-      const existingArtifact = store.artifacts.find((artifact) => artifact.cid === cid);
+      const existingArtifact = store.artifacts.find((artifact: any) => artifact.cid === cid);
 
       if (existingArtifact) {
         return existingArtifact;
@@ -61,12 +61,12 @@ export class FileArtifactRepository {
     });
   }
 
-  async findByCid(cid) {
+  async findByCid(cid: any) {
     const store = await this.load();
-    return store.artifacts.find((artifact) => artifact.cid === cid) ?? null;
+    return store.artifacts.find((artifact: any) => artifact.cid === cid) ?? null;
   }
 
-  async withWriteLock(work) {
+  async withWriteLock(work: any) {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

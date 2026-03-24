@@ -1,15 +1,15 @@
 const MARKET_ID_PATTERN = /^gm[a-z0-9_-]*[a-z0-9]$/i;
 const CLARIFY_COMMAND_PATTERN = /^\/clarify(?:@\w+)?\s+/i;
 
-function invalidTelegramPayload(message) {
+function invalidTelegramPayload(message: any) {
   return Object.assign(new Error(message), { statusCode: 400, code: "INVALID_TELEGRAM_UPDATE" });
 }
 
-function validationError(code, message) {
+function validationError(code: any, message: any) {
   return Object.assign(new Error(message), { statusCode: 400, code });
 }
 
-function parseClarifyCommand(text) {
+function parseClarifyCommand(text: any) {
   if (typeof text !== "string" || !CLARIFY_COMMAND_PATTERN.test(text)) {
     throw invalidTelegramPayload(
       "Telegram update must include a /clarify command with a market id and question."
@@ -48,7 +48,7 @@ function parseClarifyCommand(text) {
   };
 }
 
-function defaultCreateRequestId(update) {
+function defaultCreateRequestId(update: any) {
   return `clr_tg_${String(update.update_id ?? Date.now())}`;
 }
 
@@ -57,7 +57,7 @@ export async function createTelegramClarificationRequest({
   repository,
   now = () => new Date(),
   createRequestId = defaultCreateRequestId
-}) {
+}: any) {
   if (!update?.message?.chat?.id || !update?.message?.from?.id) {
     throw invalidTelegramPayload("Telegram update must include both chat and sender identifiers.");
   }

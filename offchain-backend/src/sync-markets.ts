@@ -3,7 +3,7 @@ import {
   sameNormalizedMarketShape
 } from "./gemini-market-normalizer.js";
 
-function isMarketWithStatus(market, status) {
+function isMarketWithStatus(market: any, status: any) {
   if (typeof market?.status === "string") {
     return market.status.toLowerCase() === status;
   }
@@ -25,7 +25,7 @@ function uniqueMarkets(markets: any[] = []) {
   return [...dedupedById.values()];
 }
 
-function shouldKeepNewlyListedEvent({ sourceMarket, syncState }) {
+function shouldKeepNewlyListedEvent({ sourceMarket, syncState }: any) {
   const createdAt = typeof sourceMarket?.createdAt === "string" ? sourceMarket.createdAt : null;
 
   if (!createdAt || !syncState?.lastCreatedAt) {
@@ -43,7 +43,7 @@ function shouldKeepNewlyListedEvent({ sourceMarket, syncState }) {
   return !Array.isArray(syncState.boundaryEventIds) || !syncState.boundaryEventIds.includes(String(sourceMarket.id));
 }
 
-function buildNextSyncState({ sourceMarkets, syncedAt }) {
+function buildNextSyncState({ sourceMarkets, syncedAt }: any) {
   if (!Array.isArray(sourceMarkets) || sourceMarkets.length === 0) {
     return {
       lastCreatedAt: null,
@@ -54,14 +54,14 @@ function buildNextSyncState({ sourceMarkets, syncedAt }) {
   }
 
   const latestCreatedAt = sourceMarkets
-    .map((market) => (typeof market?.createdAt === "string" ? market.createdAt : null))
+    .map((market: any) => (typeof market?.createdAt === "string" ? market.createdAt : null))
     .filter(Boolean)
-    .sort((left, right) => right.localeCompare(left))[0] ?? null;
+    .sort((left: any, right: any) => right.localeCompare(left))[0] ?? null;
   const boundaryEventIds = latestCreatedAt
     ? sourceMarkets
-        .filter((market) => market?.createdAt === latestCreatedAt)
-        .map((market) => String(market.id))
-        .sort((left, right) => left.localeCompare(right))
+        .filter((market: any) => market?.createdAt === latestCreatedAt)
+        .map((market: any) => String(market.id))
+        .sort((left: any, right: any) => left.localeCompare(right))
     : [];
 
   return {
@@ -78,11 +78,11 @@ async function syncMarketSet({
   now = () => new Date(),
   includeMarket = (() => true) as (market: any) => boolean,
   totalKey
-}) {
+}: any) {
   const sourceMarkets = uniqueMarkets(await fetchMarkets());
   const matchingMarkets = sourceMarkets.filter(includeMarket);
   const cache = await repository.load();
-  const marketsById = new Map(cache.markets.map((market) => [market.marketId, market]));
+  const marketsById = new Map(cache.markets.map((market: any) => [market.marketId, market]));
   const lastSyncedAt = now().toISOString();
 
   let inserted = 0;
@@ -120,22 +120,22 @@ async function syncMarketSet({
   };
 }
 
-export async function syncMarkets({ repository, fetchMarkets, now = () => new Date() }) {
+export async function syncMarkets({ repository, fetchMarkets, now = () => new Date() }: any) {
   return syncMarketSet({
     repository,
     fetchMarkets,
     now,
-    includeMarket: (market) => isMarketWithStatus(market, "active"),
+    includeMarket: (market: any) => isMarketWithStatus(market, "active"),
     totalKey: "totalActive"
   });
 }
 
-export async function syncUpcomingMarkets({ repository, fetchMarkets, now = () => new Date() }) {
+export async function syncUpcomingMarkets({ repository, fetchMarkets, now = () => new Date() }: any) {
   return syncMarketSet({
     repository,
     fetchMarkets,
     now,
-    includeMarket: (market) => isMarketWithStatus(market, "approved"),
+    includeMarket: (market: any) => isMarketWithStatus(market, "approved"),
     totalKey: "totalUpcoming"
   });
 }
@@ -145,7 +145,7 @@ export async function syncMarketCategories({
   fetchCategories,
   scope,
   now = () => new Date()
-}) {
+}: any) {
   const categories = await fetchCategories();
   return repository.setCatalog(scope, {
     categories,
@@ -160,10 +160,10 @@ export async function syncNewlyListedMarkets({
   syncStateRepository,
   syncStateScope = "markets:newly-listed",
   now = () => new Date()
-}) {
+}: any) {
   const sourceMarkets = uniqueMarkets(await fetchMarkets());
   const syncState = await syncStateRepository.getState(syncStateScope);
-  const candidates = sourceMarkets.filter((market) =>
+  const candidates = sourceMarkets.filter((market: any) =>
     shouldKeepNewlyListedEvent({
       sourceMarket: market,
       syncState
@@ -172,8 +172,8 @@ export async function syncNewlyListedMarkets({
   const syncTimestamp = now().toISOString();
   const activeCache = await activeRepository.load();
   const upcomingCache = await upcomingRepository.load();
-  const activeById = new Map(activeCache.markets.map((market) => [market.marketId, market]));
-  const upcomingById = new Map(upcomingCache.markets.map((market) => [market.marketId, market]));
+  const activeById = new Map(activeCache.markets.map((market: any) => [market.marketId, market]));
+  const upcomingById = new Map(upcomingCache.markets.map((market: any) => [market.marketId, market]));
 
   let insertedActive = 0;
   let updatedActive = 0;

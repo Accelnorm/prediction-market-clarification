@@ -1,8 +1,8 @@
-function validationError(code, message, statusCode = 400) {
+function validationError(code: any, message: any, statusCode: any = 400) {
   return Object.assign(new Error(message), { code, statusCode });
 }
 
-async function readJsonResponse(response) {
+async function readJsonResponse(response: any) {
   try {
     return await response.json();
   } catch {
@@ -10,7 +10,7 @@ async function readJsonResponse(response) {
   }
 }
 
-export function assertTelegramWebhookSecret(request, expectedSecret) {
+export function assertTelegramWebhookSecret(request: any, expectedSecret: any) {
   if (!expectedSecret) {
     return;
   }
@@ -33,7 +33,7 @@ export async function sendTelegramMessage({
   chatId,
   text,
   apiBaseUrl = "https://api.telegram.org"
-}) {
+}: any) {
   if (!botToken) {
     throw validationError(
       "TELEGRAM_BOT_TOKEN_REQUIRED",
@@ -81,7 +81,7 @@ export async function registerTelegramWebhook({
   webhookUrl,
   secretToken = null as string | null,
   apiBaseUrl = "https://api.telegram.org"
-}) {
+}: any) {
   if (!webhookUrl) {
     throw validationError(
       "TELEGRAM_WEBHOOK_URL_REQUIRED",

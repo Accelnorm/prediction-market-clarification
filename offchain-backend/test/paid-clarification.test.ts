@@ -56,7 +56,7 @@ const UPCOMING_MARKET = {
 
 const EXPECTED_PAYMENT_FEE_PAYER = DEFAULT_X402_PAYMENT_CONFIG.feePayer;
 
-async function startTestServer(options) {
+async function startTestServer(options: any) {
   const verifiedPaymentRepository =
     options.verifiedPaymentRepository ??
     new FileVerifiedPaymentRepository(
@@ -67,7 +67,7 @@ async function startTestServer(options) {
     );
   const verifyX402Payment =
     options.verifyX402Payment ??
-    (async ({ paymentCandidate, config, now }) => ({
+    (async ({ paymentCandidate, config, now }: any) => ({
       paymentProof: paymentCandidate.proof,
       paymentReference:
         paymentCandidate.paymentReference ?? `ref_${paymentCandidate.proof.slice(0, 24)}`,
@@ -93,7 +93,7 @@ async function startTestServer(options) {
     ...options
   });
 
-  await new Promise((resolve) => {
+  await new Promise((resolve: any) => {
     server.listen(0, "127.0.0.1", resolve);
   });
 
@@ -105,9 +105,9 @@ async function startTestServer(options) {
   };
 }
 
-async function stopTestServer(server) {
-  await new Promise((resolve, reject) => {
-    server.close((error) => {
+async function stopTestServer(server: any) {
+  await new Promise((resolve: any, reject: any) => {
+    server.close((error: any) => {
       if (error) {
         reject(error);
         return;
@@ -118,13 +118,13 @@ async function stopTestServer(server) {
   });
 }
 
-function createReviewerHeaders(token = "reviewer-secret") {
+function createReviewerHeaders(token: any = "reviewer-secret") {
   return {
     "x-reviewer-token": token
   };
 }
 
-function createPaymentSignatureHeaders(paymentPayload, extraHeaders = {}) {
+function createPaymentSignatureHeaders(paymentPayload: any, extraHeaders: any = {}) {
   return {
     "content-type": "application/json",
     "payment-signature": Buffer.from(JSON.stringify(paymentPayload), "utf8").toString("base64"),
@@ -132,35 +132,35 @@ function createPaymentSignatureHeaders(paymentPayload, extraHeaders = {}) {
   };
 }
 
-async function createMarketCacheRepository(tempDir, markets = [VALID_MARKET]) {
+async function createMarketCacheRepository(tempDir: any, markets: any = [VALID_MARKET]) {
   const repository = new FileMarketCacheRepository(path.join(tempDir, "market-cache.json"));
   await repository.save(markets);
   return repository;
 }
 
-async function createUpcomingMarketCacheRepository(tempDir, markets = [UPCOMING_MARKET]) {
+async function createUpcomingMarketCacheRepository(tempDir: any, markets: any = [UPCOMING_MARKET]) {
   const repository = new FileMarketCacheRepository(path.join(tempDir, "upcoming-market-cache.json"));
   await repository.save(markets);
   return repository;
 }
 
-async function createReviewerScanRepository(tempDir) {
+async function createReviewerScanRepository(tempDir: any) {
   const repository = new FileReviewerScanRepository(path.join(tempDir, "reviewer-scans.json"));
   await repository.save([]);
   return repository;
 }
 
-async function createBackgroundJobRepository(tempDir) {
+async function createBackgroundJobRepository(tempDir: any) {
   const repository = new FileBackgroundJobRepository(path.join(tempDir, "background-jobs.json"));
   await repository.save([]);
   return repository;
 }
 
-async function createTradeActivityRepository(tempDir) {
+async function createTradeActivityRepository(tempDir: any) {
   return new FileTradeActivityRepository(path.join(tempDir, "trade-activity.json"));
 }
 
-async function waitFor(assertion, { attempts = 25, delayMs = 10 } = {}) {
+async function waitFor(assertion: any, { attempts = 25, delayMs = 10 }: any = {}) {
   let lastError;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -169,7 +169,7 @@ async function waitFor(assertion, { attempts = 25, delayMs = 10 } = {}) {
       return;
     } catch (error) {
       lastError = error;
-      await new Promise((resolve) => {
+      await new Promise((resolve: any) => {
         setTimeout(resolve, delayMs);
       });
     }
@@ -852,7 +852,7 @@ test("POST /api/clarify/:eventId stores normalized paid request input for compar
     assert.equal(stored.requests.length, 2);
     assert.equal(stored.requests[0].question, "Should Gemini auction prints count?");
     assert.equal(stored.requests[1].question, "Should Gemini auction prints count?");
-    assert.deepEqual(stored.requests.map((request) => request.normalizedInput), [
+    assert.deepEqual(stored.requests.map((request: any) => request.normalizedInput), [
       {
         eventId: "gm_btc_above_100k",
         question: "Should Gemini auction prints count?"
@@ -1124,7 +1124,7 @@ test("paid clarification pipeline sends the issue clarification skill in the LLM
     "2026-03-21T19:29:03.000Z"
   ];
 
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = async (url: any, options: any) => {
     if (String(url).startsWith("https://openrouter.test/api/v1/")) {
       llmRequests.push({ url, options });
 
@@ -1230,8 +1230,8 @@ test("POST /api/clarify/:eventId returns 202 when wait window expires before com
     marketCacheRepository,
     now: () => new Date("2026-03-21T19:28:00.000Z"),
     createClarificationId: () => "clar_paid_wait_timeout_001",
-    runAutomaticClarificationPipeline: async (options) => {
-      await new Promise((resolve) => {
+    runAutomaticClarificationPipeline: async (options: any) => {
+      await new Promise((resolve: any) => {
         setTimeout(resolve, 100);
       });
       const { runAutomaticClarificationPipeline } = await import(
@@ -2363,7 +2363,7 @@ test("POST /api/reviewer/clarifications/:clarificationId/funding/contributions i
 
     const failingRepository = {
       ...clarificationRequestRepository,
-      async findByClarificationId(clarificationId) {
+      async findByClarificationId(clarificationId: any) {
         return clarificationRequestRepository.findByClarificationId(clarificationId);
       },
       async updateByClarificationId() {
@@ -2700,7 +2700,7 @@ test("POST /api/clarify/:eventId enqueues a retryable interpretation job and ret
     createClarificationId: () => "clar_paid_pipeline_fail_001",
     createBackgroundJobId: () => "job_clarification_001",
     reviewerAuthToken: "reviewer-secret",
-    runAutomaticClarificationPipeline: async (options) => {
+    runAutomaticClarificationPipeline: async (options: any) => {
       if (shouldFail) {
         shouldFail = false;
         throw new Error("LLM provider timeout");
@@ -3053,7 +3053,7 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
     const storedScans = await reviewerScanRepository.list();
     assert.equal(storedScans.length, 3);
     assert.deepEqual(
-      storedScans.map((scan) => ({
+      storedScans.map((scan: any) => ({
         eventId: scan.eventId,
         jobId: scan.jobId,
         recommendation: scan.recommendation,
@@ -3168,12 +3168,12 @@ test("GET /api/reviewer/scans lists historical reviewer scan records and rejects
     assert.equal(payload.ok, true);
     assert.equal(payload.scans.length, 3);
     assert.deepEqual(
-      payload.scans.map((scan) => scan.eventId).sort(),
+      payload.scans.map((scan: any) => scan.eventId).sort(),
       ["gm_btc_above_100k", "gm_btc_above_100k", "gm_eth_above_5000"]
     );
     assert.ok(
       payload.scans.every(
-        (scan) =>
+        (scan: any) =>
           typeof scan.scanId === "string" &&
           typeof scan.createdAt === "string" &&
           scan.ambiguityScore === 0.72 &&
@@ -3183,13 +3183,13 @@ test("GET /api/reviewer/scans lists historical reviewer scan records and rejects
     );
     assert.ok(
       payload.scans.some(
-        (scan) =>
+        (scan: any) =>
           scan.eventId === "gm_eth_above_5000" &&
           scan.reviewWindow.time_to_end_bucket === "lt_6h"
       )
     );
     assert.equal(
-      payload.scans.filter((scan) => scan.eventId === "gm_btc_above_100k").length,
+      payload.scans.filter((scan: any) => scan.eventId === "gm_btc_above_100k").length,
       2
     );
   } finally {
@@ -3214,7 +3214,7 @@ test("POST /api/reviewer/jobs/:jobId/retry reruns failed scan jobs without dupli
     now: () => new Date("2026-03-21T20:20:00.000Z"),
     reviewerAuthToken: "reviewer-secret",
     createBackgroundJobId: () => "job_scan_retry_001",
-    runReviewerMarketScan: async (options) => {
+    runReviewerMarketScan: async (options: any) => {
       if (shouldFail) {
         shouldFail = false;
         throw new Error("scan worker timeout");

@@ -6,7 +6,7 @@ import { buildClarificationTiming } from "./clarification-timing.js";
 
 export { buildDefaultInterpretation } from "./llm-provider.js";
 
-function buildLlmTrace({ llmTraceability, requestedAt }) {
+function buildLlmTrace({ llmTraceability, requestedAt }: any) {
   return {
     promptTemplateVersion: llmTraceability.promptTemplateVersion,
     modelId: llmTraceability.modelId,
@@ -22,7 +22,7 @@ async function publishInterpretationArtifact({
   market,
   llmOutput,
   generatedAtUtc
-}) {
+}: any) {
   if (!artifactRepository) {
     return { cid: null, url: null };
   }
@@ -69,7 +69,7 @@ export async function runAutomaticClarificationPipeline({
     modelId: "openrouter/auto",
     processingVersion: "offchain-llm-pipeline-v1"
   }
-}) {
+}: any) {
   const market = resolveMarketByClarification
     ? await resolveMarketByClarification(clarification)
     : await marketCacheRepository.findByMarketId(clarification.eventId);

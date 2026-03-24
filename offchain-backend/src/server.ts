@@ -28,7 +28,7 @@ import {
   verifyClarificationPayment as verifyDefaultClarificationPayment
 } from "./x402-payment-verifier.js";
 
-function sendJson(response, statusCode, payload, headers = {}) {
+function sendJson(response: any, statusCode: any, payload: any, headers: any = {}) {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     ...headers
@@ -36,7 +36,7 @@ function sendJson(response, statusCode, payload, headers = {}) {
   response.end(JSON.stringify(payload));
 }
 
-function sendNotFound(response) {
+function sendNotFound(response: any) {
   sendJson(response, 404, {
     ok: false,
     error: {
@@ -46,21 +46,21 @@ function sendNotFound(response) {
   });
 }
 
-function buildLogger(logger = console) {
+function buildLogger(logger: any = console) {
   return {
-    info(message, fields = {}) {
+    info(message: any, fields: any = {}) {
       (logger.info ?? logger.log).call(logger, JSON.stringify({ level: "info", message, ...fields }));
     },
-    warn(message, fields = {}) {
+    warn(message: any, fields: any = {}) {
       (logger.warn ?? logger.log).call(logger, JSON.stringify({ level: "warn", message, ...fields }));
     },
-    error(message, fields = {}) {
+    error(message: any, fields: any = {}) {
       (logger.error ?? logger.log).call(logger, JSON.stringify({ level: "error", message, ...fields }));
     }
   };
 }
 
-function buildRequestContext(request) {
+function buildRequestContext(request: any) {
   const forwardedFor = request.headers["x-forwarded-for"];
   const forwardedClient =
     typeof forwardedFor === "string" && forwardedFor.trim() !== ""
@@ -76,11 +76,11 @@ function buildRequestContext(request) {
 function createInMemoryRateLimiter({
   windowMs = 60_000,
   maxRequests = 30
-} = {}) {
+}: any = {}) {
   const buckets = new Map();
 
   return {
-    check(key, now = Date.now()) {
+    check(key: any, now: any = Date.now()) {
       const existingBucket = buckets.get(key);
 
       if (!existingBucket || existingBucket.resetAt <= now) {
@@ -104,7 +104,7 @@ function createInMemoryRateLimiter({
   };
 }
 
-function hasReviewerAccess(request, reviewerAuthToken) {
+function hasReviewerAccess(request: any, reviewerAuthToken: any) {
   if (!reviewerAuthToken) {
     return false;
   }
@@ -112,7 +112,7 @@ function hasReviewerAccess(request, reviewerAuthToken) {
   return request.headers["x-reviewer-token"] === reviewerAuthToken;
 }
 
-function sendReviewerAuthRequired(response) {
+function sendReviewerAuthRequired(response: any) {
   sendJson(response, 401, {
     ok: false,
     error: {
@@ -122,7 +122,7 @@ function sendReviewerAuthRequired(response) {
   });
 }
 
-function buildPublicClarificationPayload(clarification) {
+function buildPublicClarificationPayload(clarification: any) {
   const payload: any = {
     clarificationId: clarification.clarificationId,
     status: clarification.status,
@@ -148,7 +148,7 @@ function buildPublicClarificationPayload(clarification) {
   return payload;
 }
 
-function parseBoundedWaitOptions(requestUrl) {
+function parseBoundedWaitOptions(requestUrl: any) {
   const waitValue = String(requestUrl.searchParams.get("wait") ?? "").toLowerCase();
 
   if (!["1", "true"].includes(waitValue)) {
@@ -164,23 +164,23 @@ function parseBoundedWaitOptions(requestUrl) {
   };
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => {
+function sleep(ms: any) {
+  return new Promise((resolve: any) => {
     setTimeout(resolve, ms);
   });
 }
 
-function formatWorkflowLabel(state) {
+function formatWorkflowLabel(state: any) {
   return state
     .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .map((part: any) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 }
 
 function normalizeFundingHistory(history: any[] = []) {
   return history
     .filter(
-      (entry) =>
+      (entry: any) =>
         entry &&
         typeof entry.contributor === "string" &&
         entry.contributor.trim() !== "" &&
@@ -189,16 +189,16 @@ function normalizeFundingHistory(history: any[] = []) {
         typeof entry.timestamp === "string" &&
         entry.timestamp !== ""
     )
-    .map((entry) => ({
+    .map((entry: any) => ({
       contributor: entry.contributor,
       amount: Number.parseFloat(entry.amount).toFixed(2),
       timestamp: entry.timestamp,
       reference: entry.reference ?? null
     }))
-    .sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+    .sort((left: any, right: any) => right.timestamp.localeCompare(left.timestamp));
 }
 
-function buildFundingDetailsFromHistory(history: any[] = [], targetAmount = "1.00") {
+function buildFundingDetailsFromHistory(history: any[] = [], targetAmount: any = "1.00") {
   const normalizedHistory = normalizeFundingHistory(history);
 
   if (normalizedHistory.length === 0) {
@@ -212,10 +212,10 @@ function buildFundingDetailsFromHistory(history: any[] = [], targetAmount = "1.0
   }
 
   const raisedAmount = normalizedHistory
-    .reduce((total, entry) => total + Number.parseFloat(entry.amount), 0)
+    .reduce((total: any, entry: any) => total + Number.parseFloat(entry.amount), 0)
     .toFixed(2);
   const contributorCount = new Set(
-    normalizedHistory.map((entry) => entry.contributor)
+    normalizedHistory.map((entry: any) => entry.contributor)
   ).size;
   const fundingState =
     Number.parseFloat(raisedAmount) >= Number.parseFloat(targetAmount)
@@ -235,16 +235,16 @@ function buildFundingDetailsFromClarifications(clarifications: any[] = []) {
   const fundingProgress = buildFundingProgress(clarifications);
   const history = clarifications
     .filter(
-      (clarification) =>
+      (clarification: any) =>
         typeof clarification.paymentAmount === "string" && clarification.paymentAmount !== ""
     )
-    .map((clarification) => ({
+    .map((clarification: any) => ({
       contributor: clarification.requesterId ?? clarification.paymentReference ?? "unknown",
       amount: clarification.paymentAmount,
       timestamp: clarification.paymentVerifiedAt ?? clarification.createdAt,
       reference: clarification.paymentReference ?? null
     }))
-    .sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+    .sort((left: any, right: any) => right.timestamp.localeCompare(left.timestamp));
 
   return {
     ...fundingProgress,
@@ -252,7 +252,7 @@ function buildFundingDetailsFromClarifications(clarifications: any[] = []) {
   };
 }
 
-function buildFundingDetails(clarification, relatedClarifications: any[] = []) {
+function buildFundingDetails(clarification: any, relatedClarifications: any[] = []) {
   if (clarification?.funding && Array.isArray(clarification.funding.history)) {
     return buildFundingDetailsFromHistory(
       clarification.funding.history,
@@ -263,7 +263,7 @@ function buildFundingDetails(clarification, relatedClarifications: any[] = []) {
   return buildFundingDetailsFromClarifications(relatedClarifications);
 }
 
-function buildStoredFundingDetails(clarification) {
+function buildStoredFundingDetails(clarification: any) {
   if (clarification?.funding && Array.isArray(clarification.funding.history)) {
     return buildFundingDetailsFromHistory(
       clarification.funding.history,
@@ -274,7 +274,7 @@ function buildStoredFundingDetails(clarification) {
   return buildFundingDetailsFromHistory([]);
 }
 
-function buildReviewerVotePayload(clarification) {
+function buildReviewerVotePayload(clarification: any) {
   const status = clarification.reviewerWorkflowStatus ?? "not_started";
 
   return {
@@ -291,7 +291,7 @@ function buildReviewerClarificationPayload({
   adaptiveReviewWindow,
   market,
   relatedClarifications
-}) {
+}: any) {
   const clarificationPayload = {
     ...buildPublicClarificationPayload(clarification),
     llmOutput: clarification.llmOutput ?? null,
@@ -321,7 +321,7 @@ function buildReviewerClarificationPayload({
   return clarificationPayload;
 }
 
-function buildReviewerMarketPayload(market, fallbackMarketId: any = null) {
+function buildReviewerMarketPayload(market: any, fallbackMarketId: any = null) {
   const payload: any = {
     marketId: market?.marketId ?? fallbackMarketId ?? null,
     title: market?.title ?? null,
@@ -390,13 +390,13 @@ function buildReviewerMarketPayload(market, fallbackMarketId: any = null) {
   return payload;
 }
 
-function buildReviewerActionDetails(action) {
+function buildReviewerActionDetails(action: any) {
   return Object.fromEntries(
-    Object.entries(action).filter(([key]) => !["type", "actor", "timestamp"].includes(key))
+    Object.entries(action).filter(([key]: any) => !["type", "actor", "timestamp"].includes(key))
   );
 }
 
-function buildClarificationAuditTimeline({ clarification, artifact }) {
+function buildClarificationAuditTimeline({ clarification, artifact }: any) {
   const timeline: any[] = [];
 
   for (const entry of Array.isArray(clarification.statusHistory)
@@ -450,7 +450,7 @@ function buildClarificationAuditTimeline({ clarification, artifact }) {
     });
   }
 
-  const priority = {
+  const priority: Record<string, number> = {
     status_changed: 1,
     llm_requested: 2,
     artifact_published: 3,
@@ -458,7 +458,7 @@ function buildClarificationAuditTimeline({ clarification, artifact }) {
     funding_contribution_recorded: 5
   };
 
-  return timeline.sort((left, right) => {
+  return timeline.sort((left: any, right: any) => {
     const timestampComparison = left.timestamp.localeCompare(right.timestamp);
 
     if (timestampComparison !== 0) {
@@ -469,7 +469,7 @@ function buildClarificationAuditTimeline({ clarification, artifact }) {
   });
 }
 
-function buildClarificationAuditPayload({ clarification, artifact }) {
+function buildClarificationAuditPayload({ clarification, artifact }: any) {
   return {
     clarificationId: clarification.clarificationId,
     eventId: clarification.eventId ?? null,
@@ -528,7 +528,7 @@ const REVIEWER_QUEUE_FILTERS = [
 
 function buildFundingProgress(clarifications: any[] = []) {
   const fundedClarifications = clarifications.filter(
-    (clarification) =>
+    (clarification: any) =>
       typeof clarification.paymentAmount === "string" && clarification.paymentAmount !== ""
   );
 
@@ -542,14 +542,14 @@ function buildFundingProgress(clarifications: any[] = []) {
   }
 
   const raisedAmount = fundedClarifications
-    .reduce((total, clarification) => {
+    .reduce((total: any, clarification: any) => {
       const parsedAmount = Number.parseFloat(clarification.paymentAmount);
       return total + (Number.isFinite(parsedAmount) ? parsedAmount : 0);
     }, 0)
     .toFixed(2);
   const contributorCount = new Set(
     fundedClarifications.map(
-      (clarification) => clarification.requesterId ?? clarification.paymentReference
+      (clarification: any) => clarification.requesterId ?? clarification.paymentReference
     )
   ).size;
   const fundingState =
@@ -563,13 +563,13 @@ function buildFundingProgress(clarifications: any[] = []) {
   };
 }
 
-function buildQueueFundingProgress(latestClarification, clarifications: any[] = []) {
+function buildQueueFundingProgress(latestClarification: any, clarifications: any[] = []) {
   return latestClarification?.funding
     ? buildFundingDetails(latestClarification, clarifications)
     : buildFundingProgress(clarifications);
 }
 
-function parseReviewerFundingContributionPayload(payload) {
+function parseReviewerFundingContributionPayload(payload: any) {
   const contributor = String(payload?.contributor ?? "").trim();
   const amount = String(payload?.amount ?? "").trim();
   const reference =
@@ -594,7 +594,7 @@ function parseReviewerFundingContributionPayload(payload) {
   };
 }
 
-function buildQueueStates({ latestScan, fundingProgress, reviewWindow, voteStatus }) {
+function buildQueueStates({ latestScan, fundingProgress, reviewWindow, voteStatus }: any) {
   const queueStates: string[] = [];
 
   if (!latestScan) {
@@ -624,14 +624,14 @@ function buildQueueStates({ latestScan, fundingProgress, reviewWindow, voteStatu
   return queueStates;
 }
 
-function buildReviewerQueueFilters(queue) {
-  return REVIEWER_QUEUE_FILTERS.map((filter) => ({
+function buildReviewerQueueFilters(queue: any) {
+  return REVIEWER_QUEUE_FILTERS.map((filter: any) => ({
     ...filter,
-    count: queue.filter((item) => item.queueStates.includes(filter.key)).length
+    count: queue.filter((item: any) => item.queueStates.includes(filter.key)).length
   }));
 }
 
-function buildReviewerScanListItem(scan) {
+function buildReviewerScanListItem(scan: any) {
   return {
     scanId: scan.scanId,
     eventId: scan.eventId,
@@ -642,7 +642,7 @@ function buildReviewerScanListItem(scan) {
   };
 }
 
-function buildPrelaunchQueueItem({ market, latestScan, now }) {
+function buildPrelaunchQueueItem({ market, latestScan, now }: any) {
   const reviewWindow =
     latestScan?.review_window ??
     buildAdaptiveReviewWindow({
@@ -671,7 +671,7 @@ function buildPrelaunchQueueItem({ market, latestScan, now }) {
   };
 }
 
-function isFutureUpcomingMarket(market, referenceNow) {
+function isFutureUpcomingMarket(market: any, referenceNow: any) {
   const closesAt = market?.closesAt ?? market?.endTime ?? market?.expiryDate ?? null;
 
   if (typeof closesAt !== "string" || closesAt.trim() === "") {
@@ -682,7 +682,7 @@ function isFutureUpcomingMarket(market, referenceNow) {
   return Number.isFinite(closesAtMs) && closesAtMs > referenceNow.getTime();
 }
 
-function parseReviewerFinalizationPayload(payload) {
+function parseReviewerFinalizationPayload(payload: any) {
   const finalEditedText = String(payload?.finalEditedText ?? "").trim();
   const finalNote = String(payload?.finalNote ?? "").trim();
   const reviewerId = String(payload?.reviewerId ?? "system").trim();
@@ -706,7 +706,7 @@ function parseReviewerFinalizationPayload(payload) {
   };
 }
 
-function parseReviewerWorkflowPayload(payload) {
+function parseReviewerWorkflowPayload(payload: any) {
   const reviewerId = String(payload?.reviewerId ?? "system").trim();
 
   if (!reviewerId) {
@@ -718,7 +718,7 @@ function parseReviewerWorkflowPayload(payload) {
   };
 }
 
-function buildBackgroundJobPayload(job) {
+function buildBackgroundJobPayload(job: any) {
   return {
     jobId: job.jobId,
     kind: job.kind,
@@ -729,7 +729,7 @@ function buildBackgroundJobPayload(job) {
   };
 }
 
-async function readJsonBody(request) {
+async function readJsonBody(request: any) {
   const chunks: any[] = [];
 
   for await (const chunk of request) {
@@ -792,21 +792,21 @@ export function createServer({
       runtime: "ok"
     }
   })) as (() => Promise<{ ok: boolean; checks: Record<string, string> }>)
-}) {
+}: any) {
   const log = buildLogger(logger);
   const rateLimiter = clarifyRateLimiter ?? createInMemoryRateLimiter();
   let isShuttingDown = false;
   const upcomingMarketTextScanLocks = new Map();
 
-  function getMarketRepositoryForStage(marketStage = "active") {
+  function getMarketRepositoryForStage(marketStage: any = "active") {
     return marketStage === "upcoming" ? upcomingMarketCacheRepository : marketCacheRepository;
   }
 
-  function getReviewerScanRepositoryForStage(marketStage = "active") {
+  function getReviewerScanRepositoryForStage(marketStage: any = "active") {
     return marketStage === "upcoming" ? upcomingReviewerScanRepository : reviewerScanRepository;
   }
 
-  async function findMarketByEventId(eventId, marketStage = "active") {
+  async function findMarketByEventId(eventId: any, marketStage: any = "active") {
     if (!eventId) {
       return null;
     }
@@ -814,7 +814,7 @@ export function createServer({
     return getMarketRepositoryForStage(marketStage)?.findByMarketId?.(eventId) ?? null;
   }
 
-  async function findMarketForClarification(clarification) {
+  async function findMarketForClarification(clarification: any) {
     if (!clarification?.eventId) {
       return null;
     }
@@ -833,13 +833,13 @@ export function createServer({
     return findMarketByEventId(clarification.eventId, "active");
   }
 
-  async function getAvailableCategoriesForStage(marketStage = "active") {
+  async function getAvailableCategoriesForStage(marketStage: any = "active") {
     const repository =
       marketStage === "upcoming" ? upcomingCategoryCatalogRepository : categoryCatalogRepository;
     return (await repository?.getCatalog?.(marketStage)) ?? { categories: [], updatedAt: null };
   }
 
-  async function buildClarificationTimingForResponse({ clarification, market }) {
+  async function buildClarificationTimingForResponse({ clarification, market }: any) {
     if (clarification?.timing && typeof clarification.timing === "object") {
       return clarification.timing;
     }
@@ -858,7 +858,7 @@ export function createServer({
     });
   }
 
-  async function buildPublicClarificationResponse(clarification) {
+  async function buildPublicClarificationResponse(clarification: any) {
     const market = clarification.eventId
       ? await findMarketForClarification(clarification)
       : null;
@@ -873,7 +873,7 @@ export function createServer({
     };
   }
 
-  async function waitForClarificationSettlement(clarificationId, timeoutMs) {
+  async function waitForClarificationSettlement(clarificationId: any, timeoutMs: any) {
     const deadline = Date.now() + timeoutMs;
     let clarification =
       await clarificationRequestRepository.findByClarificationId(clarificationId);
@@ -902,7 +902,7 @@ export function createServer({
     waitOptions,
     job = null,
     headers = {}
-  }) {
+  }: any) {
     if (waitOptions) {
       const settledClarification = await waitForClarificationSettlement(
         clarification.clarificationId,
@@ -936,7 +936,7 @@ export function createServer({
     );
   }
 
-  async function markJobProcessing(job) {
+  async function markJobProcessing(job: any) {
     const processingTimestamp = now().toISOString();
 
     return (
@@ -953,7 +953,7 @@ export function createServer({
     );
   }
 
-  async function executeClarificationPipelineJob(job) {
+  async function executeClarificationPipelineJob(job: any) {
     await clarificationRequestRepository.updateByClarificationId(job.target.clarificationId, {
       status: "processing",
       updatedAt: job.updatedAt,
@@ -1013,7 +1013,7 @@ export function createServer({
     }
   }
 
-  async function executeReviewerScanJob(job) {
+  async function executeReviewerScanJob(job: any) {
     try {
       const marketStage = job.target.marketStage ?? "active";
       const scan = await runReviewerMarketScan({
@@ -1049,7 +1049,7 @@ export function createServer({
     }
   }
 
-  async function executeBackgroundJob(job) {
+  async function executeBackgroundJob(job: any) {
     if (job.kind === "clarification_pipeline") {
       await executeClarificationPipelineJob(job);
       return;
@@ -1068,7 +1068,7 @@ export function createServer({
     throw new Error(`Unsupported background job kind: ${job.kind}`);
   }
 
-  async function startBackgroundJob(job) {
+  async function startBackgroundJob(job: any) {
     const processingJob = await markJobProcessing(job);
     void Promise.resolve().then(() => executeBackgroundJob(processingJob));
     return processingJob;
@@ -1084,7 +1084,7 @@ export function createServer({
     return recoverableJobs.length;
   }
 
-  const server = http.createServer(async (request, response) => {
+  const server = http.createServer(async (request: any, response: any) => {
     const requestContext = buildRequestContext(request);
     const startedAt = Date.now();
     const forwardedProto = request.headers["x-forwarded-proto"];
@@ -1456,7 +1456,7 @@ export function createServer({
                 llmRuntime
               })
             )
-            .catch(async (pipelineError) => {
+            .catch(async (pipelineError: any) => {
               await clarificationRequestRepository.updateByClarificationId(
                 clarification.clarificationId,
                 {
@@ -1532,12 +1532,12 @@ export function createServer({
           const latestScan =
             (await reviewerScanRepository?.findLatestByEventId?.(market.marketId)) ?? null;
           const eventClarifications = clarifications.filter(
-            (clarification) => clarification.eventId === market.marketId
+            (clarification: any) => clarification.eventId === market.marketId
           );
           const latestClarification =
             eventClarifications
               .slice()
-              .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+              .sort((left: any, right: any) => right.updatedAt.localeCompare(left.updatedAt))
               .at(0) ?? null;
           const reviewWindow =
             latestScan?.review_window ??
@@ -1578,9 +1578,9 @@ export function createServer({
         const filters = buildReviewerQueueFilters(queue);
         const activeFilter = requestUrl.searchParams.get("filter");
         const filteredQueue = REVIEWER_QUEUE_FILTERS.some(
-          (filter) => filter.key === activeFilter
+          (filter: any) => filter.key === activeFilter
         )
-          ? queue.filter((item) => item.queueStates.includes(activeFilter))
+          ? queue.filter((item: any) => item.queueStates.includes(activeFilter))
           : queue;
         const availableCategories = await getAvailableCategoriesForStage("active");
 
@@ -1701,7 +1701,7 @@ export function createServer({
 
       try {
         const scans = ((await reviewerScanRepository?.list?.()) ?? [])
-          .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+          .sort((left: any, right: any) => right.createdAt.localeCompare(left.createdAt))
           .map(buildReviewerScanListItem);
 
         sendJson(response, 200, {
@@ -1975,7 +1975,7 @@ export function createServer({
       }
 
       try {
-        const markets = ((await upcomingMarketCacheRepository?.list?.()) ?? []).filter((market) =>
+        const markets = ((await upcomingMarketCacheRepository?.list?.()) ?? []).filter((market: any) =>
           isFutureUpcomingMarket(market, now())
         );
         const jobs: any[] = [];
@@ -2109,7 +2109,7 @@ export function createServer({
         const cachedMarket = await marketCacheRepository?.findByMarketId?.(eventId);
         const reviewerRefreshSource =
           fetchReviewerMarketSource ??
-          (async (requestedEventId) => {
+          (async (requestedEventId: any) => {
             if (!cachedMarket?.ticker) {
               throw Object.assign(new Error("Cached market does not include a Gemini ticker."), {
                 statusCode: 503,
@@ -2500,7 +2500,7 @@ export function createServer({
           contribution.reference === null
             ? null
             : existingFunding.history.find(
-                (entry) => entry.reference === contribution.reference
+                (entry: any) => entry.reference === contribution.reference
               ) ?? null;
 
         if (existingContribution) {
@@ -2751,7 +2751,7 @@ export function createServer({
 
         sendJson(response, 200, {
           ok: true,
-          requests: requests.map((storedRequest) => ({
+          requests: requests.map((storedRequest: any) => ({
             requestId: storedRequest.requestId,
             status: storedRequest.status,
             marketId: storedRequest.marketId,

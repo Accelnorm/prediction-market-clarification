@@ -14,13 +14,13 @@ function normalizeMarkets(markets: any[] = []) {
     dedupedById.set(market.marketId, market);
   }
 
-  return [...dedupedById.values()].sort((left, right) => left.marketId.localeCompare(right.marketId));
+  return [...dedupedById.values()].sort((left: any, right: any) => left.marketId.localeCompare(right.marketId));
 }
 
 export class FileMarketCacheRepository {
   private filePath: string;
   private writeChain: Promise<void>;
-  constructor(filePath) {
+  constructor(filePath: any) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
@@ -42,7 +42,7 @@ export class FileMarketCacheRepository {
     }
   }
 
-  async save(markets) {
+  async save(markets: any) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(
       this.filePath,
@@ -56,16 +56,16 @@ export class FileMarketCacheRepository {
     return cache.markets;
   }
 
-  async findByMarketId(marketId) {
+  async findByMarketId(marketId: any) {
     const cache = await this.load();
-    return cache.markets.find((market) => market.marketId === marketId) ?? null;
+    return cache.markets.find((market: any) => market.marketId === marketId) ?? null;
   }
 
-  async upsert(market) {
+  async upsert(market: any) {
     return this.withWriteLock(async () => {
       const cache = await this.load();
       const marketIndex = cache.markets.findIndex(
-        (existingMarket) => existingMarket.marketId === market.marketId
+        (existingMarket: any) => existingMarket.marketId === market.marketId
       );
       const nextMarkets = [...cache.markets];
 
@@ -80,7 +80,7 @@ export class FileMarketCacheRepository {
     });
   }
 
-  async withWriteLock(work) {
+  async withWriteLock(work: any) {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

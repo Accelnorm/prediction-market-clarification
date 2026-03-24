@@ -1,11 +1,11 @@
 const POLICY_STEPS_SECS = [3600, 14400, 28800, 43200, 86400];
 const VERY_HIGH_AMBIGUITY_THRESHOLD = 0.85;
 
-function clampStepIndex(index) {
+function clampStepIndex(index: any) {
   return Math.max(0, Math.min(index, POLICY_STEPS_SECS.length - 1));
 }
 
-function getTimeToEndBucket(timeToEndSecs) {
+function getTimeToEndBucket(timeToEndSecs: any) {
   if (timeToEndSecs < 6 * 60 * 60) {
     return "lt_6h";
   }
@@ -21,7 +21,7 @@ function getTimeToEndBucket(timeToEndSecs) {
   return "gt_72h";
 }
 
-function getBaseStepIndex(timeToEndBucket) {
+function getBaseStepIndex(timeToEndBucket: any) {
   switch (timeToEndBucket) {
     case "lt_6h":
       return 1;
@@ -35,7 +35,7 @@ function getBaseStepIndex(timeToEndBucket) {
   }
 }
 
-function normalizeActivitySignal(activitySignal) {
+function normalizeActivitySignal(activitySignal: any) {
   if (typeof activitySignal !== "string") {
     return "normal";
   }
@@ -49,7 +49,7 @@ function normalizeActivitySignal(activitySignal) {
   return "normal";
 }
 
-function getAmbiguityScore(clarification) {
+function getAmbiguityScore(clarification: any) {
   const score = clarification?.llmOutput?.ambiguity_score;
 
   if (typeof score === "number" && Number.isFinite(score)) {
@@ -59,7 +59,7 @@ function getAmbiguityScore(clarification) {
   return 0;
 }
 
-export function buildAdaptiveReviewWindow({ clarification, market, now }) {
+export function buildAdaptiveReviewWindow({ clarification, market, now }: any) {
   const ambiguityScore = getAmbiguityScore(clarification);
   const activitySignal = normalizeActivitySignal(market?.activitySignal);
   const closesAt = typeof market?.closesAt === "string" ? Date.parse(market.closesAt) : Number.NaN;

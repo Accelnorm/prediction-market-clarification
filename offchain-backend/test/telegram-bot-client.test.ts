@@ -43,7 +43,7 @@ test("sendTelegramMessage posts a message to the Telegram Bot API", async () => 
   const originalFetch = globalThis.fetch;
   const requests = [];
 
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = async (url: any, options: any) => {
     requests.push({ url, options });
 
     return {
@@ -127,7 +127,7 @@ test("registerTelegramWebhook posts the webhook URL and secret to Telegram", asy
   const originalFetch = globalThis.fetch;
   const requests = [];
 
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = async (url: any, options: any) => {
     requests.push({ url, options });
 
     return {

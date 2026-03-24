@@ -8,10 +8,10 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { createServer } from "../src/server.js";
 import { FileClarificationRequestRepository } from "../src/clarification-request-repository.js";
 
-async function startTestServer(options) {
+async function startTestServer(options: any) {
   const server = createServer(options);
 
-  await new Promise((resolve) => {
+  await new Promise((resolve: any) => {
     server.listen(0, "127.0.0.1", resolve);
   });
 
@@ -23,9 +23,9 @@ async function startTestServer(options) {
   };
 }
 
-async function stopTestServer(server) {
-  await new Promise((resolve, reject) => {
-    server.close((error) => {
+async function stopTestServer(server: any) {
+  await new Promise((resolve: any, reject: any) => {
+    server.close((error: any) => {
       if (error) {
         reject(error);
         return;
@@ -476,7 +476,7 @@ test("POST /api/telegram/requests/:requestId/status emits processing and complet
       "Gemini auction and spot prints both count toward resolution."
     );
     assert.deepEqual(
-      stored.requests[0].statusHistory.map((entry) => entry.status),
+      stored.requests[0].statusHistory.map((entry: any) => entry.status),
       ["pending", "processing", "completed"]
     );
   } finally {
@@ -495,7 +495,7 @@ test("POST /api/telegram/requests/:requestId/status sends the delivery through T
     now: () => new Date("2026-03-21T18:20:00.000Z"),
     createRequestId: () => "clr_telegram_delivery_001",
     telegramBotToken: "telegram-bot-token",
-    sendTelegramMessage: async (message) => {
+    sendTelegramMessage: async (message: any) => {
       sentMessages.push(message);
       return {
         ok: true,

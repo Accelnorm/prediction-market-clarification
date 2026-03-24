@@ -143,7 +143,7 @@ async function main() {
   );
 }
 
-main().catch((error) => {
+main().catch((error: any) => {
   process.stderr.write(`${error.message}\n`);
   process.exitCode = 1;
 });

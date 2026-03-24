@@ -5,15 +5,15 @@ import {
 import { buildClarificationPaymentRequirements } from "./x402-payment-challenge.js";
 import { createPayAIAuthHeaders } from "@payai/facilitator";
 
-function normalizeString(value) {
+function normalizeString(value: any) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function toBase64Value(value) {
+function toBase64Value(value: any) {
   return Buffer.from(value, "utf8").toString("base64");
 }
 
-function tryParseJson(value) {
+function tryParseJson(value: any) {
   try {
     return JSON.parse(value);
   } catch {
@@ -21,7 +21,7 @@ function tryParseJson(value) {
   }
 }
 
-function tryDecodeBase64Json(value) {
+function tryDecodeBase64Json(value: any) {
   try {
     return JSON.parse(Buffer.from(value, "base64").toString("utf8"));
   } catch {
@@ -29,7 +29,7 @@ function tryDecodeBase64Json(value) {
   }
 }
 
-function paymentVerificationError(statusCode, code, message, details: any = null) {
+function paymentVerificationError(statusCode: any, code: any, message: any, details: any = null) {
   const extra: Record<string, any> = { statusCode, code };
   if (details !== null) {
     extra.details = details;
@@ -37,7 +37,7 @@ function paymentVerificationError(statusCode, code, message, details: any = null
   return Object.assign(new Error(message), extra);
 }
 
-function parsePaymentPayload(rawValue) {
+function parsePaymentPayload(rawValue: any) {
   const normalized = normalizeString(rawValue);
 
   if (!normalized) {
@@ -65,7 +65,7 @@ function parsePaymentPayload(rawValue) {
   return null;
 }
 
-export function extractX402PaymentCandidate(request, body: any = null) {
+export function extractX402PaymentCandidate(request: any, body: any = null) {
   const paymentSignatureHeader = normalizeString(request.headers["payment-signature"]);
   const legacyPaymentHeader = normalizeString(request.headers["x-payment"]);
   const headerPayload = parsePaymentPayload(paymentSignatureHeader || legacyPaymentHeader);
@@ -109,7 +109,7 @@ async function verifyWithFacilitator({
   requestContext,
   requestUrl,
   fetchImpl
-}) {
+}: any) {
   const paymentRequirements = buildClarificationPaymentRequirements({
     eventId: requestContext.eventId,
     requesterId: requestContext.requesterId,
@@ -172,7 +172,7 @@ export async function verifyClarificationPayment({
   requestContext,
   requestUrl,
   fetchImpl = fetch
-}) {
+}: any) {
   if (!paymentCandidate) {
     throw paymentRequiredError();
   }

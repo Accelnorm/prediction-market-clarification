@@ -1,8 +1,8 @@
-function normalizeString(value) {
+function normalizeString(value: any) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-export function loadArtifactPublicationConfig(env = process.env) {
+export function loadArtifactPublicationConfig(env: any = process.env) {
   const provider = normalizeString(env.ARTIFACT_PUBLICATION_PROVIDER).toLowerCase() || "disabled";
 
   return {

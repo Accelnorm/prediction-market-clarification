@@ -6,7 +6,7 @@ const EMPTY_STORE = { scans: [] };
 export class FileReviewerScanRepository {
   private filePath: string;
   private writeChain: Promise<void>;
-  constructor(filePath) {
+  constructor(filePath: any) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
@@ -29,7 +29,7 @@ export class FileReviewerScanRepository {
     }
   }
 
-  async save(scans) {
+  async save(scans: any) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ scans }, null, 2) + "\n", "utf8");
   }
@@ -39,23 +39,23 @@ export class FileReviewerScanRepository {
     return store.scans;
   }
 
-  async findLatestByEventId(eventId) {
+  async findLatestByEventId(eventId: any) {
     const scans = await this.list();
 
     return (
       scans
-        .filter((scan) => scan.eventId === eventId)
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .filter((scan: any) => scan.eventId === eventId)
+        .sort((left: any, right: any) => right.createdAt.localeCompare(left.createdAt))
         .at(0) ?? null
     );
   }
 
-  async create(scan) {
+  async create(scan: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const existingIndex =
         typeof scan.jobId === "string"
-          ? store.scans.findIndex((existingScan) => existingScan.jobId === scan.jobId)
+          ? store.scans.findIndex((existingScan: any) => existingScan.jobId === scan.jobId)
           : -1;
 
       if (existingIndex !== -1) {
@@ -74,7 +74,7 @@ export class FileReviewerScanRepository {
     });
   }
 
-  async withWriteLock(work) {
+  async withWriteLock(work: any) {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

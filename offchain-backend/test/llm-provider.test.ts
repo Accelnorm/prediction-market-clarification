@@ -43,7 +43,7 @@ test("generateMarketInterpretation uses an OpenAI-compatible provider response w
   const originalFetch = globalThis.fetch;
   const requests = [];
 
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = async (url: any, options: any) => {
     requests.push({ url, options });
 
     return {
@@ -105,7 +105,7 @@ test("generateMarketInterpretation loads the review-upcoming-market skill when r
   const originalFetch = globalThis.fetch;
   const requests = [];
 
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = async (url: any, options: any) => {
     requests.push({ url, options });
 
     return {
@@ -164,7 +164,7 @@ test("generateMarketInterpretation loads the issue-clarification-response skill 
   const originalFetch = globalThis.fetch;
   const requests = [];
 
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = async (url: any, options: any) => {
     requests.push({ url, options });
 
     return {
@@ -223,7 +223,7 @@ test("generateMarketInterpretation uses an Anthropic-compatible provider respons
   const originalFetch = globalThis.fetch;
   const requests = [];
 
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = async (url: any, options: any) => {
     requests.push({ url, options });
 
     return {

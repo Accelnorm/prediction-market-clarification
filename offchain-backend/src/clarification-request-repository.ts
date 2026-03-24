@@ -6,7 +6,7 @@ const EMPTY_STORE = { requests: [] };
 export class FileClarificationRequestRepository {
   private filePath: string;
   private writeChain: Promise<void>;
-  constructor(filePath) {
+  constructor(filePath: any) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
@@ -29,12 +29,12 @@ export class FileClarificationRequestRepository {
     }
   }
 
-  async save(requests) {
+  async save(requests: any) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ requests }, null, 2) + "\n", "utf8");
   }
 
-  async create(request) {
+  async create(request: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const requests = [
@@ -66,10 +66,10 @@ export class FileClarificationRequestRepository {
     });
   }
 
-  async findByTelegramIdentifiers({ telegramChatId, telegramUserId }) {
+  async findByTelegramIdentifiers({ telegramChatId, telegramUserId }: any) {
     const store = await this.load();
 
-    return store.requests.filter((request) => {
+    return store.requests.filter((request: any) => {
       if (telegramChatId && request.telegramChatId !== telegramChatId) {
         return false;
       }
@@ -82,23 +82,23 @@ export class FileClarificationRequestRepository {
     });
   }
 
-  async findByRequestId(requestId) {
+  async findByRequestId(requestId: any) {
     const store = await this.load();
-    return store.requests.find((request) => request.requestId === requestId) ?? null;
+    return store.requests.find((request: any) => request.requestId === requestId) ?? null;
   }
 
-  async findByClarificationId(clarificationId) {
+  async findByClarificationId(clarificationId: any) {
     const store = await this.load();
     return (
-      store.requests.find((request) => request.clarificationId === clarificationId) ?? null
+      store.requests.find((request: any) => request.clarificationId === clarificationId) ?? null
     );
   }
 
-  async findByPaymentProof(paymentProof) {
+  async findByPaymentProof(paymentProof: any) {
     const store = await this.load();
     return (
       store.requests.find(
-        (request) => typeof request.paymentProof === "string" && request.paymentProof === paymentProof
+        (request: any) => typeof request.paymentProof === "string" && request.paymentProof === paymentProof
       ) ?? null
     );
   }
@@ -108,15 +108,15 @@ export class FileClarificationRequestRepository {
     return store.requests;
   }
 
-  async findByEventId(eventId) {
+  async findByEventId(eventId: any) {
     const store = await this.load();
-    return store.requests.filter((request) => request.eventId === eventId);
+    return store.requests.filter((request: any) => request.eventId === eventId);
   }
 
-  async updateStatus(requestId, updates) {
+  async updateStatus(requestId: any, updates: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
-      const requestIndex = store.requests.findIndex((request) => request.requestId === requestId);
+      const requestIndex = store.requests.findIndex((request: any) => request.requestId === requestId);
 
       if (requestIndex === -1) {
         return null;
@@ -145,11 +145,11 @@ export class FileClarificationRequestRepository {
     });
   }
 
-  async updateByClarificationId(clarificationId, updates) {
+  async updateByClarificationId(clarificationId: any, updates: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const requestIndex = store.requests.findIndex(
-        (request) => request.clarificationId === clarificationId
+        (request: any) => request.clarificationId === clarificationId
       );
 
       if (requestIndex === -1) {
@@ -231,7 +231,7 @@ export class FileClarificationRequestRepository {
     });
   }
 
-  async withWriteLock(work) {
+  async withWriteLock(work: any) {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

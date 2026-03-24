@@ -1,21 +1,21 @@
 import { generateMarketInterpretation } from "./llm-provider.js";
 import { buildAdaptiveReviewWindow } from "./review-window-policy.js";
 
-function buildRecommendation(llmOutput) {
+function buildRecommendation(llmOutput: any) {
   return llmOutput.ambiguity_score >= 0.5 ? "review" : "monitor";
 }
 
-function normalizeMarketText(text) {
+function normalizeMarketText(text: any) {
   return String(text ?? "")
     .trim()
     .replace(/\s+/g, " ");
 }
 
-function buildMarketTextKey(market) {
+function buildMarketTextKey(market: any) {
   return normalizeMarketText(market?.resolution ?? market?.resolutionText ?? market?.title ?? "");
 }
 
-function isUpcomingMarket(market, now) {
+function isUpcomingMarket(market: any, now: any) {
   const closesAt = market?.closesAt ?? market?.endTime ?? market?.expiryDate ?? null;
 
   if (typeof closesAt !== "string" || closesAt.trim() === "") {
@@ -26,7 +26,7 @@ function isUpcomingMarket(market, now) {
   return Number.isFinite(closesAtMs) && closesAtMs > now.getTime();
 }
 
-function cloneScanForEvent({ sourceScan, jobId, eventId, createdAt }) {
+function cloneScanForEvent({ sourceScan, jobId, eventId, createdAt }: any) {
   return {
     ...sourceScan,
     scanId: `scan_${eventId}_${createdAt}`,
@@ -48,7 +48,7 @@ export async function createReviewerMarketScan({
   requireUpcomingOpenMarket = false,
   dedupeByMarketText = false,
   inFlightMarketTextScans = null as Map<any, any> | null
-}) {
+}: any) {
   const market = await marketCacheRepository.findByMarketId(eventId);
 
   if (!market) {
@@ -83,8 +83,8 @@ export async function createReviewerMarketScan({
     const scans = (await reviewerScanRepository?.list?.()) ?? [];
     return (
       scans
-        .filter((scan) => scan.marketTextKey === marketTextKey)
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+        .filter((scan: any) => scan.marketTextKey === marketTextKey)
+        .sort((left: any, right: any) => right.createdAt.localeCompare(left.createdAt))
         .at(0) ?? null
     );
   }

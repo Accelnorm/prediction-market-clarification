@@ -22,17 +22,17 @@ function normalizeFinalityConfig(config: any = {}) {
   };
 }
 
-function parseTradeAmount(trade) {
+function parseTradeAmount(trade: any) {
   const parsed = Number.parseFloat(String(trade?.amount ?? ""));
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function getTradeTimestampMs(trade) {
+function getTradeTimestampMs(trade: any) {
   const timestampMs = Number(trade?.timestampms ?? trade?.timestamp);
   return Number.isFinite(timestampMs) ? timestampMs : null;
 }
 
-function computeTradeMetrics(trades: any[] = [], nowDate) {
+function computeTradeMetrics(trades: any[] = [], nowDate: any) {
   const nowMs = nowDate.getTime();
   const oneDayAgoMs = nowMs - 24 * 60 * 60 * 1000;
   let tradeCountWindow = 0;
@@ -62,7 +62,7 @@ function computeTradeMetrics(trades: any[] = [], nowDate) {
   };
 }
 
-function getTradeSignals(activity, nowDate) {
+function getTradeSignals(activity: any, nowDate: any) {
   const lastTradeMs =
     typeof activity?.lastTradeAt === "string" ? Date.parse(activity.lastTradeAt) : Number.NaN;
   const minutesSinceLastTrade = Number.isFinite(lastTradeMs)
@@ -78,7 +78,7 @@ function getTradeSignals(activity, nowDate) {
   };
 }
 
-function computeProcessingUrgency({ market, activity, nowDate }) {
+function computeProcessingUrgency({ market, activity, nowDate }: any) {
   const tradeSignals = getTradeSignals(activity, nowDate);
   const closesAtMs =
     typeof market?.closesAt === "string" ? Date.parse(market.closesAt) : Number.NaN;
@@ -115,7 +115,7 @@ function computeProcessingUrgency({ market, activity, nowDate }) {
   };
 }
 
-function computeDynamicFinalityWindow({ clarification, market, activity, nowDate }) {
+function computeDynamicFinalityWindow({ clarification, market, activity, nowDate }: any) {
   const tradeSignals = getTradeSignals(activity, nowDate);
   const ambiguityScore =
     typeof clarification?.llmOutput?.ambiguity_score === "number"
@@ -198,7 +198,7 @@ function computeDynamicFinalityWindow({ clarification, market, activity, nowDate
   };
 }
 
-function computeStaticFinalityWindow(config) {
+function computeStaticFinalityWindow(config: any) {
   return {
     finalityMode: "static",
     finalityWindowSecs: config.staticWindowSecs,
@@ -213,7 +213,7 @@ export async function refreshTradeActivityForMarket({
   tradeActivityRepository,
   fetchTrades = fetchTradesForSymbol,
   now = () => new Date()
-}) {
+}: any) {
   if (!market?.marketId || !Array.isArray(market?.contracts) || market.contracts.length === 0) {
     return null;
   }
@@ -236,20 +236,20 @@ export async function refreshTradeActivityForMarket({
     const trades = await fetchTrades(contract.instrumentSymbol, {
       sinceTid: existingInstrument?.lastTid ?? null
     });
-    const filteredTrades = trades.filter((trade) => Number(trade?.tid) !== Number(existingInstrument?.lastTid));
+    const filteredTrades = trades.filter((trade: any) => Number(trade?.tid) !== Number(existingInstrument?.lastTid));
     const allTrades = [...(existingInstrument?.recentTrades ?? []), ...filteredTrades]
-      .filter((trade) => {
+      .filter((trade: any) => {
         const timestampMs = getTradeTimestampMs(trade);
         return timestampMs !== null && timestampMs >= nowDate.getTime() - 24 * 60 * 60 * 1000;
       })
-      .sort((left, right) => Number(right.tid ?? 0) - Number(left.tid ?? 0))
+      .sort((left: any, right: any) => Number(right.tid ?? 0) - Number(left.tid ?? 0))
       .slice(0, 500);
 
     combinedTrades.push(...allTrades);
     instruments[contract.instrumentSymbol] = {
       instrumentSymbol: contract.instrumentSymbol,
       lastTid:
-        allTrades.reduce((maxTid, trade) => Math.max(maxTid, Number(trade?.tid ?? 0)), Number(existingInstrument?.lastTid ?? 0)) ||
+        allTrades.reduce((maxTid: any, trade: any) => Math.max(maxTid, Number(trade?.tid ?? 0)), Number(existingInstrument?.lastTid ?? 0)) ||
         null,
       recentTrades: allTrades,
       lastFetchedAt: nowDate.toISOString()
@@ -261,7 +261,7 @@ export async function refreshTradeActivityForMarket({
     eventId: market.marketId,
     ...metrics,
     activeInstrumentCountWindow: Object.values(instruments).filter(
-      (instrument) => Array.isArray(instrument.recentTrades) && instrument.recentTrades.length > 0
+      (instrument: any) => Array.isArray(instrument.recentTrades) && instrument.recentTrades.length > 0
     ).length,
     lastFetchedAt: nowDate.toISOString(),
     instruments
@@ -278,7 +278,7 @@ export async function buildClarificationTiming({
   fetchTrades = fetchTradesForSymbol,
   now = () => new Date(),
   finalityConfig = DEFAULT_FINALITY_CONFIG
-}) {
+}: any) {
   const resolvedConfig = normalizeFinalityConfig(finalityConfig);
   const nowDate = now();
   let activity = (await tradeActivityRepository?.findByEventId?.(market?.marketId)) ?? null;
@@ -287,7 +287,7 @@ export async function buildClarificationTiming({
     resolvedConfig.processingActivityEnabled &&
     market?.status === "active" &&
     Array.isArray(market?.contracts) &&
-    market.contracts.some((contract) => typeof contract?.instrumentSymbol === "string" && contract.instrumentSymbol !== "")
+    market.contracts.some((contract: any) => typeof contract?.instrumentSymbol === "string" && contract.instrumentSymbol !== "")
   ) {
     activity = await refreshTradeActivityForMarket({
       market,

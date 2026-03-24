@@ -1,6 +1,6 @@
 const TELEGRAM_STATUSES = new Set(["pending", "processing", "completed", "failed"]);
 
-function validationError(code, message, statusCode = 400) {
+function validationError(code: any, message: any, statusCode: any = 400) {
   return Object.assign(new Error(message), { code, statusCode });
 }
 
@@ -8,7 +8,7 @@ function sanitizeFailureMessage() {
   return "Please retry later.";
 }
 
-export function parseTelegramStatusUpdate(payload) {
+export function parseTelegramStatusUpdate(payload: any) {
   const status = typeof payload?.status === "string" ? payload.status.trim() : "";
 
   if (!TELEGRAM_STATUSES.has(status)) {
@@ -55,7 +55,7 @@ export function parseTelegramStatusUpdate(payload) {
   };
 }
 
-export function buildTelegramDeliveryPayload(request) {
+export function buildTelegramDeliveryPayload(request: any) {
   switch (request.status) {
     case "pending":
       return {

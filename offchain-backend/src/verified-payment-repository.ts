@@ -6,7 +6,7 @@ const EMPTY_STORE = { payments: [] };
 export class FileVerifiedPaymentRepository {
   private filePath: string;
   private writeChain: Promise<void>;
-  constructor(filePath) {
+  constructor(filePath: any) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
@@ -29,12 +29,12 @@ export class FileVerifiedPaymentRepository {
     }
   }
 
-  async save(payments) {
+  async save(payments: any) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ payments }, null, 2) + "\n", "utf8");
   }
 
-  async create(payment) {
+  async create(payment: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const payments = [
@@ -51,32 +51,32 @@ export class FileVerifiedPaymentRepository {
     });
   }
 
-  async findByPaymentProof(paymentProof) {
+  async findByPaymentProof(paymentProof: any) {
     const store = await this.load();
     return (
       store.payments.find(
-        (payment) =>
+        (payment: any) =>
           typeof payment.paymentProof === "string" && payment.paymentProof === paymentProof
       ) ?? null
     );
   }
 
-  async findByPaymentReference(paymentReference) {
+  async findByPaymentReference(paymentReference: any) {
     const store = await this.load();
     return (
       store.payments.find(
-        (payment) =>
+        (payment: any) =>
           typeof payment.paymentReference === "string" &&
           payment.paymentReference === paymentReference
       ) ?? null
     );
   }
 
-  async updateByPaymentProof(paymentProof, updates) {
+  async updateByPaymentProof(paymentProof: any, updates: any) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const paymentIndex = store.payments.findIndex(
-        (payment) => payment.paymentProof === paymentProof
+        (payment: any) => payment.paymentProof === paymentProof
       );
 
       if (paymentIndex === -1) {
@@ -101,7 +101,7 @@ export class FileVerifiedPaymentRepository {
     return store.payments;
   }
 
-  async withWriteLock(work) {
+  async withWriteLock(work: any) {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

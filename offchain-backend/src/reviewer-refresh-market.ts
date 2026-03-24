@@ -8,7 +8,7 @@ export async function refreshReviewerMarketData({
   marketCacheRepository,
   fetchReviewerMarketSource,
   now = () => new Date()
-}) {
+}: any) {
   const existingMarket = await marketCacheRepository.findByMarketId(eventId);
 
   if (!existingMarket) {
