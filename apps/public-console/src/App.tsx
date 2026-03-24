@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useWalletConnection } from "@solana/react-hooks";
 import { buildArtifactLinkHref } from "./reviewer-artifact-links";
 
 type ReviewerQueueFilter = {
@@ -164,6 +163,7 @@ type PrelaunchQueueItem = {
 type PrelaunchQueueResponse = {
   ok: true;
   queue: PrelaunchQueueItem[];
+  availableCategories?: string[];
 };
 
 type PrelaunchMarketDetailResponse = {
@@ -196,62 +196,79 @@ type ReviewerArtifactRecord = {
   url: string;
 };
 
-const REVIEWER_SESSION_STORAGE_KEY = "gemini-reviewer-session";
-
-function loadReviewerSession() {
-  if (typeof window === "undefined") {
-    return {
-      apiBaseUrl: "",
-      reviewerToken: "",
+type IntakeResponseState =
+  | {
+      kind: "payment_required";
+      eventId: string;
+      payload: {
+        paymentRequirements?: Array<{
+          assetSymbol?: string;
+          amount?: string;
+          description?: string;
+          network?: string;
+        }>;
+      };
+    }
+  | {
+      kind: "accepted";
+      eventId: string;
+      payload: {
+        clarificationId?: string;
+        status?: string;
+      };
+    }
+  | {
+      kind: "error";
+      eventId: string;
+      message: string;
     };
+
+const REVIEWER_SESSION_STORAGE_KEY = "gemini-reviewer-session";
+const PUBLIC_SESSION_STORAGE_KEY = "signal-public-session";
+
+function loadStoredSession(key: string) {
+  if (typeof window === "undefined") {
+    return { apiBaseUrl: "", reviewerToken: "" };
   }
 
   try {
-    const raw = window.localStorage.getItem(REVIEWER_SESSION_STORAGE_KEY);
+    const raw = window.localStorage.getItem(key);
 
     if (!raw) {
-      return {
-        apiBaseUrl: "",
-        reviewerToken: "",
-      };
+      return { apiBaseUrl: "", reviewerToken: "" };
     }
 
     const parsed = JSON.parse(raw);
 
     return {
-      apiBaseUrl:
-        typeof parsed.apiBaseUrl === "string" ? parsed.apiBaseUrl : "",
-      reviewerToken:
-        typeof parsed.reviewerToken === "string" ? parsed.reviewerToken : "",
+      apiBaseUrl: typeof parsed.apiBaseUrl === "string" ? parsed.apiBaseUrl : "",
+      reviewerToken: typeof parsed.reviewerToken === "string" ? parsed.reviewerToken : ""
     };
   } catch {
-    return {
-      apiBaseUrl: "",
-      reviewerToken: "",
-    };
+    return { apiBaseUrl: "", reviewerToken: "" };
   }
 }
 
-function saveReviewerSession(session: {
-  apiBaseUrl: string;
-  reviewerToken: string;
-}) {
+function saveStoredSession(
+  key: string,
+  session: {
+    apiBaseUrl: string;
+    reviewerToken: string;
+  }
+) {
   if (typeof window === "undefined") {
     return;
   }
 
-  window.localStorage.setItem(
-    REVIEWER_SESSION_STORAGE_KEY,
-    JSON.stringify(session)
-  );
+  window.localStorage.setItem(key, JSON.stringify(session));
 }
 
-function clearReviewerSession() {
+function clearStoredSession(key: string) {
   if (typeof window === "undefined") {
     return;
   }
 
-  window.localStorage.removeItem(REVIEWER_SESSION_STORAGE_KEY);
+  window.localStorage.removeItem(key);
 }
 
 function formatTimestamp(timestamp: string) {
@@ -261,8 +278,12 @@ function formatTimestamp(timestamp: string) {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-    timeZoneName: "short",
+    timeZoneName: "short"
   }).format(new Date(timestamp));
+}
+
+function formatOptionalTimestamp(timestamp?: string | null) {
+  return timestamp ? formatTimestamp(timestamp) : "Unavailable";
 }
 
 function formatQueueStateLabel(state: string) {
@@ -274,7 +295,7 @@ function formatQueueStateLabel(state: string) {
 
 function formatAmbiguityScore(score: number | null) {
   if (typeof score !== "number") {
-    return "Not scanned";
+    return "Pending";
   }
 
   return score.toFixed(2);
@@ -284,78 +305,197 @@ function formatCurrency(amount: string) {
   return `${amount} USDC`;
 }
 
-function formatOptionalTimestamp(timestamp?: string | null) {
-  return timestamp ? formatTimestamp(timestamp) : "Unavailable";
-}
-
 function formatContractPriceSummary(prices: Record<string, unknown> | null) {
   if (!prices || typeof prices !== "object") {
     return "No price snapshot";
   }
 
-  const priceEntries = Object.entries(prices)
+  const entries = Object.entries(prices)
     .filter(([, value]) => value !== null && value !== undefined)
     .slice(0, 3)
     .map(([key, value]) =>
       typeof value === "object" ? `${key}: ${JSON.stringify(value)}` : `${key}: ${value}`
     );
 
-  return priceEntries.length > 0 ? priceEntries.join(" • ") : "No price snapshot";
+  return entries.length > 0 ? entries.join(" • ") : "No price snapshot";
+}
+
+function getReviewTemperature(score: number | null) {
+  if (typeof score !== "number") {
+    return "Unscored";
+  }
+
+  if (score >= 0.8) {
+    return "Critical ambiguity";
+  }
+
+  if (score >= 0.5) {
+    return "Needs editorial pass";
+  }
+
+  return "Stable enough to monitor";
+}
+
+function SurfaceSwitch({
+  value,
+  onChange
+}: {
+  value: ReviewerSurface;
+  onChange: (next: ReviewerSurface) => void;
+}) {
+  return (
+    <div className="inline-flex rounded-full border border-border-low bg-panel/60 p-1">
+      {([
+        ["active", "Live Clarifications"],
+        ["prelaunch", "Upcoming Review"]
+      ] as const).map(([surface, label]) => (
+        <button
+          key={surface}
+          className={`rounded-full px-4 py-2 text-sm transition ${
+            value === surface
+              ? "bg-foreground text-background shadow-[0_10px_25px_rgba(0,0,0,0.25)]"
+              : "text-muted hover:text-foreground"
+          }`}
+          onClick={() => onChange(surface)}
+          type="button"
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SectionCard({
+  eyebrow,
+  title,
+  children,
+  actions
+}: {
+  eyebrow: string;
+  title: string;
+  children: React.ReactNode;
+  actions?: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[2rem] border border-border-low bg-panel/85 p-6 shadow-[0_24px_80px_-48px_rgba(4,13,22,0.6)] backdrop-blur">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border-low pb-4">
+        <div className="space-y-1">
+          <p className="text-xs uppercase tracking-[0.26em] text-muted">{eyebrow}</p>
+          <h2 className="font-display text-[clamp(1.4rem,2vw,2rem)] leading-none text-foreground">
+            {title}
+          </h2>
+        </div>
+        {actions}
+      </div>
+      <div className="mt-5">{children}</div>
+    </section>
+  );
+}
+
+function SettingsIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M10.325 4.317a1.724 1.724 0 0 1 3.35 0l.16.753a1.724 1.724 0 0 0 2.573 1.066l.658-.379a1.724 1.724 0 0 1 2.286.632l.5.866a1.724 1.724 0 0 1-.632 2.286l-.658.379a1.724 1.724 0 0 0-.84 1.493c0 .547.315 1.046.84 1.348l.658.379a1.724 1.724 0 0 1 .632 2.286l-.5.866a1.724 1.724 0 0 1-2.286.632l-.658-.379a1.724 1.724 0 0 0-2.573 1.066l-.16.753a1.724 1.724 0 0 1-3.35 0l-.16-.753a1.724 1.724 0 0 0-2.573-1.066l-.658.379a1.724 1.724 0 0 1-2.286-.632l-.5-.866a1.724 1.724 0 0 1 .632-2.286l.658-.379a1.724 1.724 0 0 0 .84-1.348c0-.547-.315-1.046-.84-1.348l-.658-.379a1.724 1.724 0 0 1-.632-2.286l.5-.866a1.724 1.724 0 0 1 2.286-.632l.658.379a1.724 1.724 0 0 0 2.573-1.066l.16-.753Z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
+function SettingsFlyout({
+  title,
+  description,
+  onClose,
+  children
+}: {
+  title: string;
+  description: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="fixed inset-0 z-40">
+      <button
+        aria-label="Close settings"
+        className="absolute inset-0 bg-[rgba(4,13,22,0.48)] backdrop-blur-[2px]"
+        onClick={onClose}
+        type="button"
+      />
+      <div className="absolute right-5 top-5 w-[min(30rem,calc(100vw-2.5rem))] rounded-[2rem] border border-border-low bg-panel/95 p-6 shadow-[0_28px_100px_-40px_rgba(4,13,22,0.95)] backdrop-blur-xl sm:right-8 sm:top-8 lg:right-10">
+        <div className="flex items-start justify-between gap-4 border-b border-border-low pb-4">
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-[0.26em] text-muted">Settings</p>
+            <h2 className="font-display text-[1.7rem] leading-none text-foreground">{title}</h2>
+            <p className="max-w-md text-sm leading-6 text-muted">{description}</p>
+          </div>
+          <button
+            aria-label="Close settings"
+            className="rounded-full border border-border-low px-3 py-2 text-sm text-muted transition hover:text-foreground"
+            onClick={onClose}
+            type="button"
+          >
+            Close
+          </button>
+        </div>
+        <div className="mt-5">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 function ReviewerConsole() {
-  const initialSession = useMemo(() => loadReviewerSession(), []);
-  const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(
-    initialSession.apiBaseUrl
+  const initialSession = useMemo(
+    () => loadStoredSession(REVIEWER_SESSION_STORAGE_KEY),
+    []
   );
-  const [draftReviewerToken, setDraftReviewerToken] = useState(
-    initialSession.reviewerToken
-  );
+  const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl);
+  const [draftReviewerToken, setDraftReviewerToken] = useState(initialSession.reviewerToken);
   const [session, setSession] = useState(initialSession);
-  const [reviewerSurface, setReviewerSurface] =
-    useState<ReviewerSurface>("active");
-  const [activeFilter, setActiveFilter] = useState<string>("all");
-  const [queueResponse, setQueueResponse] =
-    useState<ReviewerQueueResponse | null>(null);
+  const [reviewerSurface, setReviewerSurface] = useState<ReviewerSurface>("prelaunch");
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [queueResponse, setQueueResponse] = useState<ReviewerQueueResponse | null>(null);
   const [prelaunchQueueResponse, setPrelaunchQueueResponse] =
     useState<PrelaunchQueueResponse | null>(null);
-  const [selectedClarificationId, setSelectedClarificationId] = useState<
-    string | null
-  >(null);
-  const [selectedPrelaunchEventId, setSelectedPrelaunchEventId] = useState<
-    string | null
-  >(null);
+  const [selectedClarificationId, setSelectedClarificationId] = useState<string | null>(null);
+  const [selectedPrelaunchEventId, setSelectedPrelaunchEventId] = useState<string | null>(null);
   const [detailResponse, setDetailResponse] =
     useState<ReviewerClarificationDetailResponse | null>(null);
   const [prelaunchDetailResponse, setPrelaunchDetailResponse] =
     useState<PrelaunchMarketDetailResponse | null>(null);
-  const [artifactPreview, setArtifactPreview] =
-    useState<ReviewerArtifactRecord | null>(null);
+  const [artifactPreview, setArtifactPreview] = useState<ReviewerArtifactRecord | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [prelaunchErrorMessage, setPrelaunchErrorMessage] = useState<
-    string | null
-  >(null);
-  const [detailErrorMessage, setDetailErrorMessage] = useState<string | null>(
-    null
-  );
+  const [prelaunchErrorMessage, setPrelaunchErrorMessage] = useState<string | null>(null);
+  const [detailErrorMessage, setDetailErrorMessage] = useState<string | null>(null);
   const [prelaunchDetailErrorMessage, setPrelaunchDetailErrorMessage] =
     useState<string | null>(null);
-  const [artifactPreviewError, setArtifactPreviewError] = useState<
-    string | null
-  >(null);
+  const [artifactPreviewError, setArtifactPreviewError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isPrelaunchLoading, setIsPrelaunchLoading] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
-  const [isPrelaunchDetailLoading, setIsPrelaunchDetailLoading] =
-    useState(false);
-  const [isArtifactPreviewLoading, setIsArtifactPreviewLoading] =
-    useState(false);
-  const [prelaunchScanTargetId, setPrelaunchScanTargetId] = useState<
-    string | null
-  >(null);
-  const [isPrelaunchScanAllRunning, setIsPrelaunchScanAllRunning] =
-    useState(false);
+  const [isPrelaunchDetailLoading, setIsPrelaunchDetailLoading] = useState(false);
+  const [isArtifactPreviewLoading, setIsArtifactPreviewLoading] = useState(false);
+  const [prelaunchScanTargetId, setPrelaunchScanTargetId] = useState<string | null>(null);
+  const [isPrelaunchScanAllRunning, setIsPrelaunchScanAllRunning] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   useEffect(() => {
     if (
@@ -382,8 +522,8 @@ function ReviewerConsole() {
 
         const response = await fetch(endpoint, {
           headers: {
-            "x-reviewer-token": session.reviewerToken,
-          },
+            "x-reviewer-token": session.reviewerToken
+          }
         });
         const payload = await response.json();
 
@@ -440,15 +580,15 @@ function ReviewerConsole() {
         const endpoint = new URL("/api/reviewer/prelaunch/queue", session.apiBaseUrl);
         const response = await fetch(endpoint, {
           headers: {
-            "x-reviewer-token": session.reviewerToken,
-          },
+            "x-reviewer-token": session.reviewerToken
+          }
         });
         const payload = await response.json();
 
         if (!response.ok) {
           throw new Error(
             payload?.error?.message ??
-              "Prelaunch reviewer queue could not be loaded with the current session."
+              "Upcoming review queue could not be loaded with the current session."
           );
         }
 
@@ -461,7 +601,7 @@ function ReviewerConsole() {
           setPrelaunchErrorMessage(
             error instanceof Error
               ? error.message
-              : "Prelaunch reviewer queue could not be loaded with the current session."
+              : "Upcoming review queue could not be loaded with the current session."
           );
         }
       } finally {
@@ -491,8 +631,8 @@ function ReviewerConsole() {
       return;
     }
 
-    const clarificationId = selectedClarificationId;
     let cancelled = false;
+    const clarificationId = selectedClarificationId;
 
     async function loadDetail() {
       setIsDetailLoading(true);
@@ -505,8 +645,8 @@ function ReviewerConsole() {
         );
         const response = await fetch(endpoint, {
           headers: {
-            "x-reviewer-token": session.reviewerToken,
-          },
+            "x-reviewer-token": session.reviewerToken
+          }
         });
         const payload = await response.json();
 
@@ -556,8 +696,8 @@ function ReviewerConsole() {
       return;
     }
 
-    const eventId = selectedPrelaunchEventId;
     let cancelled = false;
+    const eventId = selectedPrelaunchEventId;
 
     async function loadPrelaunchDetail() {
       setIsPrelaunchDetailLoading(true);
@@ -570,15 +710,15 @@ function ReviewerConsole() {
         );
         const response = await fetch(endpoint, {
           headers: {
-            "x-reviewer-token": session.reviewerToken,
-          },
+            "x-reviewer-token": session.reviewerToken
+          }
         });
         const payload = await response.json();
 
         if (!response.ok) {
           throw new Error(
             payload?.error?.message ??
-              "Prelaunch market detail could not be loaded with the current session."
+              "Upcoming market detail could not be loaded with the current session."
           );
         }
 
@@ -591,7 +731,7 @@ function ReviewerConsole() {
           setPrelaunchDetailErrorMessage(
             error instanceof Error
               ? error.message
-              : "Prelaunch market detail could not be loaded with the current session."
+              : "Upcoming market detail could not be loaded with the current session."
           );
         }
       } finally {
@@ -608,13 +748,15 @@ function ReviewerConsole() {
     };
   }, [refreshNonce, reviewerSurface, selectedPrelaunchEventId, session]);
 
-  const filters = queueResponse?.filters ?? [];
   const detail = detailResponse?.clarification ?? null;
-  const prelaunchQueue = prelaunchQueueResponse?.queue ?? [];
   const prelaunchDetail = prelaunchDetailResponse?.market ?? null;
   const prelaunchLatestScan = prelaunchDetailResponse?.latestScan ?? null;
   const selectedArtifactCid = detail?.artifact?.cid ?? null;
   const selectedArtifactHref = buildArtifactLinkHref(detail?.artifact?.url);
+  const activeQueue = queueResponse?.queue ?? [];
+  const filters = queueResponse?.filters ?? [];
+  const prelaunchQueue = prelaunchQueueResponse?.queue ?? [];
+  const availableCategories = prelaunchQueueResponse?.availableCategories ?? [];
 
   useEffect(() => {
     if (!session.apiBaseUrl || !session.reviewerToken || !selectedArtifactCid) {
@@ -638,8 +780,8 @@ function ReviewerConsole() {
         );
         const response = await fetch(endpoint, {
           headers: {
-            "x-reviewer-token": session.reviewerToken,
-          },
+            "x-reviewer-token": session.reviewerToken
+          }
         });
         const payload = await response.json();
 
@@ -676,46 +818,41 @@ function ReviewerConsole() {
     };
   }, [selectedArtifactCid, session]);
 
-  function handleConnectReviewer(event: React.FormEvent<HTMLFormElement>) {
+  function connectReviewer(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const nextSession = {
       apiBaseUrl: draftApiBaseUrl.trim().replace(/\/+$/, ""),
-      reviewerToken: draftReviewerToken.trim(),
+      reviewerToken: draftReviewerToken.trim()
     };
 
-    saveReviewerSession(nextSession);
+    saveStoredSession(REVIEWER_SESSION_STORAGE_KEY, nextSession);
     setSession(nextSession);
+    setIsSettingsOpen(false);
   }
 
-  function handleDisconnectReviewer() {
-    clearReviewerSession();
+  function clearReviewer() {
+    clearStoredSession(REVIEWER_SESSION_STORAGE_KEY);
     setDraftApiBaseUrl("");
     setDraftReviewerToken("");
-    setSession({
-      apiBaseUrl: "",
-      reviewerToken: "",
-    });
+    setSession({ apiBaseUrl: "", reviewerToken: "" });
     setQueueResponse(null);
     setPrelaunchQueueResponse(null);
-    setErrorMessage(null);
-    setPrelaunchErrorMessage(null);
-    setDetailResponse(null);
-    setPrelaunchDetailResponse(null);
-    setDetailErrorMessage(null);
-    setPrelaunchDetailErrorMessage(null);
-    setArtifactPreview(null);
-    setArtifactPreviewError(null);
     setSelectedClarificationId(null);
     setSelectedPrelaunchEventId(null);
+    setDetailResponse(null);
+    setPrelaunchDetailResponse(null);
+    setArtifactPreview(null);
+    setArtifactPreviewError(null);
     setActiveFilter("all");
+    setIsSettingsOpen(false);
   }
 
   function refreshReviewerData() {
     setRefreshNonce((value) => value + 1);
   }
 
-  async function handleRunPrelaunchScan(eventId: string) {
+  async function runPrelaunchScan(eventId: string) {
     if (!session.apiBaseUrl || !session.reviewerToken) {
       return;
     }
@@ -731,26 +868,26 @@ function ReviewerConsole() {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
-          "x-reviewer-token": session.reviewerToken,
-        },
+          "x-reviewer-token": session.reviewerToken
+        }
       });
       const payload = await response.json();
 
       if (!response.ok) {
-        throw new Error(payload?.error?.message ?? "Prelaunch scan could not be started.");
+        throw new Error(payload?.error?.message ?? "Upcoming scan could not be started.");
       }
 
       refreshReviewerData();
     } catch (error) {
       setPrelaunchDetailErrorMessage(
-        error instanceof Error ? error.message : "Prelaunch scan could not be started."
+        error instanceof Error ? error.message : "Upcoming scan could not be started."
       );
     } finally {
       setPrelaunchScanTargetId(null);
     }
   }
 
-  async function handleRunPrelaunchScanAll() {
+  async function runPrelaunchScanAll() {
     if (!session.apiBaseUrl || !session.reviewerToken) {
       return;
     }
@@ -763,1078 +900,646 @@ function ReviewerConsole() {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
-          "x-reviewer-token": session.reviewerToken,
-        },
+          "x-reviewer-token": session.reviewerToken
+        }
       });
       const payload = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          payload?.error?.message ?? "Prelaunch scan-all could not be started."
-        );
+        throw new Error(payload?.error?.message ?? "Upcoming scan-all could not be started.");
       }
 
       refreshReviewerData();
     } catch (error) {
       setPrelaunchErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Prelaunch scan-all could not be started."
+        error instanceof Error ? error.message : "Upcoming scan-all could not be started."
       );
     } finally {
       setIsPrelaunchScanAllRunning(false);
     }
   }
 
-  return (
-    <div className="relative min-h-screen overflow-x-clip bg-bg1 text-foreground">
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-72 bg-[radial-gradient(circle_at_top,_rgba(196,168,106,0.22),_transparent_58%)]"
-      />
-      <main className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col gap-8 border-x border-border-low px-6 py-10">
-        <header className="flex flex-col gap-3 border-b border-border-low pb-6 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-2">
-            <p className="text-sm uppercase tracking-[0.18em] text-muted">
-              Reviewer Console
-            </p>
-            <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-              Queue filters for off-chain review
-            </h1>
-            <p className="max-w-3xl text-sm leading-6 text-muted">
-              Segment active markets by persisted scan, funding, expiry, and
-              workflow state without waiting for on-chain voting.
-            </p>
-          </div>
-          <a
-            className="inline-flex items-center rounded-lg border border-border-low bg-card px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5 hover:shadow-sm"
-            href="/"
-          >
-            Return to public console
-          </a>
-        </header>
+  const openCount = prelaunchQueue.filter((item) => item.needsScan).length;
+  const liveNeedsAttention = activeQueue.filter((item) =>
+    item.queueStates.includes("needs_scan") || item.queueStates.includes("high_ambiguity")
+  ).length;
 
-        <section className="grid gap-4 lg:grid-cols-[1.1fr_2fr]">
-          <form
-            className="space-y-4 rounded-[1.75rem] border border-border-low bg-card p-6 shadow-[0_20px_80px_-50px_rgba(0,0,0,0.35)]"
-            onSubmit={handleConnectReviewer}
+  return (
+    <div className="min-h-screen bg-bg1 text-foreground">
+      <div className="mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
+        {isSettingsOpen ? (
+          <SettingsFlyout
+            description="Connect this desk to a backend and reviewer token when you need queue and detail access."
+            onClose={() => setIsSettingsOpen(false)}
+            title="Reviewer connection"
           >
-            <div className="space-y-1">
-              <p className="text-sm uppercase tracking-[0.16em] text-muted">
-                Authenticated Session
-              </p>
-              <h2 className="text-xl font-semibold tracking-tight">
-                Fail closed until reviewer credentials are present
-              </h2>
-            </div>
-            <label className="block space-y-2 text-sm">
-              <span className="font-medium">Backend API base URL</span>
-              <input
-                className="w-full rounded-xl border border-border-low bg-bg1 px-3 py-3 text-sm outline-none transition focus:border-border-strong"
-                name="apiBaseUrl"
-                onChange={(event) => setDraftApiBaseUrl(event.target.value)}
-                placeholder="http://127.0.0.1:3101"
-                value={draftApiBaseUrl}
-              />
-            </label>
-            <label className="block space-y-2 text-sm">
-              <span className="font-medium">Reviewer token</span>
-              <input
-                className="w-full rounded-xl border border-border-low bg-bg1 px-3 py-3 text-sm outline-none transition focus:border-border-strong"
-                name="reviewerToken"
-                onChange={(event) => setDraftReviewerToken(event.target.value)}
-                placeholder="Internal reviewer token"
-                type="password"
-                value={draftReviewerToken}
-              />
-            </label>
-            <div className="flex flex-wrap gap-3">
+            <form className="grid gap-4" onSubmit={connectReviewer}>
+              <label className="grid gap-2 text-sm">
+                <span className="text-muted">Backend API base URL</span>
+                <input
+                  className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
+                  onChange={(event) => setDraftApiBaseUrl(event.target.value)}
+                  placeholder="http://127.0.0.1:3000"
+                  value={draftApiBaseUrl}
+                />
+              </label>
+              <label className="grid gap-2 text-sm">
+                <span className="text-muted">Reviewer auth token</span>
+                <input
+                  className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
+                  onChange={(event) => setDraftReviewerToken(event.target.value)}
+                  placeholder="demo-reviewer-token"
+                  type="password"
+                  value={draftReviewerToken}
+                />
+              </label>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  className="rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:translate-y-[-1px]"
+                  disabled={!draftApiBaseUrl.trim() || !draftReviewerToken.trim()}
+                  type="submit"
+                >
+                  Save
+                </button>
+                <button
+                  className="rounded-full border border-border-low px-5 py-3 text-sm text-muted transition hover:text-foreground"
+                  onClick={refreshReviewerData}
+                  type="button"
+                >
+                  Refresh
+                </button>
+                <button
+                  className="rounded-full border border-border-low px-5 py-3 text-sm text-muted transition hover:text-foreground"
+                  onClick={clearReviewer}
+                  type="button"
+                >
+                  Clear
+                </button>
+              </div>
+            </form>
+          </SettingsFlyout>
+        ) : null}
+        <header className="grid gap-6 border-b border-border-low pb-8 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <p className="pt-1 text-xs uppercase tracking-[0.34em] text-muted">Review Desk</p>
               <button
-                className="inline-flex items-center rounded-xl bg-foreground px-4 py-3 text-sm font-semibold text-background transition hover:-translate-y-0.5 disabled:opacity-60"
-                disabled={!draftApiBaseUrl.trim() || !draftReviewerToken.trim()}
-                type="submit"
-              >
-                Load reviewer queue
-              </button>
-              <button
-                className="inline-flex items-center rounded-xl border border-border-low bg-card px-4 py-3 text-sm font-medium transition hover:-translate-y-0.5"
-                onClick={handleDisconnectReviewer}
+                aria-label="Open settings"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border-low bg-panel/80 text-muted transition hover:text-foreground"
+                onClick={() => setIsSettingsOpen(true)}
                 type="button"
               >
-                Clear session
+                <SettingsIcon />
               </button>
             </div>
-            <p className="text-xs leading-5 text-muted">
-              The route stays blocked until an internal API base URL and
-              reviewer token are provided.
+            <h1 className="font-display text-[clamp(3rem,8vw,6.6rem)] leading-[0.9] text-foreground">
+              Signal
+              <br />
+              Market Review
+            </h1>
+            <p className="max-w-2xl text-base leading-7 text-muted sm:text-lg">
+              Review live clarification requests and screen upcoming markets before launch.
             </p>
-          </form>
+          </div>
 
-          <section className="rounded-[1.75rem] border border-border-low bg-card p-6 shadow-[0_20px_80px_-50px_rgba(0,0,0,0.35)]">
-            <div className="flex flex-col gap-4 border-b border-border-low pb-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm uppercase tracking-[0.16em] text-muted">
-                    Reviewer surface
-                  </p>
-                  <p className="text-sm text-muted">
-                    Switch between active paid clarifications and upcoming prelaunch review.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className={`inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                      reviewerSurface === "active"
-                        ? "border-foreground bg-foreground text-background"
-                        : "border-border-low bg-cream"
-                    }`}
-                    onClick={() => {
-                      setReviewerSurface("active");
-                      setSelectedPrelaunchEventId(null);
-                    }}
-                    type="button"
-                  >
-                    Active queue
-                  </button>
-                  <button
-                    className={`inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                      reviewerSurface === "prelaunch"
-                        ? "border-foreground bg-foreground text-background"
-                        : "border-border-low bg-cream"
-                    }`}
-                    onClick={() => {
-                      setReviewerSurface("prelaunch");
-                      setSelectedClarificationId(null);
-                    }}
-                    type="button"
-                  >
-                    Prelaunch queue
-                  </button>
-                  {session.apiBaseUrl ? (
-                    <button
-                      className="inline-flex items-center rounded-lg border border-border-low bg-cream px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5"
-                      onClick={refreshReviewerData}
-                      type="button"
-                    >
-                      Refresh
-                    </button>
-                  ) : null}
-                  {session.apiBaseUrl && reviewerSurface === "prelaunch" ? (
-                    <button
-                      className="inline-flex items-center rounded-lg border border-border-low bg-card px-3 py-2 text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60"
-                      disabled={isPrelaunchScanAllRunning}
-                      onClick={handleRunPrelaunchScanAll}
-                      type="button"
-                    >
-                      {isPrelaunchScanAllRunning ? "Scanning upcoming…" : "Scan all upcoming"}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-
-              {reviewerSurface === "active" ? (
-                <div
-                  className="flex flex-wrap gap-2"
-                  data-testid="reviewer-filter-list"
-                >
-                  <button
-                    data-testid="filter-all"
-                    className={`rounded-full border px-3 py-2 text-sm transition ${
-                      activeFilter === "all"
-                        ? "border-foreground bg-foreground text-background"
-                        : "border-border-low bg-bg1 text-foreground"
-                    }`}
-                    onClick={() => setActiveFilter("all")}
-                    type="button"
-                  >
-                    All markets
-                  </button>
-                  {filters.map((filter) => (
-                    <button
-                      data-testid={`filter-${filter.key}`}
-                      className={`rounded-full border px-3 py-2 text-sm transition ${
-                        activeFilter === filter.key
-                          ? "border-foreground bg-foreground text-background"
-                          : "border-border-low bg-bg1 text-foreground"
-                      }`}
-                      key={filter.key}
-                      onClick={() => setActiveFilter(filter.key)}
-                      type="button"
-                    >
-                      {filter.label}{" "}
-                      <span className="opacity-70">({filter.count})</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm leading-6 text-muted">
-                  Upcoming Gemini markets live here before they can receive paid clarification requests.
-                  Use this queue to proactively scan contracts, category context, and launch timing.
-                </p>
-              )}
+          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
+              <p className="text-xs uppercase tracking-[0.22em] text-muted">Surface</p>
+              <p className="mt-3 text-3xl font-semibold text-foreground">
+                {reviewerSurface === "prelaunch" ? "Upcoming" : "Live"}
+              </p>
             </div>
+            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
+              <p className="text-xs uppercase tracking-[0.22em] text-muted">Unscanned Upcoming</p>
+              <p className="mt-3 text-3xl font-semibold text-foreground">{openCount}</p>
+            </div>
+            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
+              <p className="text-xs uppercase tracking-[0.22em] text-muted">Live Attention</p>
+              <p className="mt-3 text-3xl font-semibold text-foreground">{liveNeedsAttention}</p>
+            </div>
+          </div>
+        </header>
 
-            {reviewerSurface === "active" && isLoading ? (
-              <div className="py-10 text-sm text-muted">
-                Loading reviewer queue…
+        <main className="mt-8 grid gap-6 xl:grid-cols-[0.88fr_1.12fr]">
+          <div className="space-y-6">
+            <SectionCard eyebrow="Overview" title="What this desk is for">
+              <div className="grid gap-4">
+                <div className="rounded-[1.6rem] border border-border-low bg-card/70 p-4">
+                  <p className="text-sm font-medium text-foreground">Live clarifications</p>
+                  <p className="mt-2 text-sm leading-6 text-muted">
+                    Review paid clarification requests for Gemini prediction markets,
+                    including ambiguity, funding, timing, and final wording.
+                  </p>
+                </div>
+                <div className="rounded-[1.6rem] border border-border-low bg-card/70 p-4">
+                  <p className="text-sm font-medium text-foreground">Upcoming review</p>
+                  <p className="mt-2 text-sm leading-6 text-muted">
+                    Screen markets before trading starts so unclear resolution text
+                    and contract structure can be caught early.
+                  </p>
+                </div>
               </div>
-            ) : null}
+            </SectionCard>
 
-            {reviewerSurface === "prelaunch" && isPrelaunchLoading ? (
-              <div className="py-10 text-sm text-muted">
-                Loading prelaunch queue…
-              </div>
-            ) : null}
-
-            {reviewerSurface === "active" && !isLoading && errorMessage ? (
-              <div
-                className="mt-4 rounded-2xl border border-border-low bg-bg1 p-4 text-sm text-muted"
-                data-testid="reviewer-queue-error"
-              >
-                {errorMessage}
-              </div>
-            ) : null}
-
-            {reviewerSurface === "prelaunch" &&
-            !isPrelaunchLoading &&
-            prelaunchErrorMessage ? (
-              <div className="mt-4 rounded-2xl border border-border-low bg-bg1 p-4 text-sm text-muted">
-                {prelaunchErrorMessage}
-              </div>
-            ) : null}
-
-            {reviewerSurface === "active" &&
-            !isLoading &&
-            !errorMessage &&
-            !session.apiBaseUrl ? (
-              <div
-                className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1 p-6 text-sm leading-6 text-muted"
-                data-testid="reviewer-session-blocked"
-              >
-                Enter reviewer credentials to unlock the queue. Unauthorized
-                sessions stay out of reviewer-only data.
-              </div>
-            ) : null}
-
-            {reviewerSurface === "prelaunch" &&
-            !isPrelaunchLoading &&
-            !prelaunchErrorMessage &&
-            !session.apiBaseUrl ? (
-              <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1 p-6 text-sm leading-6 text-muted">
-                Enter reviewer credentials to unlock the prelaunch queue.
-              </div>
-            ) : null}
-
-            {reviewerSurface === "active" &&
-            !isLoading &&
-            !errorMessage &&
-            session.apiBaseUrl &&
-            queueResponse &&
-            queueResponse.queue.length === 0 ? (
-              <div
-                className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1 p-6 text-sm leading-6 text-muted"
-                data-testid="reviewer-empty-state"
-              >
-                No markets match the <strong>{activeFilter}</strong> filter
-                right now.
-              </div>
-            ) : null}
-
-            {reviewerSurface === "prelaunch" &&
-            !isPrelaunchLoading &&
-            !prelaunchErrorMessage &&
-            session.apiBaseUrl &&
-            prelaunchQueueResponse &&
-            prelaunchQueue.length === 0 ? (
-              <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1 p-6 text-sm leading-6 text-muted">
-                No upcoming Gemini markets are queued for proactive review right now.
-              </div>
-            ) : null}
-
-            {reviewerSurface === "active" &&
-            !isLoading &&
-            !errorMessage &&
-            queueResponse &&
-            queueResponse.queue.length > 0 ? (
-              <div className="mt-5 grid gap-4">
-                {queueResponse.queue.map((item) => (
-                  <article
-                    data-testid={`queue-item-${item.eventId}`}
-                    className={`rounded-[1.5rem] border bg-bg1 p-5 transition ${
-                      selectedClarificationId === item.latestClarificationId &&
-                      item.latestClarificationId
-                        ? "border-foreground shadow-[0_24px_70px_-50px_rgba(0,0,0,0.5)]"
-                        : "border-border-low"
-                    }`}
-                    key={item.eventId}
+            <SectionCard
+              eyebrow="Modes"
+              title="Move between live clarifications and upcoming review"
+              actions={
+                reviewerSurface === "prelaunch" && session.apiBaseUrl ? (
+                  <button
+                    className="rounded-full border border-border-low px-4 py-2 text-sm text-muted transition hover:text-foreground disabled:opacity-60"
+                    disabled={isPrelaunchScanAllRunning}
+                    onClick={runPrelaunchScanAll}
+                    type="button"
                   >
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="space-y-3">
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-[0.18em] text-muted">
-                            {item.eventId}
-                          </p>
-                          <h3 className="text-xl font-semibold tracking-tight">
-                            {item.marketTitle}
-                          </h3>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {item.queueStates.map((state) => (
-                            <span
-                              className="rounded-full border border-border-low bg-card px-3 py-1 text-xs uppercase tracking-[0.12em] text-muted"
-                              key={state}
-                            >
-                              {formatQueueStateLabel(state)}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <dl className="grid min-w-[16rem] grid-cols-2 gap-3 text-sm">
-                        <div className="rounded-xl border border-border-low bg-card p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Ambiguity
-                          </dt>
-                          <dd className="mt-1 text-lg font-semibold">
-                            {formatAmbiguityScore(item.ambiguityScore)}
-                          </dd>
-                        </div>
-                        <div className="rounded-xl border border-border-low bg-card p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Vote status
-                          </dt>
-                          <dd className="mt-1 text-lg font-semibold">
-                            {formatQueueStateLabel(item.voteStatus)}
-                          </dd>
-                        </div>
-                        <div className="rounded-xl border border-border-low bg-card p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Funding
-                          </dt>
-                          <dd className="mt-1 text-lg font-semibold">
-                            {item.fundingProgress.raisedAmount}/
-                            {item.fundingProgress.targetAmount} USDC
-                          </dd>
-                        </div>
-                        <div className="rounded-xl border border-border-low bg-card p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Review window
-                          </dt>
-                          <dd className="mt-1 text-lg font-semibold">
-                            {Math.round(
-                              item.reviewWindow.review_window_secs / 3600
-                            )}
-                            h
-                          </dd>
-                        </div>
-                      </dl>
-                    </div>
-
-                    <div className="mt-5 grid gap-3 text-sm text-muted md:grid-cols-3">
-                      <div className="rounded-xl border border-border-low bg-card p-3">
-                        <p className="text-xs uppercase tracking-[0.12em]">
-                          Market ends
-                        </p>
-                        <p className="mt-2 text-foreground">
-                          {formatTimestamp(item.endTime)}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-border-low bg-card p-3">
-                        <p className="text-xs uppercase tracking-[0.12em]">
-                          Activity signal
-                        </p>
-                        <p className="mt-2 text-foreground">
-                          {formatQueueStateLabel(
-                            item.reviewWindow.activity_signal
-                          )}
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-border-low bg-card p-3">
-                        <p className="text-xs uppercase tracking-[0.12em]">
-                          Contributors
-                        </p>
-                        <p className="mt-2 text-foreground">
-                          {item.fundingProgress.contributorCount}{" "}
-                          reviewer-facing funding records
-                        </p>
-                      </div>
-                    </div>
-
-                    <p className="mt-4 text-sm leading-6 text-muted">
-                      {item.reviewWindow.review_window_reason}
-                    </p>
-
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border-low pt-4">
-                      <p className="text-xs uppercase tracking-[0.14em] text-muted">
-                        {item.latestClarificationId
-                          ? `Latest clarification ${item.latestClarificationId}`
-                          : "No clarification detail yet"}
-                      </p>
+                    {isPrelaunchScanAllRunning ? "Scanning…" : "Scan all upcoming"}
+                  </button>
+                ) : null
+              }
+            >
+              <div className="space-y-4">
+                <SurfaceSwitch
+                  onChange={(next) => {
+                    setReviewerSurface(next);
+                    if (next === "active") {
+                      setSelectedPrelaunchEventId(null);
+                    } else {
+                      setSelectedClarificationId(null);
+                    }
+                  }}
+                  value={reviewerSurface}
+                />
+                {reviewerSurface === "active" ? (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className={`rounded-full px-3 py-2 text-sm transition ${
+                        activeFilter === "all"
+                          ? "bg-foreground text-background"
+                          : "border border-border-low text-muted"
+                      }`}
+                      onClick={() => setActiveFilter("all")}
+                      type="button"
+                    >
+                      All
+                    </button>
+                    {filters.map((filter) => (
                       <button
-                        data-testid={`open-detail-${item.eventId}`}
-                        className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-medium transition ${
-                          item.latestClarificationId
-                            ? "border border-border-low bg-card hover:-translate-y-0.5"
-                            : "cursor-not-allowed border border-border-low bg-card/60 text-muted"
+                        key={filter.key}
+                        className={`rounded-full px-3 py-2 text-sm transition ${
+                          activeFilter === filter.key
+                            ? "bg-foreground text-background"
+                            : "border border-border-low text-muted"
                         }`}
-                        disabled={!item.latestClarificationId}
-                        onClick={() =>
-                          setSelectedClarificationId(item.latestClarificationId)
-                        }
+                        onClick={() => setActiveFilter(filter.key)}
                         type="button"
                       >
-                        {item.latestClarificationId
-                          ? "Open reviewer detail"
-                          : "Awaiting paid request"}
+                        {filter.label} ({filter.count})
                       </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : null}
-
-            {reviewerSurface === "prelaunch" &&
-            !isPrelaunchLoading &&
-            !prelaunchErrorMessage &&
-            prelaunchQueue.length > 0 ? (
-              <div className="mt-5 grid gap-4">
-                {prelaunchQueue.map((item) => (
-                  <article
-                    className={`rounded-[1.5rem] border bg-bg1 p-5 transition ${
-                      selectedPrelaunchEventId === item.eventId
-                        ? "border-foreground shadow-[0_24px_70px_-50px_rgba(0,0,0,0.5)]"
-                        : "border-border-low"
-                    }`}
-                    key={item.eventId}
-                  >
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="space-y-3">
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-[0.18em] text-muted">
-                            {item.eventId} {item.ticker ? `• ${item.ticker}` : ""}
-                          </p>
-                          <h3 className="text-xl font-semibold tracking-tight">
-                            {item.marketTitle}
-                          </h3>
-                          <p className="text-sm text-muted">
-                            {item.category ?? "Uncategorized"} • {item.contracts.length} contract
-                            {item.contracts.length === 1 ? "" : "s"}
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <span className="rounded-full border border-border-low bg-card px-3 py-1 text-xs uppercase tracking-[0.12em] text-muted">
-                            {item.status ?? "upcoming"}
-                          </span>
-                          {item.needsScan ? (
-                            <span className="rounded-full border border-border-low bg-card px-3 py-1 text-xs uppercase tracking-[0.12em] text-muted">
-                              Needs scan
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <dl className="grid min-w-[16rem] grid-cols-2 gap-3 text-sm">
-                        <div className="rounded-xl border border-border-low bg-card p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Ambiguity
-                          </dt>
-                          <dd className="mt-1 text-lg font-semibold">
-                            {formatAmbiguityScore(item.ambiguityScore)}
-                          </dd>
-                        </div>
-                        <div className="rounded-xl border border-border-low bg-card p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Review window
-                          </dt>
-                          <dd className="mt-1 text-lg font-semibold">
-                            {Math.round(item.reviewWindow.review_window_secs / 3600)}h
-                          </dd>
-                        </div>
-                        <div className="rounded-xl border border-border-low bg-card p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Starts
-                          </dt>
-                          <dd className="mt-1 text-sm font-semibold">
-                            {formatOptionalTimestamp(item.startsAt)}
-                          </dd>
-                        </div>
-                        <div className="rounded-xl border border-border-low bg-card p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Expires
-                          </dt>
-                          <dd className="mt-1 text-sm font-semibold">
-                            {formatTimestamp(item.endTime)}
-                          </dd>
-                        </div>
-                      </dl>
-                    </div>
-
-                    <p className="mt-4 text-sm leading-6 text-muted">
-                      {item.reviewWindow.review_window_reason}
-                    </p>
-
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border-low pt-4">
-                      <p className="text-xs uppercase tracking-[0.14em] text-muted">
-                        {item.latestScanId
-                          ? `Latest scan ${item.latestScanId}`
-                          : "No prelaunch scan recorded yet"}
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          className="inline-flex items-center rounded-full border border-border-low bg-card px-4 py-2 text-sm font-medium transition hover:-translate-y-0.5"
-                          onClick={() => setSelectedPrelaunchEventId(item.eventId)}
-                          type="button"
-                        >
-                          Open prelaunch detail
-                        </button>
-                        <button
-                          className="inline-flex items-center rounded-full border border-border-low bg-cream px-4 py-2 text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60"
-                          disabled={prelaunchScanTargetId === item.eventId}
-                          onClick={() => void handleRunPrelaunchScan(item.eventId)}
-                          type="button"
-                        >
-                          {prelaunchScanTargetId === item.eventId ? "Scanning…" : "Run scan"}
-                        </button>
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : null}
-
-            <section className="mt-6 rounded-[1.75rem] border border-border-low bg-bg1 p-6">
-              <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border-low pb-4">
-                <div className="space-y-1">
-                  <p className="text-sm uppercase tracking-[0.16em] text-muted">
-                    {reviewerSurface === "active"
-                      ? "Clarification detail"
-                      : "Prelaunch detail"}
-                  </p>
-                  <h3 className="text-2xl font-semibold tracking-tight">
-                    {reviewerSurface === "active"
-                      ? "Review the latest off-chain interpretation record"
-                      : "Inspect upcoming Gemini markets before they go live"}
-                  </h3>
-                </div>
-                {reviewerSurface === "active" && selectedClarificationId ? (
-                  <span className="rounded-full border border-border-low bg-card px-3 py-1 text-xs uppercase tracking-[0.14em] text-muted">
-                    {selectedClarificationId}
-                  </span>
-                ) : null}
-                {reviewerSurface === "prelaunch" && selectedPrelaunchEventId ? (
-                  <span className="rounded-full border border-border-low bg-card px-3 py-1 text-xs uppercase tracking-[0.14em] text-muted">
-                    {selectedPrelaunchEventId}
-                  </span>
+                    ))}
+                  </div>
+                ) : availableCategories.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {availableCategories.slice(0, 8).map((category) => (
+                      <span
+                        key={category}
+                        className="rounded-full border border-border-low px-3 py-2 text-xs uppercase tracking-[0.16em] text-muted"
+                      >
+                        {category}
+                      </span>
+                    ))}
+                  </div>
                 ) : null}
               </div>
+            </SectionCard>
 
-              {reviewerSurface === "active" && isDetailLoading ? (
-                <div className="py-10 text-sm text-muted">
-                  Loading clarification detail…
+            <SectionCard
+              eyebrow="Queue"
+              title={
+                reviewerSurface === "prelaunch"
+                  ? "Upcoming markets waiting for editorial review"
+                  : "Live clarification operations"
+              }
+            >
+              {!session.apiBaseUrl || !session.reviewerToken ? (
+                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-sm leading-6 text-muted">
+                  Add reviewer credentials to load queue data. The interface stays closed
+                  until the token is present.
                 </div>
               ) : null}
 
-              {reviewerSurface === "prelaunch" && isPrelaunchDetailLoading ? (
-                <div className="py-10 text-sm text-muted">
-                  Loading prelaunch detail…
+              {reviewerSurface === "active" && isLoading ? (
+                <div className="text-sm text-muted">Loading live queue…</div>
+              ) : null}
+              {reviewerSurface === "prelaunch" && isPrelaunchLoading ? (
+                <div className="text-sm text-muted">Loading upcoming queue…</div>
+              ) : null}
+              {reviewerSurface === "active" && errorMessage ? (
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">
+                  {errorMessage}
+                </div>
+              ) : null}
+              {reviewerSurface === "prelaunch" && prelaunchErrorMessage ? (
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">
+                  {prelaunchErrorMessage}
                 </div>
               ) : null}
 
-              {reviewerSurface === "active" && !isDetailLoading && detailErrorMessage ? (
-                <div
-                  className="mt-4 rounded-2xl border border-border-low bg-card p-4 text-sm text-muted"
-                  data-testid="reviewer-detail-error"
-                >
-                  {detailErrorMessage}
+              {reviewerSurface === "active" && !isLoading && !errorMessage && activeQueue.length === 0 ? (
+                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-sm leading-6 text-muted">
+                  No live markets match the current filter.
                 </div>
               ) : null}
 
               {reviewerSurface === "prelaunch" &&
-              !isPrelaunchDetailLoading &&
-              prelaunchDetailErrorMessage ? (
-                <div className="mt-4 rounded-2xl border border-border-low bg-card p-4 text-sm text-muted">
+              !isPrelaunchLoading &&
+              !prelaunchErrorMessage &&
+              prelaunchQueue.length === 0 ? (
+                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-sm leading-6 text-muted">
+                  No upcoming markets are currently queued for review.
+                </div>
+              ) : null}
+
+              {reviewerSurface === "active" && activeQueue.length > 0 ? (
+                <div className="grid gap-4">
+                  {activeQueue.map((item) => (
+                    <article
+                      key={item.eventId}
+                      className={`rounded-[1.6rem] border p-5 transition ${
+                        item.latestClarificationId &&
+                        item.latestClarificationId === selectedClarificationId
+                          ? "border-foreground bg-card shadow-[0_18px_50px_-35px_rgba(4,13,22,0.9)]"
+                          : "border-border-low bg-card/70"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="space-y-2">
+                          <p className="text-xs uppercase tracking-[0.2em] text-muted">
+                            {item.eventId}
+                          </p>
+                          <h3 className="text-xl font-semibold text-foreground">
+                            {item.marketTitle}
+                          </h3>
+                          <div className="flex flex-wrap gap-2">
+                            {item.queueStates.map((state) => (
+                              <span
+                                key={state}
+                                className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-muted"
+                              >
+                                {formatQueueStateLabel(state)}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs uppercase tracking-[0.18em] text-muted">
+                            Ambiguity
+                          </p>
+                          <p className="mt-2 text-3xl font-semibold text-foreground">
+                            {formatAmbiguityScore(item.ambiguityScore)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Funding</p>
+                          <p className="mt-2 text-sm text-foreground">
+                            {item.fundingProgress.raisedAmount}/{item.fundingProgress.targetAmount}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                            Review window
+                          </p>
+                          <p className="mt-2 text-sm text-foreground">
+                            {Math.round(item.reviewWindow.review_window_secs / 3600)}h
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Ends</p>
+                          <p className="mt-2 text-sm text-foreground">
+                            {formatTimestamp(item.endTime)}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="mt-4 text-sm leading-6 text-muted">
+                        {item.reviewWindow.review_window_reason}
+                      </p>
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border-low pt-4">
+                        <span className="text-xs uppercase tracking-[0.16em] text-muted">
+                          {item.latestClarificationId
+                            ? `Latest ${item.latestClarificationId}`
+                            : "Waiting for first paid clarification"}
+                        </span>
+                        <button
+                          className="rounded-full border border-border-low px-4 py-2 text-sm text-muted transition hover:text-foreground disabled:opacity-50"
+                          disabled={!item.latestClarificationId}
+                          onClick={() => setSelectedClarificationId(item.latestClarificationId)}
+                          type="button"
+                        >
+                          Open detail
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+
+              {reviewerSurface === "prelaunch" && prelaunchQueue.length > 0 ? (
+                <div className="grid gap-4">
+                  {prelaunchQueue.map((item) => (
+                    <article
+                      key={item.eventId}
+                      className={`rounded-[1.6rem] border p-5 transition ${
+                        item.eventId === selectedPrelaunchEventId
+                          ? "border-foreground bg-card shadow-[0_18px_50px_-35px_rgba(4,13,22,0.9)]"
+                          : "border-border-low bg-card/70"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="space-y-2">
+                          <p className="text-xs uppercase tracking-[0.2em] text-muted">
+                            {item.eventId} {item.ticker ? `• ${item.ticker}` : ""}
+                          </p>
+                          <h3 className="text-xl font-semibold text-foreground">
+                            {item.marketTitle}
+                          </h3>
+                          <div className="flex flex-wrap gap-2">
+                            <span className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-muted">
+                              {item.category ?? "Uncategorized"}
+                            </span>
+                            <span className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-muted">
+                              {item.status ?? "upcoming"}
+                            </span>
+                            {item.needsScan ? (
+                              <span className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-signal">
+                                Needs scan
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs uppercase tracking-[0.18em] text-muted">
+                            Editorial temperature
+                          </p>
+                          <p className="mt-2 text-xl font-semibold text-foreground">
+                            {getReviewTemperature(item.ambiguityScore)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Starts</p>
+                          <p className="mt-2 text-sm text-foreground">
+                            {formatOptionalTimestamp(item.startsAt)}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Ends</p>
+                          <p className="mt-2 text-sm text-foreground">
+                            {formatTimestamp(item.endTime)}
+                          </p>
+                        </div>
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                            Contracts
+                          </p>
+                          <p className="mt-2 text-sm text-foreground">{item.contracts.length}</p>
+                        </div>
+                      </div>
+                      <p className="mt-4 text-sm leading-6 text-muted">
+                        {item.reviewWindow.review_window_reason}
+                      </p>
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border-low pt-4">
+                        <span className="text-xs uppercase tracking-[0.16em] text-muted">
+                          {item.latestScanId ? `Latest ${item.latestScanId}` : "No stored scan"}
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            className="rounded-full border border-border-low px-4 py-2 text-sm text-muted transition hover:text-foreground"
+                            onClick={() => setSelectedPrelaunchEventId(item.eventId)}
+                            type="button"
+                          >
+                            Inspect
+                          </button>
+                          <button
+                            className="rounded-full bg-foreground px-4 py-2 text-sm text-background transition disabled:opacity-60"
+                            disabled={prelaunchScanTargetId === item.eventId}
+                            onClick={() => void runPrelaunchScan(item.eventId)}
+                            type="button"
+                          >
+                            {prelaunchScanTargetId === item.eventId ? "Scanning…" : "Run scan"}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </SectionCard>
+
+          </div>
+
+          <div className="space-y-6">
+            <SectionCard
+              eyebrow="Detail"
+              title={
+                reviewerSurface === "prelaunch"
+                  ? "Upcoming market inspection"
+                  : "Clarification dossier"
+              }
+            >
+              {reviewerSurface === "active" && isDetailLoading ? (
+                <div className="text-sm text-muted">Loading clarification detail…</div>
+              ) : null}
+              {reviewerSurface === "prelaunch" && isPrelaunchDetailLoading ? (
+                <div className="text-sm text-muted">Loading upcoming market detail…</div>
+              ) : null}
+              {reviewerSurface === "active" && detailErrorMessage ? (
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">
+                  {detailErrorMessage}
+                </div>
+              ) : null}
+              {reviewerSurface === "prelaunch" && prelaunchDetailErrorMessage ? (
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">
                   {prelaunchDetailErrorMessage}
                 </div>
               ) : null}
 
-              {reviewerSurface === "active" &&
-              !isDetailLoading &&
-              !detailErrorMessage &&
-              !selectedClarificationId ? (
-                <div
-                  className="mt-4 rounded-2xl border border-dashed border-border-low bg-card p-6 text-sm leading-6 text-muted"
-                  data-testid="reviewer-detail-empty"
-                >
-                  Pick a queue item with a paid clarification to inspect market
-                  text, interpretation output, funding history, artifact
-                  reference, and vote placeholders.
+              {reviewerSurface === "active" && !detail && !isDetailLoading && !detailErrorMessage ? (
+                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-sm leading-6 text-muted">
+                  Select a live clarification to inspect wording, funding history, artifact output,
+                  and the current review window.
                 </div>
               ) : null}
 
               {reviewerSurface === "prelaunch" &&
+              !prelaunchDetail &&
               !isPrelaunchDetailLoading &&
-              !prelaunchDetailErrorMessage &&
-              !selectedPrelaunchEventId ? (
-                <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-card p-6 text-sm leading-6 text-muted">
-                  Select an upcoming market to inspect category context, contract structure,
-                  terms links, and the latest proactive ambiguity scan.
+              !prelaunchDetailErrorMessage ? (
+                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-sm leading-6 text-muted">
+                  Select an upcoming market to inspect contract structure, category context, and
+                  the latest ambiguity scan.
                 </div>
               ) : null}
 
-              {reviewerSurface === "active" && !isDetailLoading && !detailErrorMessage && detail ? (
-                <div
-                  className="mt-5 grid gap-5"
-                  data-testid="reviewer-detail-panel"
-                >
-                  <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                    <article
-                      className="rounded-[1.5rem] border border-border-low bg-card p-5"
-                      data-testid="reviewer-market-section"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted">
-                            Market text
-                          </p>
-                          <h4 className="text-xl font-semibold tracking-tight">
-                            {detail.market.title ?? detail.eventId}
-                          </h4>
-                        </div>
-                        <span className="rounded-full border border-border-low bg-bg1 px-3 py-1 text-xs uppercase tracking-[0.14em] text-muted">
-                          {detail.status}
-                        </span>
-                      </div>
-                      <p className="mt-4 text-sm leading-7 text-muted">
-                        {detail.market.resolutionText ??
-                          "No market text cached for this clarification."}
-                      </p>
-                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                          <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Market closes
-                          </p>
-                          <p className="mt-2 text-sm text-foreground">
-                            {detail.market.endTime
-                              ? formatTimestamp(detail.market.endTime)
-                              : "Unavailable"}
-                          </p>
-                        </div>
-                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                          <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Source market
-                          </p>
-                          <p className="mt-2 text-sm text-foreground">
-                            {detail.market.slug ?? "No slug cached"}
-                          </p>
-                        </div>
-                      </div>
-                      {detail.market.category || detail.market.ticker ? (
-                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                          <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                              Category
-                            </p>
-                            <p className="mt-2 text-sm text-foreground">
-                              {detail.market.category ?? "Unavailable"}
-                            </p>
-                          </div>
-                          <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                              Gemini ticker
-                            </p>
-                            <p className="mt-2 text-sm text-foreground">
-                              {detail.market.ticker ?? "Unavailable"}
-                            </p>
-                          </div>
-                        </div>
-                      ) : null}
-                      {detail.market.tags && detail.market.tags.length > 0 ? (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {detail.market.tags.map((tag) => (
-                            <span
-                              className="rounded-full border border-border-low bg-bg1 px-3 py-1 text-xs uppercase tracking-[0.12em] text-muted"
-                              key={tag}
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-                      {detail.market.contracts && detail.market.contracts.length > 0 ? (
-                        <div className="mt-4 rounded-xl border border-border-low bg-bg1 p-4">
-                          <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Cached contracts
-                          </p>
-                          <div className="mt-3 grid gap-3">
-                            {detail.market.contracts.slice(0, 3).map((contract) => (
-                              <div
-                                className="rounded-xl border border-border-low bg-card p-3"
-                                key={contract.id ?? contract.ticker ?? contract.label ?? "contract"}
-                              >
-                                <p className="text-sm font-semibold text-foreground">
-                                  {contract.label ?? "Unnamed contract"}
-                                </p>
-                                <p className="mt-1 text-xs uppercase tracking-[0.12em] text-muted">
-                                  {contract.instrumentSymbol ?? contract.ticker ?? "No Gemini symbol"}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                      {detail.market.url ? (
-                        <a
-                          className="mt-4 inline-flex text-sm font-medium underline underline-offset-4"
-                          href={detail.market.url}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          Open cached market URL
-                        </a>
-                      ) : null}
-                    </article>
-
-                    <article
-                      className="rounded-[1.5rem] border border-border-low bg-card p-5"
-                      data-testid="reviewer-review-window-section"
-                    >
-                      <div className="space-y-1">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted">
-                          Review window
+              {reviewerSurface === "active" && detail ? (
+                <div className="grid gap-5">
+                  <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-muted">
+                          {detail.market.marketId ?? detail.eventId}
                         </p>
-                        <h4 className="text-xl font-semibold tracking-tight">
-                          {Math.round(detail.review_window_secs / 3600)} hour
-                          response window
-                        </h4>
+                        <h3 className="mt-2 text-2xl font-semibold text-foreground">
+                          {detail.market.title ?? detail.eventId}
+                        </h3>
                       </div>
-                      <dl className="mt-5 grid gap-3 text-sm">
-                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Time bucket
-                          </dt>
-                          <dd className="mt-2 text-foreground">
-                            {formatQueueStateLabel(detail.time_to_end_bucket)}
-                          </dd>
-                        </div>
-                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Activity signal
-                          </dt>
-                          <dd className="mt-2 text-foreground">
-                            {formatQueueStateLabel(detail.activity_signal)}
-                          </dd>
-                        </div>
-                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Ambiguity
-                          </dt>
-                          <dd className="mt-2 text-foreground">
-                            {detail.ambiguity_score.toFixed(2)}
-                          </dd>
-                        </div>
-                      </dl>
-                      <p className="mt-4 text-sm leading-6 text-muted">
-                        {detail.review_window_reason}
-                      </p>
-                    </article>
-                  </section>
-
-                  <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                    <article
-                      className="rounded-[1.5rem] border border-border-low bg-card p-5"
-                      data-testid="reviewer-llm-section"
-                    >
-                      <div className="space-y-1">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted">
-                          LLM interpretation
+                      <div className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-muted">
+                        {detail.status}
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                        <p className="text-xs uppercase tracking-[0.14em] text-muted">Question</p>
+                        <p className="mt-2 text-sm leading-6 text-foreground">{detail.question}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                        <p className="text-xs uppercase tracking-[0.14em] text-muted">Timing</p>
+                        <p className="mt-2 text-sm leading-6 text-foreground">
+                          Requested {formatTimestamp(detail.createdAt)}
+                          <br />
+                          Updated {formatTimestamp(detail.updatedAt)}
                         </p>
-                        <h4 className="text-xl font-semibold tracking-tight">
-                          {detail.llmOutput?.verdict
-                            ? formatQueueStateLabel(detail.llmOutput.verdict)
-                            : "Interpretation unavailable"}
-                        </h4>
                       </div>
+                    </div>
+                    <div className="mt-4 rounded-[1.4rem] border border-border-low bg-bg1/80 p-4">
+                      <p className="text-xs uppercase tracking-[0.16em] text-muted">
+                        Source market text
+                      </p>
+                      <p className="mt-3 text-sm leading-7 text-foreground">
+                        {detail.market.resolutionText ?? "No market text cached."}
+                      </p>
+                    </div>
+                  </article>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                      <p className="text-xs uppercase tracking-[0.18em] text-muted">
+                        Interpretation
+                      </p>
                       {detail.llmOutput ? (
-                        <div className="mt-5 grid gap-4">
-                          <div className="rounded-xl border border-border-low bg-bg1 p-4">
-                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                              Ambiguity summary
+                        <div className="mt-4 space-y-4">
+                          <div>
+                            <p className="text-2xl font-semibold text-foreground">
+                              {getReviewTemperature(detail.llmOutput.ambiguity_score)}
                             </p>
-                            <p className="mt-2 text-sm leading-6 text-foreground">
+                            <p className="mt-2 text-sm text-muted">
                               {detail.llmOutput.ambiguity_summary}
                             </p>
                           </div>
-                          <div className="rounded-xl border border-border-low bg-bg1 p-4">
-                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                              Suggested edited market text
+                          <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                            <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                              Suggested wording
                             </p>
                             <p className="mt-2 text-sm leading-6 text-foreground">
                               {detail.llmOutput.suggested_market_text}
                             </p>
                           </div>
-                          <div className="rounded-xl border border-border-low bg-bg1 p-4">
-                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                              Suggested clarification note
+                          <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                            <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                              Note
                             </p>
                             <p className="mt-2 text-sm leading-6 text-foreground">
                               {detail.llmOutput.suggested_note}
                             </p>
                           </div>
-                          <div className="rounded-xl border border-border-low bg-bg1 p-4">
-                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                              Reasoning
-                            </p>
-                            <p className="mt-2 text-sm leading-6 text-foreground">
-                              {detail.llmOutput.reasoning}
-                            </p>
-                            <p className="mt-3 text-xs uppercase tracking-[0.12em] text-muted">
-                              Cited clause
-                            </p>
-                            <p className="mt-2 text-sm leading-6 text-foreground">
-                              {detail.llmOutput.cited_clause}
-                            </p>
-                          </div>
                         </div>
                       ) : (
-                        <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
-                          No completed LLM output is available on this
-                          clarification yet.
+                        <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-sm text-muted">
+                          No LLM output has been persisted for this clarification.
                         </div>
                       )}
                     </article>
 
-                    <div className="grid gap-4">
-                      <article
-                        className="rounded-[1.5rem] border border-border-low bg-card p-5"
-                        data-testid="reviewer-artifact-section"
-                      >
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted">
-                            Artifact preview
-                          </p>
-                          <h4 className="text-xl font-semibold tracking-tight">
-                            {detail.artifact
-                              ? detail.artifact.cid
-                              : "No artifact published"}
-                          </h4>
-                        </div>
-                        {detail.artifact ? (
-                          <div className="mt-5 grid gap-3 text-sm">
-                            <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                              <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                                Stored reference
-                              </p>
-                              <p className="mt-2 break-all text-foreground">
-                                {detail.artifact.url}
-                              </p>
-                            </div>
-                            {isArtifactPreviewLoading ? (
-                              <div className="rounded-xl border border-border-low bg-bg1 p-3 text-muted">
-                                Loading authenticated artifact preview…
-                              </div>
-                            ) : null}
-                            {!isArtifactPreviewLoading &&
-                            artifactPreviewError ? (
-                              <div className="rounded-xl border border-border-low bg-bg1 p-3 text-muted">
-                                {artifactPreviewError}
-                              </div>
-                            ) : null}
-                            {!isArtifactPreviewLoading &&
-                            !artifactPreviewError &&
-                            artifactPreview ? (
-                              <div className="grid gap-3">
-                                <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                                  <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                                    Original market text
-                                  </p>
-                                  <p className="mt-2 leading-6 text-foreground">
-                                    {artifactPreview.marketText}
-                                  </p>
-                                </div>
-                                <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                                  <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                                    Suggested edited text
-                                  </p>
-                                  <p className="mt-2 leading-6 text-foreground">
-                                    {artifactPreview.suggestedEditedMarketText}
-                                  </p>
-                                </div>
-                                <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                                  <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                                    Clarification note
-                                  </p>
-                                  <p className="mt-2 leading-6 text-foreground">
-                                    {artifactPreview.clarificationNote}
-                                  </p>
-                                  <p className="mt-3 text-xs text-muted">
-                                    Generated{" "}
-                                    {formatTimestamp(
-                                      artifactPreview.generatedAtUtc
-                                    )}
-                                  </p>
-                                </div>
-                              </div>
-                            ) : null}
-                            {selectedArtifactHref ? (
-                              <a
-                                className="inline-flex items-center justify-center rounded-full border border-border-low bg-bg1 px-4 py-3 font-medium transition hover:-translate-y-0.5"
-                                href={selectedArtifactHref}
-                                rel="noreferrer"
-                                target="_blank"
-                              >
-                                Open stored artifact reference
-                              </a>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
-                            This clarification does not have an artifact
-                            reference yet.
-                          </div>
-                        )}
-                      </article>
-
-                      <article
-                        className="rounded-[1.5rem] border border-border-low bg-card p-5"
-                        data-testid="reviewer-vote-section"
-                      >
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted">
-                            Vote placeholder
-                          </p>
-                          <h4 className="text-xl font-semibold tracking-tight">
-                            {detail.vote.label}
-                          </h4>
-                        </div>
-                        <div className="mt-4 rounded-xl border border-border-low bg-bg1 p-4 text-sm leading-6 text-muted">
-                          <p>{detail.vote.summary}</p>
-                          <p className="mt-3 text-foreground">
-                            Placeholder fields active:{" "}
-                            {detail.vote.placeholder ? "yes" : "no"}
-                          </p>
-                          <p className="mt-2 text-foreground">
-                            Last workflow update:{" "}
-                            {formatTimestamp(detail.vote.updatedAt)}
-                          </p>
-                        </div>
-                      </article>
-                      <article
-                        className="rounded-[1.5rem] border border-border-low bg-card p-5"
-                        data-testid="reviewer-trace-section"
-                      >
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted">
-                            LLM trace
-                          </p>
-                          <h4 className="text-xl font-semibold tracking-tight">
-                            {detail.llmTrace?.modelId ??
-                              "Trace metadata unavailable"}
-                          </h4>
-                        </div>
-                        {detail.llmTrace ? (
-                          <dl className="mt-4 grid gap-3 text-sm">
-                            <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                              <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                                Prompt template
-                              </dt>
-                              <dd className="mt-2 text-foreground">
-                                {detail.llmTrace.promptTemplateVersion}
-                              </dd>
-                            </div>
-                            <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                              <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                                Processing version
-                              </dt>
-                              <dd className="mt-2 text-foreground">
-                                {detail.llmTrace.processingVersion}
-                              </dd>
-                            </div>
-                            <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                              <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                                Requested
-                              </dt>
-                              <dd className="mt-2 text-foreground">
-                                {formatTimestamp(detail.llmTrace.requestedAt)}
-                              </dd>
-                            </div>
-                          </dl>
-                        ) : (
-                          <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
-                            No trace metadata was stored for this clarification.
-                          </div>
-                        )}
-                      </article>
-                    </div>
-                  </section>
-
-                  <section className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
-                    <article
-                      className="rounded-[1.5rem] border border-border-low bg-card p-5"
-                      data-testid="reviewer-funding-state-section"
-                    >
-                      <div className="space-y-1">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted">
-                          Funding state
-                        </p>
-                        <h4 className="text-xl font-semibold tracking-tight">
-                          {formatQueueStateLabel(detail.funding.fundingState)}
-                        </h4>
-                      </div>
-                      <dl className="mt-5 grid gap-3 text-sm">
-                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Raised
-                          </dt>
-                          <dd className="mt-2 text-foreground">
+                    <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                      <p className="text-xs uppercase tracking-[0.18em] text-muted">Funding + Review</p>
+                      <div className="mt-4 grid gap-3">
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Funding</p>
+                          <p className="mt-2 text-sm text-foreground">
                             {formatCurrency(detail.funding.raisedAmount)} of{" "}
                             {formatCurrency(detail.funding.targetAmount)}
-                          </dd>
+                          </p>
                         </div>
-                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Contributors
-                          </dt>
-                          <dd className="mt-2 text-foreground">
-                            {detail.funding.contributorCount} recorded
-                            contributors
-                          </dd>
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                            Review window
+                          </p>
+                          <p className="mt-2 text-sm text-foreground">
+                            {detail.review_window_reason}
+                          </p>
                         </div>
-                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                          <dt className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Requested
-                          </dt>
-                          <dd className="mt-2 text-foreground">
-                            {formatTimestamp(detail.createdAt)}
-                          </dd>
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Vote state</p>
+                          <p className="mt-2 text-sm text-foreground">{detail.vote.label}</p>
                         </div>
-                      </dl>
-                    </article>
-
-                    <article
-                      className="rounded-[1.5rem] border border-border-low bg-card p-5"
-                      data-testid="reviewer-funding-history-section"
-                    >
-                      <div className="space-y-1">
-                        <p className="text-xs uppercase tracking-[0.16em] text-muted">
-                          Funding history
-                        </p>
-                        <h4 className="text-xl font-semibold tracking-tight">
-                          Contribution audit trail
-                        </h4>
                       </div>
-                      {detail.funding.history.length > 0 ? (
-                        <div className="mt-5 grid gap-3">
-                          {detail.funding.history.map((entry) => (
+                    </article>
+                  </div>
+
+                  <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs uppercase tracking-[0.18em] text-muted">
+                        Artifact + contribution trace
+                      </p>
+                      {selectedArtifactHref ? (
+                        <a
+                          className="text-sm text-muted underline underline-offset-4 transition hover:text-foreground"
+                          href={selectedArtifactHref}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          Open artifact
+                        </a>
+                      ) : null}
+                    </div>
+                    <div className="mt-4 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+                      <div className="rounded-2xl border border-border-low bg-bg1/80 p-4">
+                        <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                          Artifact preview
+                        </p>
+                        {isArtifactPreviewLoading ? (
+                          <p className="mt-3 text-sm text-muted">Loading artifact preview…</p>
+                        ) : artifactPreviewError ? (
+                          <p className="mt-3 text-sm text-muted">{artifactPreviewError}</p>
+                        ) : artifactPreview ? (
+                          <div className="mt-3 space-y-3">
+                            <p className="text-sm text-foreground">
+                              {artifactPreview.suggestedEditedMarketText}
+                            </p>
+                            <p className="text-sm text-muted">
+                              {artifactPreview.clarificationNote}
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="mt-3 text-sm text-muted">
+                            No artifact preview is available for this clarification.
+                          </p>
+                        )}
+                      </div>
+                      <div className="grid gap-3">
+                        {detail.funding.history.length > 0 ? (
+                          detail.funding.history.map((entry) => (
                             <div
-                              className="rounded-xl border border-border-low bg-bg1 p-4"
                               key={`${entry.contributor}-${entry.timestamp}-${entry.reference ?? "none"}`}
+                              className="rounded-2xl border border-border-low bg-bg1/80 p-4"
                             >
                               <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div>
                                   <p className="text-sm font-medium text-foreground">
                                     {entry.contributor}
                                   </p>
-                                  <p className="mt-1 text-xs uppercase tracking-[0.12em] text-muted">
+                                  <p className="mt-1 text-xs uppercase tracking-[0.14em] text-muted">
                                     {entry.reference ?? "No payment reference"}
                                   </p>
                                 </div>
@@ -1848,128 +1553,113 @@ function ReviewerConsole() {
                                 </div>
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
-                          No funding entries have been recorded for this
-                          clarification yet.
-                        </div>
-                      )}
-                    </article>
-                  </section>
+                          ))
+                        ) : (
+                          <div className="rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-sm text-muted">
+                            No funding history is recorded yet.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </article>
                 </div>
               ) : null}
 
-              {reviewerSurface === "prelaunch" &&
-              !isPrelaunchDetailLoading &&
-              !prelaunchDetailErrorMessage &&
-              prelaunchDetail ? (
-                <div className="mt-5 grid gap-5">
-                  <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-                    <article className="rounded-[1.5rem] border border-border-low bg-card p-5">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted">
-                            Upcoming market
-                          </p>
-                          <h4 className="text-xl font-semibold tracking-tight">
-                            {prelaunchDetail.title ?? selectedPrelaunchEventId}
-                          </h4>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {prelaunchDetail.status ? (
-                            <span className="rounded-full border border-border-low bg-bg1 px-3 py-1 text-xs uppercase tracking-[0.14em] text-muted">
-                              {prelaunchDetail.status}
-                            </span>
-                          ) : null}
-                          {prelaunchDetail.ticker ? (
-                            <span className="rounded-full border border-border-low bg-bg1 px-3 py-1 text-xs uppercase tracking-[0.14em] text-muted">
-                              {prelaunchDetail.ticker}
-                            </span>
-                          ) : null}
-                        </div>
+              {reviewerSurface === "prelaunch" && prelaunchDetail ? (
+                <div className="grid gap-5">
+                  <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-muted">
+                          {prelaunchDetail.marketId ?? selectedPrelaunchEventId}
+                        </p>
+                        <h3 className="mt-2 text-2xl font-semibold text-foreground">
+                          {prelaunchDetail.title ?? selectedPrelaunchEventId}
+                        </h3>
                       </div>
-                      <p className="mt-4 text-sm leading-7 text-muted">
+                      <div className="flex flex-wrap gap-2">
+                        {prelaunchDetail.status ? (
+                          <span className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-muted">
+                            {prelaunchDetail.status}
+                          </span>
+                        ) : null}
+                        {prelaunchDetail.ticker ? (
+                          <span className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-muted">
+                            {prelaunchDetail.ticker}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="mt-4 rounded-[1.4rem] border border-border-low bg-bg1/80 p-4">
+                      <p className="text-xs uppercase tracking-[0.16em] text-muted">Market text</p>
+                      <p className="mt-3 text-sm leading-7 text-foreground">
                         {prelaunchDetail.description ??
                           prelaunchDetail.resolutionText ??
-                          "No market text cached for this upcoming market."}
+                          "No market text cached for this market."}
                       </p>
-                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                          <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Category
-                          </p>
-                          <p className="mt-2 text-sm text-foreground">
-                            {prelaunchDetail.category ?? "Uncategorized"}
-                          </p>
-                        </div>
-                        <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                          <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Timing
-                          </p>
-                          <p className="mt-2 text-sm text-foreground">
-                            Starts {formatOptionalTimestamp(prelaunchDetail.effectiveDate)}
-                          </p>
-                          <p className="mt-1 text-sm text-foreground">
-                            Expires {formatOptionalTimestamp(prelaunchDetail.expiryDate ?? prelaunchDetail.endTime)}
-                          </p>
-                        </div>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                        <p className="text-xs uppercase tracking-[0.14em] text-muted">Category</p>
+                        <p className="mt-2 text-sm text-foreground">
+                          {prelaunchDetail.category ?? "Uncategorized"}
+                        </p>
                       </div>
-                      {prelaunchDetail.tags && prelaunchDetail.tags.length > 0 ? (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {prelaunchDetail.tags.map((tag) => (
-                            <span
-                              className="rounded-full border border-border-low bg-bg1 px-3 py-1 text-xs uppercase tracking-[0.12em] text-muted"
-                              key={tag}
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
+                      <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                        <p className="text-xs uppercase tracking-[0.14em] text-muted">Window</p>
+                        <p className="mt-2 text-sm text-foreground">
+                          Starts {formatOptionalTimestamp(prelaunchDetail.effectiveDate)}
+                          <br />
+                          Ends{" "}
+                          {formatOptionalTimestamp(
+                            prelaunchDetail.expiryDate ?? prelaunchDetail.endTime
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      {prelaunchDetail.url ? (
+                        <a
+                          className="text-sm text-muted underline underline-offset-4 transition hover:text-foreground"
+                          href={prelaunchDetail.url}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          Open source market page
+                        </a>
                       ) : null}
-                      <div className="mt-4 flex flex-wrap gap-3">
-                        {prelaunchDetail.url ? (
-                          <a
-                            className="inline-flex text-sm font-medium underline underline-offset-4"
-                            href={prelaunchDetail.url}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            Open Gemini market page
-                          </a>
-                        ) : null}
-                        {prelaunchDetail.termsLink ? (
-                          <a
-                            className="inline-flex text-sm font-medium underline underline-offset-4"
-                            href={prelaunchDetail.termsLink}
-                            rel="noreferrer"
-                            target="_blank"
-                          >
-                            Open event terms
-                          </a>
-                        ) : null}
-                      </div>
-                    </article>
+                      {prelaunchDetail.termsLink ? (
+                        <a
+                          className="text-sm text-muted underline underline-offset-4 transition hover:text-foreground"
+                          href={prelaunchDetail.termsLink}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          Open terms
+                        </a>
+                      ) : null}
+                    </div>
+                  </article>
 
-                    <article className="rounded-[1.5rem] border border-border-low bg-card p-5">
+                  <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+                    <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
                       <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-[0.16em] text-muted">
-                            Proactive scan
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.18em] text-muted">
+                            Ambiguity scan
                           </p>
-                          <h4 className="text-xl font-semibold tracking-tight">
+                          <p className="mt-2 text-2xl font-semibold text-foreground">
                             {prelaunchLatestScan
-                              ? formatQueueStateLabel(prelaunchLatestScan.recommendation)
-                              : "No scan recorded"}
-                          </h4>
+                              ? getReviewTemperature(prelaunchLatestScan.ambiguityScore)
+                              : "No stored scan"}
+                          </p>
                         </div>
                         <button
-                          className="inline-flex items-center rounded-full border border-border-low bg-cream px-4 py-2 text-sm font-medium transition hover:-translate-y-0.5 disabled:opacity-60"
+                          className="rounded-full bg-foreground px-4 py-2 text-sm text-background transition disabled:opacity-60"
                           disabled={prelaunchScanTargetId === selectedPrelaunchEventId}
                           onClick={() =>
                             selectedPrelaunchEventId
-                              ? void handleRunPrelaunchScan(selectedPrelaunchEventId)
+                              ? void runPrelaunchScan(selectedPrelaunchEventId)
                               : undefined
                           }
                           type="button"
@@ -1980,274 +1670,407 @@ function ReviewerConsole() {
                         </button>
                       </div>
                       {prelaunchLatestScan ? (
-                        <div className="mt-5 grid gap-3 text-sm">
-                          <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                              Ambiguity
+                        <div className="mt-4 grid gap-3">
+                          <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                            <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                              Score
                             </p>
-                            <p className="mt-2 text-lg font-semibold text-foreground">
+                            <p className="mt-2 text-sm text-foreground">
                               {formatAmbiguityScore(prelaunchLatestScan.ambiguityScore)}
                             </p>
                           </div>
-                          <div className="rounded-xl border border-border-low bg-bg1 p-3">
-                            <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                              Review window
+                          <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                            <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                              Recommendation
+                            </p>
+                            <p className="mt-2 text-sm text-foreground">
+                              {formatQueueStateLabel(prelaunchLatestScan.recommendation)}
+                            </p>
+                          </div>
+                          <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                            <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                              Reason
                             </p>
                             <p className="mt-2 text-sm text-foreground">
                               {prelaunchLatestScan.reviewWindow.review_window_reason}
                             </p>
                           </div>
-                          <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                            Last scanned {formatTimestamp(prelaunchLatestScan.createdAt)}
-                          </p>
                         </div>
                       ) : (
-                        <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
-                          No proactive ambiguity scan has been stored for this upcoming market yet.
+                        <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-sm text-muted">
+                          This market has not been scanned yet.
                         </div>
                       )}
                     </article>
-                  </section>
 
-                  <section className="rounded-[1.5rem] border border-border-low bg-card p-5">
-                    <div className="space-y-1">
-                      <p className="text-xs uppercase tracking-[0.16em] text-muted">
-                        Contracts
-                      </p>
-                      <h4 className="text-xl font-semibold tracking-tight">
-                        {prelaunchDetail.contracts?.length ?? 0} contract
-                        {(prelaunchDetail.contracts?.length ?? 0) === 1 ? "" : "s"}
-                      </h4>
-                    </div>
-                    {prelaunchDetail.contracts && prelaunchDetail.contracts.length > 0 ? (
-                      <div className="mt-5 grid gap-4 xl:grid-cols-2">
-                        {prelaunchDetail.contracts.map((contract) => (
-                          <article
-                            className="rounded-[1.25rem] border border-border-low bg-bg1 p-4"
-                            key={contract.id ?? contract.ticker ?? contract.label ?? "contract"}
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div>
-                                <p className="text-sm font-semibold text-foreground">
-                                  {contract.label ?? "Unnamed contract"}
-                                </p>
-                                <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                                  {contract.instrumentSymbol ?? contract.ticker ?? "No Gemini symbol"}
-                                </p>
+                    <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                      <p className="text-xs uppercase tracking-[0.18em] text-muted">Contract map</p>
+                      {prelaunchDetail.contracts && prelaunchDetail.contracts.length > 0 ? (
+                        <div className="mt-4 grid gap-3">
+                          {prelaunchDetail.contracts.map((contract) => (
+                            <div
+                              key={contract.id ?? contract.ticker ?? contract.label ?? "contract"}
+                              className="rounded-2xl border border-border-low bg-bg1/80 p-4"
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-sm font-medium text-foreground">
+                                    {contract.label ?? "Unnamed contract"}
+                                  </p>
+                                  <p className="mt-1 text-xs uppercase tracking-[0.14em] text-muted">
+                                    {contract.instrumentSymbol ?? contract.ticker ?? "No symbol"}
+                                  </p>
+                                </div>
+                                {contract.marketState ? (
+                                  <span className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-muted">
+                                    {contract.marketState}
+                                  </span>
+                                ) : null}
                               </div>
-                              {contract.marketState ? (
-                                <span className="rounded-full border border-border-low bg-card px-3 py-1 text-xs uppercase tracking-[0.12em] text-muted">
-                                  {contract.marketState}
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="mt-3 text-sm leading-6 text-muted">
-                              {contract.description ?? "No contract description cached."}
-                            </p>
-                            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                              <div className="rounded-xl border border-border-low bg-card p-3">
-                                <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                                  Timing
-                                </p>
-                                <p className="mt-2 text-sm text-foreground">
-                                  {formatOptionalTimestamp(contract.expiryDate)}
-                                </p>
-                              </div>
-                              <div className="rounded-xl border border-border-low bg-card p-3">
-                                <p className="text-xs uppercase tracking-[0.12em] text-muted">
-                                  Price snapshot
-                                </p>
-                                <p className="mt-2 text-sm text-foreground">
-                                  {formatContractPriceSummary(contract.prices)}
-                                </p>
+                              <p className="mt-3 text-sm leading-6 text-muted">
+                                {contract.description ?? "No contract description cached."}
+                              </p>
+                              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                <div className="rounded-2xl border border-border-low bg-card/70 p-3">
+                                  <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                                    Expiry
+                                  </p>
+                                  <p className="mt-2 text-sm text-foreground">
+                                    {formatOptionalTimestamp(contract.expiryDate)}
+                                  </p>
+                                </div>
+                                <div className="rounded-2xl border border-border-low bg-card/70 p-3">
+                                  <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                                    Price
+                                  </p>
+                                  <p className="mt-2 text-sm text-foreground">
+                                    {formatContractPriceSummary(contract.prices)}
+                                  </p>
+                                </div>
                               </div>
                             </div>
-                            {contract.termsAndConditionsUrl ? (
-                              <a
-                                className="mt-4 inline-flex text-sm font-medium underline underline-offset-4"
-                                href={contract.termsAndConditionsUrl}
-                                rel="noreferrer"
-                                target="_blank"
-                              >
-                                Open contract terms
-                              </a>
-                            ) : null}
-                          </article>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="mt-4 rounded-xl border border-dashed border-border-low bg-bg1 p-4 text-sm text-muted">
-                        No contracts were cached for this upcoming market.
-                      </div>
-                    )}
-                  </section>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-sm text-muted">
+                          No contracts were cached for this upcoming market.
+                        </div>
+                      )}
+                    </article>
+                  </div>
                 </div>
               ) : null}
-            </section>
-          </section>
-        </section>
-      </main>
+            </SectionCard>
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
 
 function PublicConsole() {
-  const { connectors, connect, disconnect, wallet, status } =
-    useWalletConnection();
-  const address = wallet?.account.address.toString();
+  const initialSession = useMemo(() => loadStoredSession(PUBLIC_SESSION_STORAGE_KEY), []);
+  const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl);
+  const [apiBaseUrl, setApiBaseUrl] = useState(initialSession.apiBaseUrl);
+  const [draftRequesterId, setDraftRequesterId] = useState("phase1_tester");
+  const [draftEventId, setDraftEventId] = useState("gm_sol_above_500");
+  const [draftQuestion, setDraftQuestion] = useState(
+    "If trading opens later than planned, does the same end timestamp still control resolution?"
+  );
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [intakeState, setIntakeState] = useState<IntakeResponseState | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  function savePublicApiBaseUrl(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const nextSession = {
+      apiBaseUrl: draftApiBaseUrl.trim().replace(/\/+$/, ""),
+      reviewerToken: ""
+    };
+
+    saveStoredSession(PUBLIC_SESSION_STORAGE_KEY, nextSession);
+    setApiBaseUrl(nextSession.apiBaseUrl);
+    setIsSettingsOpen(false);
+  }
+
+  async function requestChallenge(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!apiBaseUrl.trim()) {
+      setIntakeState({
+        kind: "error",
+        eventId: draftEventId.trim(),
+        message: "Set the backend API base URL first."
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setIntakeState(null);
+
+    try {
+      const endpoint = new URL(
+        `/api/clarify/${encodeURIComponent(draftEventId.trim())}`,
+        apiBaseUrl
+      );
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          requesterId: draftRequesterId.trim() || "phase1_tester",
+          question: draftQuestion.trim()
+        })
+      });
+      const payload = await response.json();
+
+      if (response.status === 402) {
+        setIntakeState({
+          kind: "payment_required",
+          eventId: draftEventId.trim(),
+          payload
+        });
+        return;
+      }
+
+      if (response.ok) {
+        setIntakeState({
+          kind: "accepted",
+          eventId: draftEventId.trim(),
+          payload
+        });
+        return;
+      }
+
+      setIntakeState({
+        kind: "error",
+        eventId: draftEventId.trim(),
+        message: payload?.error?.message ?? "The intake request could not be completed."
+      });
+    } catch (error) {
+      setIntakeState({
+        kind: "error",
+        eventId: draftEventId.trim(),
+        message: error instanceof Error ? error.message : "Network error."
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
 
   return (
-    <div className="relative min-h-screen overflow-x-clip bg-bg1 text-foreground">
-      <main className="relative z-10 mx-auto flex min-h-screen max-w-4xl flex-col gap-10 border-x border-border-low px-6 py-16">
-        <header className="space-y-3">
-          <p className="text-sm uppercase tracking-[0.18em] text-muted">
-            Solana starter kit
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-            Ship a Solana dapp fast
-          </h1>
-          <p className="max-w-3xl text-base leading-relaxed text-muted">
-            Drop in <code className="font-mono">@solana/react-hooks</code>, wrap
-            your tree once, and you get wallet connect/disconnect plus
-            ready-to-use hooks for balances and transactions—no manual RPC
-            wiring.
-          </p>
-          <ul className="mt-4 space-y-2 text-sm text-foreground">
-            <li className="flex gap-2">
-              <span
-                className="mt-1.5 h-2 w-2 rounded-full bg-foreground/60"
-                aria-hidden
-              />
-              <div>
-                <a
-                  className="font-medium underline underline-offset-2"
-                  href="https://solana.com/docs"
-                  target="_blank"
-                  rel="noreferrer"
+    <div className="min-h-screen bg-bg1 text-foreground">
+      <div className="mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
+        {isSettingsOpen ? (
+          <SettingsFlyout
+            description="Choose which backend this intake form should use for clarification requests."
+            onClose={() => setIsSettingsOpen(false)}
+            title="Connection"
+          >
+            <form className="grid gap-4" onSubmit={savePublicApiBaseUrl}>
+              <label className="grid gap-2 text-sm">
+                <span className="text-muted">Backend API base URL</span>
+                <input
+                  className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
+                  onChange={(event) => setDraftApiBaseUrl(event.target.value)}
+                  placeholder="http://127.0.0.1:3000"
+                  value={draftApiBaseUrl}
+                />
+              </label>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  className="rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:translate-y-[-1px]"
+                  disabled={!draftApiBaseUrl.trim()}
+                  type="submit"
                 >
-                  Solana docs
-                </a>{" "}
-                — core concepts, RPC, programs, and client patterns.
+                  Save endpoint
+                </button>
+                {apiBaseUrl ? (
+                  <span className="rounded-full border border-border-low px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted">
+                    {apiBaseUrl}
+                  </span>
+                ) : null}
               </div>
-            </li>
-            <li className="flex gap-2">
-              <span
-                className="mt-1.5 h-2 w-2 rounded-full bg-foreground/60"
-                aria-hidden
-              />
-              <div>
-                <a
-                  className="font-medium underline underline-offset-2"
-                  href="https://www.anchor-lang.com/docs/introduction"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Anchor docs
-                </a>{" "}
-                — build and test programs with IDL, macros, and type-safe
-                clients.
-              </div>
-            </li>
-            <li className="flex gap-2">
-              <span
-                className="mt-1.5 h-2 w-2 rounded-full bg-foreground/60"
-                aria-hidden
-              />
-              <div>
-                <a
-                  className="font-medium underline underline-offset-2"
-                  href="https://faucet.solana.com/"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Solana faucet (devnet)
-                </a>{" "}
-                — grab free devnet SOL to try transfers and transactions.
-              </div>
-            </li>
-            <li className="flex gap-2">
-              <span
-                className="mt-1.5 h-2 w-2 rounded-full bg-foreground/60"
-                aria-hidden
-              />
-              <div>
-                <a
-                  className="font-medium underline underline-offset-2"
-                  href="https://github.com/solana-foundation/solana-kit/tree/main/packages/react-hooks"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  @solana/react-hooks README
-                </a>{" "}
-                — how this starter wires the client, connectors, and hooks.
-              </div>
-            </li>
-          </ul>
+            </form>
+          </SettingsFlyout>
+        ) : null}
+        <header className="grid gap-6 border-b border-border-low pb-10 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className="space-y-5">
+            <div className="flex items-start justify-between gap-4">
+              <p className="pt-1 text-xs uppercase tracking-[0.34em] text-muted">
+                Clarification Network
+              </p>
+              <button
+                aria-label="Open settings"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border-low bg-panel/80 text-muted transition hover:text-foreground"
+                onClick={() => setIsSettingsOpen(true)}
+                type="button"
+              >
+                <SettingsIcon />
+              </button>
+            </div>
+            <h1 className="font-display text-[clamp(3.2rem,8vw,7rem)] leading-[0.88] text-foreground">
+              Markets need
+              <br />
+              editorial truth
+            </h1>
+            <p className="max-w-2xl text-base leading-7 text-muted sm:text-lg">
+              Ask for clarification on Gemini prediction markets, track the payment
+              challenge, and route disputed market wording into review.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <a
+                className="rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:translate-y-[-1px]"
+                href="/reviewer"
+              >
+                Open reviewer desk
+              </a>
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
+            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
+              <p className="text-xs uppercase tracking-[0.22em] text-muted">Requests</p>
+              <p className="mt-3 text-3xl font-semibold text-foreground">Paid</p>
+            </div>
+            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
+              <p className="text-xs uppercase tracking-[0.22em] text-muted">Upcoming markets</p>
+              <p className="mt-3 text-lg font-semibold text-foreground">Reviewable</p>
+            </div>
+            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
+              <p className="text-xs uppercase tracking-[0.22em] text-muted">Decisions</p>
+              <p className="mt-3 text-lg font-semibold text-foreground">Tracked</p>
+            </div>
+          </div>
         </header>
 
-        <section className="w-full max-w-3xl space-y-4 rounded-2xl border border-border-low bg-card p-6 shadow-[0_20px_80px_-50px_rgba(0,0,0,0.35)]">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <p className="text-lg font-semibold">Wallet connection</p>
-              <p className="text-sm text-muted">
-                Pick any discovered connector and manage connect / disconnect in
-                one spot.
+        <main className="mt-8 grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+          <div className="space-y-6">
+            <SectionCard eyebrow="Clarification intake" title="Request a clarification">
+              <p className="mb-4 max-w-2xl text-sm leading-6 text-muted">
+                Use this form when a Gemini prediction market needs clearer resolution
+                criteria, timing, or source-of-truth wording.
               </p>
-            </div>
-            <span className="rounded-full bg-cream px-3 py-1 text-xs font-semibold uppercase tracking-wide text-foreground/80">
-              {status === "connected" ? "Connected" : "Not connected"}
-            </span>
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            {connectors.map((connector) => (
-              <button
-                key={connector.id}
-                onClick={() => connect(connector.id)}
-                disabled={status === "connecting"}
-                className="group flex cursor-pointer items-center justify-between rounded-xl border border-border-low bg-card px-4 py-3 text-left text-sm font-medium transition hover:-translate-y-0.5 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="flex flex-col">
-                  <span className="text-base">{connector.name}</span>
-                  <span className="text-xs text-muted">
-                    {status === "connecting"
-                      ? "Connecting…"
-                      : status === "connected" &&
-                          wallet?.connector.id === connector.id
-                        ? "Active"
-                        : "Tap to connect"}
+              <form className="grid gap-4" onSubmit={requestChallenge}>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="grid gap-2 text-sm">
+                    <span className="text-muted">Requester ID</span>
+                    <input
+                      className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
+                      onChange={(event) => setDraftRequesterId(event.target.value)}
+                      value={draftRequesterId}
+                    />
+                  </label>
+                  <label className="grid gap-2 text-sm">
+                    <span className="text-muted">Event ID</span>
+                    <input
+                      className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
+                      onChange={(event) => setDraftEventId(event.target.value)}
+                      value={draftEventId}
+                    />
+                  </label>
+                </div>
+                <label className="grid gap-2 text-sm">
+                  <span className="text-muted">Clarification question</span>
+                  <textarea
+                    className="min-h-32 rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
+                    onChange={(event) => setDraftQuestion(event.target.value)}
+                    value={draftQuestion}
+                  />
+                </label>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    className="rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:translate-y-[-1px] disabled:opacity-60"
+                    disabled={isSubmitting}
+                    type="submit"
+                  >
+                    {isSubmitting ? "Requesting…" : "Submit request"}
+                  </button>
+                  <span className="rounded-full border border-border-low px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted">
+                    Live or upcoming markets
                   </span>
-                </span>
-                <span
-                  aria-hidden
-                  className="h-2.5 w-2.5 rounded-full bg-border-low transition group-hover:bg-primary/80"
-                />
-              </button>
-            ))}
+                </div>
+              </form>
+
+              {intakeState ? (
+                <div className="mt-5 rounded-[1.6rem] border border-border-low bg-card p-5">
+                  <p className="text-xs uppercase tracking-[0.18em] text-muted">
+                    Latest response for {intakeState.eventId}
+                  </p>
+                  {intakeState.kind === "payment_required" ? (
+                    <div className="mt-4 space-y-4">
+                      <p className="text-2xl font-semibold text-foreground">
+                        Payment required
+                      </p>
+                      {intakeState.payload.paymentRequirements?.map((requirement, index) => (
+                        <div
+                          key={`${requirement.network ?? "network"}-${index}`}
+                          className="rounded-2xl border border-border-low bg-bg1/80 p-4"
+                        >
+                          <p className="text-sm text-foreground">
+                            {requirement.description ?? "Clarification payment request"}
+                          </p>
+                          <p className="mt-2 text-sm text-muted">
+                            {requirement.amount} {requirement.assetSymbol} on{" "}
+                            {requirement.network}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {intakeState.kind === "accepted" ? (
+                    <div className="mt-4 space-y-3">
+                      <p className="text-2xl font-semibold text-foreground">
+                        Request accepted
+                      </p>
+                      <p className="text-sm text-muted">
+                        Clarification ID {intakeState.payload.clarificationId ?? "pending"} with status{" "}
+                        {intakeState.payload.status ?? "processing"}.
+                      </p>
+                    </div>
+                  ) : null}
+                  {intakeState.kind === "error" ? (
+                    <div className="mt-4 space-y-3">
+                      <p className="text-2xl font-semibold text-foreground">Request failed</p>
+                      <p className="text-sm text-muted">{intakeState.message}</p>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </SectionCard>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 border-t border-border-low pt-4 text-sm">
-            <span className="rounded-lg border border-border-low bg-cream px-3 py-2 font-mono text-xs">
-              {address ?? "No wallet connected"}
-            </span>
-            <button
-              onClick={() => disconnect()}
-              disabled={status !== "connected"}
-              className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-border-low bg-card px-3 py-2 font-medium transition hover:-translate-y-0.5 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Disconnect
-            </button>
+          <div className="space-y-6">
+            <SectionCard eyebrow="Features" title="What each part does">
+              <div className="grid gap-4">
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                  <p className="text-lg font-semibold text-foreground">Clarification requests</p>
+                  <p className="mt-2 text-sm leading-6 text-muted">
+                    Submit a question about how a Gemini market should be interpreted.
+                    The backend returns the payment challenge required to open the request.
+                  </p>
+                </div>
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                  <p className="text-lg font-semibold text-foreground">Reviewer desk</p>
+                  <p className="mt-2 text-sm leading-6 text-muted">
+                    Internal reviewers can inspect live requests, review upcoming markets,
+                    and trigger ambiguity scans before launch.
+                  </p>
+                </div>
+              </div>
+            </SectionCard>
+
           </div>
-        </section>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
 
 export default function App() {
-  const isReviewerRoute = window.location.pathname.startsWith("/reviewer");
-
-  if (isReviewerRoute) {
+  if (window.location.pathname.startsWith("/reviewer")) {
     return <ReviewerConsole />;
   }
 
