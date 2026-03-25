@@ -1865,12 +1865,71 @@ function BeforeAfterDemo() {
   );
 }
 
+function NewsStrip() {
+  return (
+    <section className="border-t border-border-low bg-panel/40">
+      <div className="mx-auto max-w-7xl px-5 py-14 sm:px-8 lg:px-10">
+        <p className="mb-2 text-xs uppercase tracking-[0.22em] text-muted">Why this matters</p>
+        <h2 className="mb-10 text-2xl font-semibold text-foreground">What we're built to avoid</h2>
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Kalshi lawsuit card */}
+          <a
+            href="https://news.bloomberglaw.com/securities-law/kalshi-sued-over-death-carveout-in-iran-leader-prediction-market?utm_source=chatgpt.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex flex-col gap-4 rounded-2xl border border-border-low bg-panel p-6 transition-colors hover:border-border"
+          >
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-destructive/10 px-2.5 py-0.5 text-xs font-medium text-destructive">
+                Lawsuit
+              </span>
+              <span className="text-xs text-muted">Bloomberg Law</span>
+            </div>
+            <p className="text-base font-medium leading-snug text-foreground group-hover:underline">
+              Kalshi Sued Over Death Carveout in Iran Leader Prediction Market
+            </p>
+            <p className="text-sm leading-relaxed text-muted">
+              A post-hoc rule change — a "death carveout" quietly inserted after trading opened —
+              led to a federal lawsuit. Opaque resolution criteria and after-the-fact modifications
+              are exactly the failure mode this system is designed to surface before markets go live.
+            </p>
+            <span className="mt-auto text-xs text-muted/60">bloomberglaw.com ↗</span>
+          </a>
+
+          {/* X post embed card */}
+          <div className="flex flex-col gap-4 rounded-2xl border border-border-low bg-panel p-6">
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-500">
+                Community
+              </span>
+              <span className="text-xs text-muted">X / Twitter</span>
+            </div>
+            <p className="text-sm text-muted">Trader reaction to ambiguous resolution:</p>
+            <div className="overflow-hidden rounded-xl border border-border-low">
+              <blockquote
+                className="twitter-tweet"
+                data-dnt="true"
+                data-theme="dark"
+              >
+                <a href="https://twitter.com/bull_genius/status/1941024645861322890">
+                  Loading post…
+                </a>
+              </blockquote>
+            </div>
+            <script async={true} src="https://platform.twitter.com/widgets.js" />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function FooterStrip() {
   return (
     <footer className="border-t border-border-low">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-8 sm:px-8 lg:px-10">
-        <p className="text-xs text-muted">The Oracle's Wakeup Call — prediction market clarification</p>
-        <p className="text-xs text-muted">AI analysis · Human review · Audit trace</p>
+        <p className="text-xs text-muted">The Oracle's Wakeup Call — a prediction market clarification prototype, tested on live Gemini markets</p>
+        <p className="text-xs text-muted">AI analysis · Human review · No after-the-fact rule changes</p>
       </div>
     </footer>
   );
@@ -2112,6 +2171,7 @@ function PublicConsole() {
         </div>
       </section>
 
+      <NewsStrip />
       <FooterStrip />
     </div>
   );
