@@ -1775,21 +1775,21 @@ function HowItWorksStrip() {
 }
 
 const BEFORE_ISSUES = [
-  "\"SOL price\" — which price? (spot mid, TWAP, or an external index?)",
-  "No fallback defined if the Gemini SOL/USD market is halted at snapshot time",
-  "No tolerance stated if the index value is delayed or stale at 5 pm EDT"
+  "\"Recession\" is undefined — NBER declaration and two consecutive negative GDP quarters are different standards",
+  "No GDP release vintage named — advance, second, and third estimates often diverge",
+  "Silent on whether a later BEA revision that reverses a negative quarter changes the outcome"
 ] as const;
 
 const AFTER_FIXES = [
-  "Price source specified as Gemini SOL/USD last-trade spot mid-price",
-  "Snapshot time confirmed as 17:00:00 EDT on the contract end date",
-  "Fallback: if SOL/USD is halted, resolution deferred to next available uncrossed mid"
+  "Resolution binds exclusively to the BEA advance GDP estimate — NBER declaration is not sufficient",
+  "Two consecutive quarters of negative BEA advance real GDP growth required",
+  "Later revisions to the advance estimate do not affect settlement once the advance figure is published"
 ] as const;
 
 function BeforeAfterDemo() {
   return (
     <section className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
-      <p className="text-xs uppercase tracking-[0.30em] text-muted">Real Gemini market · #9848</p>
+      <p className="text-xs uppercase tracking-[0.30em] text-muted">Real Gemini market · #4020</p>
       <h2 className="mt-2 font-display text-[clamp(2rem,4vw,3.2rem)] leading-none text-foreground">
         See the difference clarity makes
       </h2>
@@ -1804,12 +1804,12 @@ function BeforeAfterDemo() {
           <div className="mb-5 flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-signal/[0.12] px-3 py-1 text-sm font-medium text-signal">
               <span className="h-1.5 w-1.5 rounded-full bg-signal" />
-              Ambiguity score 0.81 — High
+              Ambiguity score 0.78 — High
             </span>
           </div>
           <p className="mb-3 text-xs uppercase tracking-[0.22em] text-muted">Original resolution text</p>
           <blockquote className="rounded-xl border border-signal/25 bg-signal/[0.05] px-5 py-4 text-base leading-7 text-foreground">
-            "SOL price on March 25" — resolves to the SOL price at 5 pm EDT.
+            Resolves Yes if the U.S. economy experiences a recession in 2026.
           </blockquote>
           <div className="mt-5 space-y-2.5">
             <p className="text-xs uppercase tracking-[0.20em] text-muted">Identified issues</p>
@@ -1832,9 +1832,10 @@ function BeforeAfterDemo() {
           </div>
           <p className="mb-3 text-xs uppercase tracking-[0.22em] text-muted">Suggested resolution text</p>
           <blockquote className="rounded-xl border border-border-low bg-card px-5 py-4 text-base leading-7 text-foreground">
-            Resolves to the Gemini SOL/USD last-trade spot mid-price at 17:00:00 EDT on March 25.
-            If the SOL/USD market is halted at that time, resolution uses the next available
-            uncrossed mid-price.
+            Resolves Yes if the BEA advance GDP estimate shows two consecutive quarters of negative
+            real GDP growth in 2026, with Q1 2026 as the earliest qualifying quarter. An NBER
+            recession declaration alone is not sufficient. Later revisions to the advance estimate
+            are not binding.
           </blockquote>
           <div className="mt-5 space-y-2.5">
             <p className="text-xs uppercase tracking-[0.20em] text-muted">Clarifications applied</p>
@@ -1851,13 +1852,14 @@ function BeforeAfterDemo() {
       <div className="mt-6 rounded-[1.6rem] border border-border-low bg-card/60 p-6">
         <p className="text-xs uppercase tracking-[0.22em] text-muted">Oracle reasoning excerpt (illustrative)</p>
         <p className="mt-3 text-base leading-7 text-muted">
-          "The title 'SOL price on March 25' does not specify whether resolution uses the Gemini
-          spot mid, a time-weighted average, or an external index. Additionally, no fallback is
-          stated for a halted or illiquid market at the snapshot time. These omissions create two
-          independent dispute surfaces. Ambiguity score: 0.76. A clarification note and light edit
-          to the resolution text have been issued."
+          "The term 'recession' is undefined in the contract text. The NBER and BEA use materially
+          different standards — the NBER can declare a recession without two consecutive negative
+          GDP quarters, and the BEA advance estimate is frequently revised. A trader who holds Yes
+          because NBER declares a recession may win or lose depending on which standard the resolver
+          applies, creating a dispute surface that is entirely about resolver behavior rather than
+          the underlying event. Ambiguity score: 0.78."
         </p>
-        <p className="mt-3 text-sm text-muted/60">Based on Gemini market #9848 — illustrative oracle output.</p>
+        <p className="mt-3 text-sm text-muted/60">Based on Gemini market #4020 — illustrative oracle output.</p>
       </div>
     </section>
   );
@@ -1878,9 +1880,9 @@ function PublicConsole() {
   const initialSession = useMemo(() => loadStoredSession(PUBLIC_SESSION_STORAGE_KEY), []);
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl);
   const [apiBaseUrl, setApiBaseUrl] = useState(initialSession.apiBaseUrl);
-  const [draftEventId, setDraftEventId] = useState("9848");
+  const [draftEventId, setDraftEventId] = useState("4020");
   const [draftQuestion, setDraftQuestion] = useState(
-    "Is the resolution price the Gemini SOL/USD spot mid-price, a time-weighted average, or an external index, and what is the fallback if the Gemini market is halted at the snapshot time?"
+    "If the NBER formally declares a recession before the deadline but no two consecutive quarters of negative GDP appear in the BEA advance estimates, does this market resolve Yes or No?"
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [intakeState, setIntakeState] = useState<IntakeResponseState | null>(null);
