@@ -1904,23 +1904,12 @@ function PublicConsole() {
   async function requestChallenge(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!apiBaseUrl.trim()) {
-      setIntakeState({
-        kind: "error",
-        eventId: draftEventId.trim(),
-        message: "Set the backend API base URL first."
-      });
-      return;
-    }
-
     setIsSubmitting(true);
     setIntakeState(null);
 
     try {
-      const endpoint = new URL(
-        `/api/clarify/${encodeURIComponent(draftEventId.trim())}`,
-        apiBaseUrl
-      );
+      const clarifyPath = `/api/clarify/${encodeURIComponent(draftEventId.trim())}`;
+      const endpoint = apiBaseUrl ? new URL(clarifyPath, apiBaseUrl) : clarifyPath;
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
