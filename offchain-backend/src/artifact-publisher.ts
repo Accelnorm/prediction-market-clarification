@@ -1,4 +1,6 @@
-function buildIpfsGatewayUrl(baseUrl: any, cid: any) {
+import type { ArtifactInput } from "./types.js";
+
+function buildIpfsGatewayUrl(baseUrl: string | null, cid: string) {
   if (!baseUrl) {
     return null;
   }
@@ -6,7 +8,7 @@ function buildIpfsGatewayUrl(baseUrl: any, cid: any) {
   return `${baseUrl.replace(/\/$/, "")}/ipfs/${encodeURIComponent(cid)}`;
 }
 
-function parseIpfsAddResponseBody(body: any) {
+function parseIpfsAddResponseBody(body: unknown) {
   const normalized = String(body ?? "").trim();
 
   if (!normalized) {
@@ -15,7 +17,7 @@ function parseIpfsAddResponseBody(body: any) {
 
   const lines = normalized
     .split("\n")
-    .map((line: any) => line.trim())
+    .map((line: string) => line.trim())
     .filter(Boolean);
 
   if (lines.length === 0) {
@@ -25,7 +27,7 @@ function parseIpfsAddResponseBody(body: any) {
   return JSON.parse(lines.at(-1) as string);
 }
 
-function buildPublicationSourcePayload(artifact: any) {
+function buildPublicationSourcePayload(artifact: ArtifactInput) {
   return {
     clarificationId: artifact.clarificationId ?? null,
     eventId: artifact.eventId ?? null,
@@ -53,15 +55,22 @@ export function createDisabledArtifactPublisher() {
   };
 }
 
+export type IpfsArtifactPublisherOptions = {
+  ipfsApiUrl: string | null;
+  ipfsGatewayBaseUrl?: string | null;
+  ipfsAuthToken?: string | null;
+  fetchImpl?: typeof fetch;
+};
+
 export function createIpfsArtifactPublisher({
   ipfsApiUrl,
-  ipfsGatewayBaseUrl = null as string | null,
-  ipfsAuthToken = null as string | null,
+  ipfsGatewayBaseUrl = null,
+  ipfsAuthToken = null,
   fetchImpl = fetch
-}: any) {
+}: IpfsArtifactPublisherOptions) {
   return {
     provider: "ipfs",
-    async publishArtifact(artifact: any) {
+    async publishArtifact(artifact: ArtifactInput) {
       const formData = new FormData();
       const body = JSON.stringify(buildPublicationSourcePayload(artifact), null, 2);
       formData.set(
@@ -70,7 +79,7 @@ export function createIpfsArtifactPublisher({
         `${artifact.clarificationId ?? artifact.eventId ?? "clarification-artifact"}.json`
       );
 
-      const response = await fetchImpl(`${ipfsApiUrl.replace(/\/$/, "")}/api/v0/add?pin=true`, {
+      const response = await fetchImpl(`${(ipfsApiUrl ?? "").replace(/\/$/, "")}/api/v0/add?pin=true`, {
         method: "POST",
         headers: {
           ...(ipfsAuthToken ? { authorization: `Bearer ${ipfsAuthToken}` } : {})

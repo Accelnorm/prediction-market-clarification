@@ -1,12 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import type { ClarificationRequest } from "./types.js";
 
 const EMPTY_STORE = { requests: [] };
 
 export class FileClarificationRequestRepository {
   private filePath: string;
-  private writeChain: Promise<void>;
-  constructor(filePath: any) {
+  private writeChain: Promise<unknown>;
+  constructor(filePath: string) {
     this.filePath = filePath;
     this.writeChain = Promise.resolve();
   }
@@ -17,59 +18,58 @@ export class FileClarificationRequestRepository {
       const parsed = JSON.parse(raw);
 
       return {
-        requests: Array.isArray(parsed.requests) ? parsed.requests : []
+        requests: Array.isArray(parsed.requests) ? parsed.requests as ClarificationRequest[] : [] as ClarificationRequest[]
       };
     } catch (error) {
       const err = error as NodeJS.ErrnoException;
       if (err.code === "ENOENT") {
-        return { ...EMPTY_STORE };
+        return { ...EMPTY_STORE, requests: [] as ClarificationRequest[] };
       }
 
       throw error;
     }
   }
 
-  async save(requests: any) {
+  async save(requests: ClarificationRequest[]) {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify({ requests }, null, 2) + "\n", "utf8");
   }
 
-  async create(request: any) {
+  async create(request: Omit<ClarificationRequest, "requestId"> & { requestId?: string | null }): Promise<ClarificationRequest | null> {
     return this.withWriteLock(async () => {
       const store = await this.load();
-      const requests = [
-        ...store.requests,
-        {
-          ...request,
-          updatedAt: request.updatedAt ?? request.createdAt,
-          clarificationId: request.clarificationId ?? null,
-          summary: request.summary ?? null,
-          errorMessage: request.errorMessage ?? null,
-          retryable: request.retryable ?? false,
-          llmOutput: request.llmOutput ?? null,
-          llmTrace: request.llmTrace ?? null,
-          artifactCid: request.artifactCid ?? null,
-          artifactUrl: request.artifactUrl ?? null,
-          reviewerWorkflowStatus: request.reviewerWorkflowStatus ?? null,
-          finalEditedText: request.finalEditedText ?? null,
-          finalNote: request.finalNote ?? null,
-          finalizedAt: request.finalizedAt ?? null,
-          finalizedBy: request.finalizedBy ?? null,
-          reviewerActions: Array.isArray(request.reviewerActions) ? request.reviewerActions : [],
-          statusHistory: Array.isArray(request.statusHistory)
-            ? request.statusHistory
-            : [{ status: request.status, timestamp: request.updatedAt ?? request.createdAt }]
-        }
-      ];
+      const newEntry = {
+        ...request,
+        requestId: request.requestId ?? null,
+        updatedAt: request.updatedAt ?? request.createdAt,
+        clarificationId: request.clarificationId ?? null,
+        summary: request.summary ?? null,
+        errorMessage: request.errorMessage ?? null,
+        retryable: request.retryable ?? false,
+        llmOutput: request.llmOutput ?? null,
+        llmTrace: request.llmTrace ?? null,
+        artifactCid: request.artifactCid ?? null,
+        artifactUrl: request.artifactUrl ?? null,
+        reviewerWorkflowStatus: request.reviewerWorkflowStatus ?? null,
+        finalEditedText: request.finalEditedText ?? null,
+        finalNote: request.finalNote ?? null,
+        finalizedAt: request.finalizedAt ?? null,
+        finalizedBy: request.finalizedBy ?? null,
+        reviewerActions: Array.isArray(request.reviewerActions) ? request.reviewerActions : [],
+        statusHistory: Array.isArray(request.statusHistory)
+          ? request.statusHistory
+          : [{ status: request.status, timestamp: request.updatedAt ?? request.createdAt }]
+      } as ClarificationRequest;
+      const requests = [...store.requests, newEntry];
       await this.save(requests);
-      return requests.at(-1);
+      return requests.at(-1) ?? null;
     });
   }
 
-  async findByTelegramIdentifiers({ telegramChatId, telegramUserId }: any) {
+  async findByTelegramIdentifiers({ telegramChatId, telegramUserId }: { telegramChatId?: string | null; telegramUserId?: string | null }) {
     const store = await this.load();
 
-    return store.requests.filter((request: any) => {
+    return store.requests.filter((request: ClarificationRequest) => {
       if (telegramChatId && request.telegramChatId !== telegramChatId) {
         return false;
       }
@@ -82,23 +82,23 @@ export class FileClarificationRequestRepository {
     });
   }
 
-  async findByRequestId(requestId: any) {
+  async findByRequestId(requestId: string) {
     const store = await this.load();
-    return store.requests.find((request: any) => request.requestId === requestId) ?? null;
+    return store.requests.find((request: ClarificationRequest) => request.requestId === requestId) ?? null;
   }
 
-  async findByClarificationId(clarificationId: any) {
+  async findByClarificationId(clarificationId: string) {
     const store = await this.load();
     return (
-      store.requests.find((request: any) => request.clarificationId === clarificationId) ?? null
+      store.requests.find((request: ClarificationRequest) => request.clarificationId === clarificationId) ?? null
     );
   }
 
-  async findByPaymentProof(paymentProof: any) {
+  async findByPaymentProof(paymentProof: string) {
     const store = await this.load();
     return (
       store.requests.find(
-        (request: any) => typeof request.paymentProof === "string" && request.paymentProof === paymentProof
+        (request: ClarificationRequest) => typeof request.paymentProof === "string" && request.paymentProof === paymentProof
       ) ?? null
     );
   }
@@ -108,15 +108,15 @@ export class FileClarificationRequestRepository {
     return store.requests;
   }
 
-  async findByEventId(eventId: any) {
+  async findByEventId(eventId: string) {
     const store = await this.load();
-    return store.requests.filter((request: any) => request.eventId === eventId);
+    return store.requests.filter((request: ClarificationRequest) => request.eventId === eventId);
   }
 
-  async updateStatus(requestId: any, updates: any) {
+  async updateStatus(requestId: string, updates: Partial<ClarificationRequest>) {
     return this.withWriteLock(async () => {
       const store = await this.load();
-      const requestIndex = store.requests.findIndex((request: any) => request.requestId === requestId);
+      const requestIndex = store.requests.findIndex((request: ClarificationRequest) => request.requestId === requestId);
 
       if (requestIndex === -1) {
         return null;
@@ -125,16 +125,16 @@ export class FileClarificationRequestRepository {
       const existingRequest = store.requests[requestIndex];
       const nextRequest = {
         ...existingRequest,
-        status: updates.status,
-        updatedAt: updates.updatedAt,
+        status: updates.status ?? existingRequest.status,
+        updatedAt: updates.updatedAt ?? existingRequest.updatedAt,
         clarificationId: updates.clarificationId ?? existingRequest.clarificationId ?? null,
         summary: updates.summary ?? existingRequest.summary ?? null,
         errorMessage: updates.errorMessage ?? existingRequest.errorMessage ?? null,
         statusHistory: [
           ...(Array.isArray(existingRequest.statusHistory) ? existingRequest.statusHistory : []),
           {
-            status: updates.status,
-            timestamp: updates.updatedAt
+            status: updates.status ?? existingRequest.status,
+            timestamp: updates.updatedAt ?? existingRequest.updatedAt
           }
         ]
       };
@@ -145,11 +145,11 @@ export class FileClarificationRequestRepository {
     });
   }
 
-  async updateByClarificationId(clarificationId: any, updates: any) {
+  async updateByClarificationId(clarificationId: string, updates: Partial<ClarificationRequest>) {
     return this.withWriteLock(async () => {
       const store = await this.load();
       const requestIndex = store.requests.findIndex(
-        (request: any) => request.clarificationId === clarificationId
+        (request: ClarificationRequest) => request.clarificationId === clarificationId
       );
 
       if (requestIndex === -1) {
@@ -214,7 +214,7 @@ export class FileClarificationRequestRepository {
           Object.prototype.hasOwnProperty.call(updates, "reviewerActions")
             ? updates.reviewerActions
             : existingRequest.reviewerActions ?? [],
-        statusHistory: shouldAppendStatusHistory
+        statusHistory: shouldAppendStatusHistory && updates.status
           ? [
               ...(Array.isArray(existingRequest.statusHistory) ? existingRequest.statusHistory : []),
               {
@@ -231,7 +231,7 @@ export class FileClarificationRequestRepository {
     });
   }
 
-  async withWriteLock(work: any) {
+  async withWriteLock<T>(work: () => Promise<T>): Promise<T> {
     const nextOperation = this.writeChain.then(work);
     this.writeChain = nextOperation.catch(() => {});
     return nextOperation;

@@ -1,11 +1,11 @@
 const POLICY_STEPS_SECS = [3600, 14400, 28800, 43200, 86400];
 const VERY_HIGH_AMBIGUITY_THRESHOLD = 0.85;
 
-function clampStepIndex(index: any) {
+function clampStepIndex(index: number) {
   return Math.max(0, Math.min(index, POLICY_STEPS_SECS.length - 1));
 }
 
-function getTimeToEndBucket(timeToEndSecs: any) {
+function getTimeToEndBucket(timeToEndSecs: number) {
   if (timeToEndSecs < 6 * 60 * 60) {
     return "lt_6h";
   }
@@ -21,7 +21,7 @@ function getTimeToEndBucket(timeToEndSecs: any) {
   return "gt_72h";
 }
 
-function getBaseStepIndex(timeToEndBucket: any) {
+function getBaseStepIndex(timeToEndBucket: string) {
   switch (timeToEndBucket) {
     case "lt_6h":
       return 1;
@@ -35,7 +35,7 @@ function getBaseStepIndex(timeToEndBucket: any) {
   }
 }
 
-function normalizeActivitySignal(activitySignal: any) {
+function normalizeActivitySignal(activitySignal: unknown) {
   if (typeof activitySignal !== "string") {
     return "normal";
   }
@@ -49,7 +49,7 @@ function normalizeActivitySignal(activitySignal: any) {
   return "normal";
 }
 
-function getAmbiguityScore(clarification: any) {
+function getAmbiguityScore(clarification: { llmOutput?: { ambiguity_score?: unknown } } | null | undefined) {
   const score = clarification?.llmOutput?.ambiguity_score;
 
   if (typeof score === "number" && Number.isFinite(score)) {
@@ -59,8 +59,14 @@ function getAmbiguityScore(clarification: any) {
   return 0;
 }
 
-export function buildAdaptiveReviewWindow({ clarification, market, now }: any) {
-  const ambiguityScore = getAmbiguityScore(clarification);
+export type BuildAdaptiveReviewWindowOptions = {
+  clarification: unknown;
+  market: { activitySignal?: unknown; closesAt?: string | null } | null | undefined;
+  now: Date;
+};
+
+export function buildAdaptiveReviewWindow({ clarification, market, now }: BuildAdaptiveReviewWindowOptions) {
+  const ambiguityScore = getAmbiguityScore(clarification as { llmOutput?: { ambiguity_score?: unknown } } | null | undefined);
   const activitySignal = normalizeActivitySignal(market?.activitySignal);
   const closesAt = typeof market?.closesAt === "string" ? Date.parse(market.closesAt) : Number.NaN;
   const currentTime = now.getTime();

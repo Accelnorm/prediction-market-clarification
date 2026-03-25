@@ -1,22 +1,23 @@
 import { generateMarketInterpretation } from "./llm-provider.js";
 import { buildAdaptiveReviewWindow } from "./review-window-policy.js";
+import type { MarketRecord, ReviewerScan } from "./types.js";
 
-function buildRecommendation(llmOutput: any) {
-  return llmOutput.ambiguity_score >= 0.5 ? "review" : "monitor";
+function buildRecommendation(llmOutput: { ambiguity_score?: number }) {
+  return (llmOutput.ambiguity_score ?? 0) >= 0.5 ? "review" : "monitor";
 }
 
-function normalizeMarketText(text: any) {
+function normalizeMarketText(text: unknown) {
   return String(text ?? "")
     .trim()
     .replace(/\s+/g, " ");
 }
 
-function buildMarketTextKey(market: any) {
+function buildMarketTextKey(market: MarketRecord) {
   return normalizeMarketText(market?.resolution ?? market?.resolutionText ?? market?.title ?? "");
 }
 
-function isUpcomingMarket(market: any, now: any) {
-  const closesAt = market?.closesAt ?? market?.endTime ?? market?.expiryDate ?? null;
+function isUpcomingMarket(market: MarketRecord, now: Date) {
+  const closesAt = market?.closesAt ?? market?.endTime ?? null;
 
   if (typeof closesAt !== "string" || closesAt.trim() === "") {
     return false;
@@ -26,17 +27,35 @@ function isUpcomingMarket(market: any, now: any) {
   return Number.isFinite(closesAtMs) && closesAtMs > now.getTime();
 }
 
-function cloneScanForEvent({ sourceScan, jobId, eventId, createdAt }: any) {
+function cloneScanForEvent({ sourceScan, jobId, eventId, createdAt }: { sourceScan: ReviewerScan; jobId: string | null; eventId: string; createdAt: string }) {
   return {
     ...sourceScan,
     scanId: `scan_${eventId}_${createdAt}`,
     jobId: jobId ?? null,
     eventId,
     createdAt,
-    reusedFromScanId: sourceScan.scanId,
+    reusedFromScanId: sourceScan.scanId ?? null,
     reusedFromEventId: sourceScan.eventId
   };
 }
+
+export type CreateReviewerMarketScanOptions = {
+  jobId: string | null;
+  eventId: string;
+  marketCacheRepository: {
+    findByMarketId?: (marketId: string) => Promise<MarketRecord | null>;
+  } | null | undefined;
+  reviewerScanRepository: {
+    create?: (scan: ReviewerScan) => Promise<unknown>;
+    list?: () => Promise<ReviewerScan[]>;
+    findLatestByEventId?: (eventId: string) => Promise<ReviewerScan | null>;
+  } | null | undefined;
+  now: () => Date;
+  llmRuntime: unknown;
+  requireUpcomingOpenMarket?: boolean;
+  dedupeByMarketText?: boolean;
+  inFlightMarketTextScans?: Map<string, Promise<ReviewerScan>> | null;
+};
 
 export async function createReviewerMarketScan({
   jobId,
@@ -47,9 +66,9 @@ export async function createReviewerMarketScan({
   llmRuntime,
   requireUpcomingOpenMarket = false,
   dedupeByMarketText = false,
-  inFlightMarketTextScans = null as Map<any, any> | null
-}: any) {
-  const market = await marketCacheRepository.findByMarketId(eventId);
+  inFlightMarketTextScans = null
+}: CreateReviewerMarketScanOptions) {
+  const market = await marketCacheRepository?.findByMarketId?.(eventId);
 
   if (!market) {
     throw Object.assign(
@@ -83,8 +102,8 @@ export async function createReviewerMarketScan({
     const scans = (await reviewerScanRepository?.list?.()) ?? [];
     return (
       scans
-        .filter((scan: any) => scan.marketTextKey === marketTextKey)
-        .sort((left: any, right: any) => right.createdAt.localeCompare(left.createdAt))
+        .filter((scan: ReviewerScan) => scan.marketTextKey === marketTextKey)
+        .sort((left: ReviewerScan, right: ReviewerScan) => right.createdAt.localeCompare(left.createdAt))
         .at(0) ?? null
     );
   }
@@ -98,31 +117,31 @@ export async function createReviewerMarketScan({
         question: `Review this market for ambiguity and suggest clarifying edits.`
       },
       market,
-      llmRuntime,
+      llmRuntime: llmRuntime as Record<string, unknown>,
       promptProfile: "review-upcoming-market"
     });
     const reviewWindow = buildAdaptiveReviewWindow({
       clarification: {
-        llmOutput
+        llmOutput: llmOutput as { ambiguity_score?: unknown }
       },
       market,
       now: new Date(createdAt)
     });
-    const scan = {
+    const scan: ReviewerScan = {
       scanId: `scan_${eventId}_${createdAt}`,
       jobId: jobId ?? null,
       eventId,
       createdAt,
-      ambiguity_score: llmOutput.ambiguity_score,
-      recommendation: buildRecommendation(llmOutput),
-      flagged_clauses: [llmOutput.cited_clause],
-      suggested_market_text: llmOutput.suggested_market_text,
-      suggested_note: llmOutput.suggested_note,
+      ambiguity_score: (llmOutput as { ambiguity_score?: unknown }).ambiguity_score,
+      recommendation: buildRecommendation(llmOutput as { ambiguity_score?: number }),
+      flagged_clauses: [(llmOutput as { cited_clause?: unknown }).cited_clause],
+      suggested_market_text: (llmOutput as { suggested_market_text?: unknown }).suggested_market_text,
+      suggested_note: (llmOutput as { suggested_note?: unknown }).suggested_note,
       review_window: reviewWindow,
       marketTextKey
     };
 
-    await reviewerScanRepository.create(scan);
+    await reviewerScanRepository?.create?.(scan);
 
     return scan;
   }
@@ -141,7 +160,7 @@ export async function createReviewerMarketScan({
         eventId,
         createdAt: scanNow.toISOString()
       });
-      await reviewerScanRepository.create(reusedScan);
+      await reviewerScanRepository?.create?.(reusedScan);
       return reusedScan;
     }
 
@@ -173,7 +192,7 @@ export async function createReviewerMarketScan({
       eventId,
       createdAt: scanNow.toISOString()
     });
-    await reviewerScanRepository.create(reusedScan);
+    await reviewerScanRepository?.create?.(reusedScan);
     return reusedScan;
   }
 

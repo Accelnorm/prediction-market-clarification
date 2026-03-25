@@ -1,15 +1,17 @@
+import type { ClarificationRequest } from "./types.js";
+
 const MARKET_ID_PATTERN = /^gm[a-z0-9_-]*[a-z0-9]$/i;
 const CLARIFY_COMMAND_PATTERN = /^\/clarify(?:@\w+)?\s+/i;
 
-function invalidTelegramPayload(message: any) {
+function invalidTelegramPayload(message: string) {
   return Object.assign(new Error(message), { statusCode: 400, code: "INVALID_TELEGRAM_UPDATE" });
 }
 
-function validationError(code: any, message: any) {
+function validationError(code: string, message: string) {
   return Object.assign(new Error(message), { statusCode: 400, code });
 }
 
-function parseClarifyCommand(text: any) {
+function parseClarifyCommand(text: unknown) {
   if (typeof text !== "string" || !CLARIFY_COMMAND_PATTERN.test(text)) {
     throw invalidTelegramPayload(
       "Telegram update must include a /clarify command with a market id and question."
@@ -48,26 +50,45 @@ function parseClarifyCommand(text: any) {
   };
 }
 
-function defaultCreateRequestId(update: any) {
+type TelegramUpdate = {
+  update_id?: number;
+  message?: {
+    text?: unknown;
+    chat?: { id?: unknown };
+    from?: { id?: unknown; username?: unknown };
+  };
+};
+
+function defaultCreateRequestId(update: TelegramUpdate) {
   return `clr_tg_${String(update.update_id ?? Date.now())}`;
 }
+
+export type CreateTelegramClarificationRequestOptions = {
+  update: TelegramUpdate;
+  repository: {
+    create: (request: ClarificationRequest) => Promise<unknown>;
+  };
+  now?: () => Date;
+  createRequestId?: (update: TelegramUpdate) => string;
+};
 
 export async function createTelegramClarificationRequest({
   update,
   repository,
   now = () => new Date(),
   createRequestId = defaultCreateRequestId
-}: any) {
+}: CreateTelegramClarificationRequestOptions) {
   if (!update?.message?.chat?.id || !update?.message?.from?.id) {
     throw invalidTelegramPayload("Telegram update must include both chat and sender identifiers.");
   }
 
   const { marketId, question } = parseClarifyCommand(update.message.text);
   const createdAt = now().toISOString();
-  const request = {
+  const request: ClarificationRequest = {
     requestId: String(createRequestId(update)),
     source: "telegram",
     status: "pending",
+    eventId: marketId,
     marketId,
     question,
     telegramChatId: String(update.message.chat.id),
@@ -75,7 +96,8 @@ export async function createTelegramClarificationRequest({
     telegramUsername: update.message.from.username
       ? String(update.message.from.username)
       : null,
-    createdAt
+    createdAt,
+    updatedAt: createdAt
   };
 
   await repository.create(request);

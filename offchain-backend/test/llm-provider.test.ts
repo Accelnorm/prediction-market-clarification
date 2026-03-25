@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -41,9 +40,9 @@ test("generateMarketInterpretation falls back to the deterministic interpretatio
 
 test("generateMarketInterpretation uses an OpenAI-compatible provider response when configured", async () => {
   const originalFetch = globalThis.fetch;
-  const requests = [];
+  const requests: Array<{ url: unknown; options: unknown }> = [];
 
-  globalThis.fetch = async (url: any, options: any) => {
+  globalThis.fetch = (async (url: unknown, options: unknown) => {
     requests.push({ url, options });
 
     return {
@@ -72,7 +71,7 @@ test("generateMarketInterpretation uses an OpenAI-compatible provider response w
         };
       }
     };
-  };
+  }) as unknown as typeof globalThis.fetch;
 
   try {
     const result = await generateMarketInterpretation({
@@ -92,10 +91,10 @@ test("generateMarketInterpretation uses an OpenAI-compatible provider response w
     assert.equal(result.usedFallback, false);
     assert.equal(result.llmOutput.ambiguity_score, 0.81);
     assert.equal(
-      requests[0].url,
+      (requests[0] as { url: string }).url,
       "https://openrouter.test/api/v1/chat/completions"
     );
-    assert.equal(requests[0].options.method, "POST");
+    assert.equal((requests[0] as { options: { method: string } }).options.method, "POST");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -103,9 +102,9 @@ test("generateMarketInterpretation uses an OpenAI-compatible provider response w
 
 test("generateMarketInterpretation loads the review-upcoming-market skill when requested", async () => {
   const originalFetch = globalThis.fetch;
-  const requests = [];
+  const requests: Array<{ url: unknown; options: unknown }> = [];
 
-  globalThis.fetch = async (url: any, options: any) => {
+  globalThis.fetch = (async (url: unknown, options: unknown) => {
     requests.push({ url, options });
 
     return {
@@ -134,7 +133,7 @@ test("generateMarketInterpretation loads the review-upcoming-market skill when r
         };
       }
     };
-  };
+  }) as unknown as typeof globalThis.fetch;
 
   try {
     await generateMarketInterpretation({
@@ -149,7 +148,7 @@ test("generateMarketInterpretation loads the review-upcoming-market skill when r
       promptProfile: "review-upcoming-market"
     });
 
-    const requestBody = JSON.parse(requests[0].options.body);
+    const requestBody = JSON.parse((requests[0] as { options: { body: string } }).options.body);
     const systemPrompt = requestBody.messages[0].content;
 
     assert.match(systemPrompt, /# Review Upcoming Market/);
@@ -162,9 +161,9 @@ test("generateMarketInterpretation loads the review-upcoming-market skill when r
 
 test("generateMarketInterpretation loads the issue-clarification-response skill when requested", async () => {
   const originalFetch = globalThis.fetch;
-  const requests = [];
+  const requests: Array<{ url: unknown; options: unknown }> = [];
 
-  globalThis.fetch = async (url: any, options: any) => {
+  globalThis.fetch = (async (url: unknown, options: unknown) => {
     requests.push({ url, options });
 
     return {
@@ -193,7 +192,7 @@ test("generateMarketInterpretation loads the issue-clarification-response skill 
         };
       }
     };
-  };
+  }) as unknown as typeof globalThis.fetch;
 
   try {
     await generateMarketInterpretation({
@@ -208,7 +207,7 @@ test("generateMarketInterpretation loads the issue-clarification-response skill 
       promptProfile: "issue-clarification-response"
     });
 
-    const requestBody = JSON.parse(requests[0].options.body);
+    const requestBody = JSON.parse((requests[0] as { options: { body: string } }).options.body);
     const systemPrompt = requestBody.messages[0].content;
 
     assert.match(systemPrompt, /# Issue Clarification Response/);
@@ -221,9 +220,9 @@ test("generateMarketInterpretation loads the issue-clarification-response skill 
 
 test("generateMarketInterpretation uses an Anthropic-compatible provider response when configured", async () => {
   const originalFetch = globalThis.fetch;
-  const requests = [];
+  const requests: Array<{ url: unknown; options: unknown }> = [];
 
-  globalThis.fetch = async (url: any, options: any) => {
+  globalThis.fetch = (async (url: unknown, options: unknown) => {
     requests.push({ url, options });
 
     return {
@@ -249,7 +248,7 @@ test("generateMarketInterpretation uses an Anthropic-compatible provider respons
         };
       }
     };
-  };
+  }) as unknown as typeof globalThis.fetch;
 
   try {
     const result = await generateMarketInterpretation({
@@ -268,8 +267,11 @@ test("generateMarketInterpretation uses an Anthropic-compatible provider respons
     assert.equal(result.modelId, "claude-sonnet-4-20250514");
     assert.equal(result.usedFallback, false);
     assert.equal(result.llmOutput.verdict, "clear");
-    assert.equal(requests[0].url, "https://anthropic.test/v1/messages");
-    assert.equal(requests[0].options.headers["x-api-key"], "claude-key");
+    assert.equal((requests[0] as { url: string }).url, "https://anthropic.test/v1/messages");
+    assert.equal(
+      (requests[0] as { options: { headers: Record<string, string> } }).options.headers["x-api-key"],
+      "claude-key"
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -2,8 +2,11 @@ import {
   normalizeGeminiMarket,
   sameNormalizedMarketShape
 } from "./gemini-market-normalizer.js";
+import type { MarketRecord } from "./types.js";
 
-function isMarketWithStatus(market: any, status: any) {
+type SourceMarket = Record<string, unknown> & { id?: unknown; status?: unknown; createdAt?: unknown };
+
+function isMarketWithStatus(market: SourceMarket, status: string) {
   if (typeof market?.status === "string") {
     return market.status.toLowerCase() === status;
   }
@@ -11,8 +14,8 @@ function isMarketWithStatus(market: any, status: any) {
   return false;
 }
 
-function uniqueMarkets(markets: any[] = []) {
-  const dedupedById = new Map();
+function uniqueMarkets(markets: SourceMarket[] = []) {
+  const dedupedById = new Map<string, SourceMarket>();
 
   for (const market of Array.isArray(markets) ? markets : []) {
     if (!market || typeof market.id === "undefined" || market.id === null) {
@@ -25,7 +28,14 @@ function uniqueMarkets(markets: any[] = []) {
   return [...dedupedById.values()];
 }
 
-function shouldKeepNewlyListedEvent({ sourceMarket, syncState }: any) {
+type SyncState = {
+  lastCreatedAt?: string | null;
+  boundaryEventIds?: string[];
+  lastSyncedAt?: string | null;
+  updatedAt?: string | null;
+};
+
+function shouldKeepNewlyListedEvent({ sourceMarket, syncState }: { sourceMarket: SourceMarket; syncState: SyncState | null | undefined }) {
   const createdAt = typeof sourceMarket?.createdAt === "string" ? sourceMarket.createdAt : null;
 
   if (!createdAt || !syncState?.lastCreatedAt) {
@@ -43,7 +53,7 @@ function shouldKeepNewlyListedEvent({ sourceMarket, syncState }: any) {
   return !Array.isArray(syncState.boundaryEventIds) || !syncState.boundaryEventIds.includes(String(sourceMarket.id));
 }
 
-function buildNextSyncState({ sourceMarkets, syncedAt }: any) {
+function buildNextSyncState({ sourceMarkets, syncedAt }: { sourceMarkets: SourceMarket[]; syncedAt: string }) {
   if (!Array.isArray(sourceMarkets) || sourceMarkets.length === 0) {
     return {
       lastCreatedAt: null,
@@ -54,14 +64,14 @@ function buildNextSyncState({ sourceMarkets, syncedAt }: any) {
   }
 
   const latestCreatedAt = sourceMarkets
-    .map((market: any) => (typeof market?.createdAt === "string" ? market.createdAt : null))
+    .map((market: SourceMarket) => (typeof market?.createdAt === "string" ? market.createdAt : null))
     .filter(Boolean)
-    .sort((left: any, right: any) => right.localeCompare(left))[0] ?? null;
+    .sort((left: string | null, right: string | null) => (right as string).localeCompare(left as string))[0] ?? null;
   const boundaryEventIds = latestCreatedAt
     ? sourceMarkets
-        .filter((market: any) => market?.createdAt === latestCreatedAt)
-        .map((market: any) => String(market.id))
-        .sort((left: any, right: any) => left.localeCompare(right))
+        .filter((market: SourceMarket) => market?.createdAt === latestCreatedAt)
+        .map((market: SourceMarket) => String(market.id))
+        .sort((left: string, right: string) => left.localeCompare(right))
     : [];
 
   return {
@@ -72,17 +82,30 @@ function buildNextSyncState({ sourceMarkets, syncedAt }: any) {
   };
 }
 
+type MarketCacheRepository = {
+  load: () => Promise<{ markets: MarketRecord[] }>;
+  save: (markets: MarketRecord[]) => Promise<void>;
+};
+
+type SyncMarketSetOptions = {
+  repository: MarketCacheRepository;
+  fetchMarkets: () => Promise<unknown[]>;
+  now?: () => Date;
+  includeMarket?: (market: SourceMarket) => boolean;
+  totalKey: string;
+};
+
 async function syncMarketSet({
   repository,
   fetchMarkets,
   now = () => new Date(),
-  includeMarket = (() => true) as (market: any) => boolean,
+  includeMarket = (() => true),
   totalKey
-}: any) {
-  const sourceMarkets = uniqueMarkets(await fetchMarkets());
+}: SyncMarketSetOptions) {
+  const sourceMarkets = uniqueMarkets(await fetchMarkets() as SourceMarket[]);
   const matchingMarkets = sourceMarkets.filter(includeMarket);
   const cache = await repository.load();
-  const marketsById = new Map(cache.markets.map((market: any) => [market.marketId, market]));
+  const marketsById = new Map(cache.markets.map((market: MarketRecord) => [market.marketId, market]));
   const lastSyncedAt = now().toISOString();
 
   let inserted = 0;
@@ -107,7 +130,7 @@ async function syncMarketSet({
     );
   }
 
-  const markets = [...marketsById.values()].sort((left: any, right: any) =>
+  const markets = [...marketsById.values()].sort((left: MarketRecord, right: MarketRecord) =>
     left.marketId.localeCompare(right.marketId)
   );
 
@@ -120,38 +143,63 @@ async function syncMarketSet({
   };
 }
 
-export async function syncMarkets({ repository, fetchMarkets, now = () => new Date() }: any) {
+export type SyncMarketsOptions = {
+  repository: MarketCacheRepository;
+  fetchMarkets: () => Promise<unknown[]>;
+  now?: () => Date;
+};
+
+export async function syncMarkets({ repository, fetchMarkets, now = () => new Date() }: SyncMarketsOptions) {
   return syncMarketSet({
     repository,
     fetchMarkets,
     now,
-    includeMarket: (market: any) => isMarketWithStatus(market, "active"),
+    includeMarket: (market: SourceMarket) => isMarketWithStatus(market, "active"),
     totalKey: "totalActive"
   });
 }
 
-export async function syncUpcomingMarkets({ repository, fetchMarkets, now = () => new Date() }: any) {
+export async function syncUpcomingMarkets({ repository, fetchMarkets, now = () => new Date() }: SyncMarketsOptions) {
   return syncMarketSet({
     repository,
     fetchMarkets,
     now,
-    includeMarket: (market: any) => isMarketWithStatus(market, "approved"),
+    includeMarket: (market: SourceMarket) => isMarketWithStatus(market, "approved"),
     totalKey: "totalUpcoming"
   });
 }
+
+export type SyncMarketCategoriesOptions = {
+  repository: { setCatalog: (scope: string, data: { categories: string[]; updatedAt: string | null }) => Promise<unknown> };
+  fetchCategories: () => Promise<string[]>;
+  scope: string;
+  now?: () => Date;
+};
 
 export async function syncMarketCategories({
   repository,
   fetchCategories,
   scope,
   now = () => new Date()
-}: any) {
+}: SyncMarketCategoriesOptions) {
   const categories = await fetchCategories();
   return repository.setCatalog(scope, {
     categories,
     updatedAt: now().toISOString()
   });
 }
+
+export type SyncNewlyListedMarketsOptions = {
+  activeRepository: MarketCacheRepository;
+  upcomingRepository: MarketCacheRepository;
+  fetchMarkets: () => Promise<unknown[]>;
+  syncStateRepository: {
+    getState: (scope: string) => Promise<SyncState | null | undefined>;
+    setState: (scope: string, state: SyncState) => Promise<unknown>;
+  };
+  syncStateScope?: string;
+  now?: () => Date;
+};
 
 export async function syncNewlyListedMarkets({
   activeRepository,
@@ -160,10 +208,10 @@ export async function syncNewlyListedMarkets({
   syncStateRepository,
   syncStateScope = "markets:newly-listed",
   now = () => new Date()
-}: any) {
-  const sourceMarkets = uniqueMarkets(await fetchMarkets());
+}: SyncNewlyListedMarketsOptions) {
+  const sourceMarkets = uniqueMarkets(await fetchMarkets() as SourceMarket[]);
   const syncState = await syncStateRepository.getState(syncStateScope);
-  const candidates = sourceMarkets.filter((market: any) =>
+  const candidates = sourceMarkets.filter((market: SourceMarket) =>
     shouldKeepNewlyListedEvent({
       sourceMarket: market,
       syncState
@@ -172,8 +220,8 @@ export async function syncNewlyListedMarkets({
   const syncTimestamp = now().toISOString();
   const activeCache = await activeRepository.load();
   const upcomingCache = await upcomingRepository.load();
-  const activeById = new Map(activeCache.markets.map((market: any) => [market.marketId, market]));
-  const upcomingById = new Map(upcomingCache.markets.map((market: any) => [market.marketId, market]));
+  const activeById = new Map(activeCache.markets.map((market: MarketRecord) => [market.marketId, market]));
+  const upcomingById = new Map(upcomingCache.markets.map((market: MarketRecord) => [market.marketId, market]));
 
   let insertedActive = 0;
   let updatedActive = 0;

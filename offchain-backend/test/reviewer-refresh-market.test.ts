@@ -1,13 +1,14 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
+import type { AddressInfo } from "node:net";
 
 import { createServer } from "../src/server.js";
 import { FileClarificationRequestRepository } from "../src/clarification-request-repository.js";
 import { FileMarketCacheRepository } from "../src/market-cache-repository.js";
+import type { MarketRecord } from "../src/types.js";
 
 const VALID_MARKET = {
   marketId: "gm_btc_above_100k",
@@ -19,14 +20,14 @@ const VALID_MARKET = {
   lastSyncedAt: "2026-03-21T18:59:00.000Z"
 };
 
-async function startTestServer(options: any) {
+async function startTestServer(options: Parameters<typeof createServer>[0]) {
   const server = createServer(options);
 
-  await new Promise((resolve: any) => {
+  await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
 
-  const address = server.address();
+  const address = server.address() as AddressInfo;
 
   return {
     server,
@@ -34,9 +35,9 @@ async function startTestServer(options: any) {
   };
 }
 
-async function stopTestServer(server: any) {
-  await new Promise((resolve: any, reject: any) => {
-    server.close((error: any) => {
+async function stopTestServer(server: ReturnType<typeof createServer>) {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error?: Error) => {
       if (error) {
         reject(error);
         return;
@@ -47,13 +48,13 @@ async function stopTestServer(server: any) {
   });
 }
 
-async function createMarketCacheRepository(tempDir: any, markets: any = [VALID_MARKET]) {
+async function createMarketCacheRepository(tempDir: string, markets: MarketRecord[] = [VALID_MARKET as MarketRecord]) {
   const repository = new FileMarketCacheRepository(path.join(tempDir, "market-cache.json"));
   await repository.save(markets);
   return repository;
 }
 
-function createReviewerHeaders(token: any = "reviewer-secret") {
+function createReviewerHeaders(token: string = "reviewer-secret") {
   return {
     "x-reviewer-token": token
   };
@@ -88,7 +89,7 @@ test("POST /api/reviewer/refresh-market/:eventId refreshes cached market data wi
     marketCacheRepository,
     now: () => new Date("2026-03-21T21:00:00.000Z"),
     reviewerAuthToken: "reviewer-secret",
-    fetchReviewerMarketSource: async (eventId: any) => {
+    fetchReviewerMarketSource: async (eventId: string) => {
       assert.equal(eventId, "gm_btc_above_100k");
       return {
         id: "gm_btc_above_100k",

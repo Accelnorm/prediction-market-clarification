@@ -49,14 +49,23 @@ export function resolveClarificationFinalityConfig(env: NodeJS.ProcessEnv = proc
   };
 }
 
+export type ProductionRuntimeConfigOptions = {
+  env?: NodeJS.ProcessEnv;
+  llmRuntime: { apiKey?: string | null };
+  x402PaymentConfig: { recipientAddress?: string | null; network?: string | null; mintAddress?: string | null; facilitatorAuthToken?: string | null; payaiApiKeyId?: string | null; payaiApiKeySecret?: string | null };
+  artifactPublicationConfig?: { provider: string; enabled: boolean; ipfsApiUrl?: string | null };
+  telegramEnabled?: boolean;
+  hasDatabase?: boolean;
+};
+
 export function validateProductionRuntimeConfig({
   env = process.env,
   llmRuntime,
   x402PaymentConfig,
-  artifactPublicationConfig = { provider: "disabled", enabled: false } as { provider: string; enabled: boolean; ipfsApiUrl?: string | null },
+  artifactPublicationConfig = { provider: "disabled", enabled: false },
   telegramEnabled = false,
   hasDatabase = false
-}: any) {
+}: ProductionRuntimeConfigOptions) {
   if (!isProductionRuntime(env)) {
     return;
   }

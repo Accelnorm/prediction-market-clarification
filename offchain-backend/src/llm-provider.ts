@@ -1,10 +1,11 @@
 import { readFile } from "node:fs/promises";
+import type { MarketRecord, ClarificationRequest } from "./types.js";
 
-function validationError(code: any, message: any, statusCode: any = 500) {
+function validationError(code: string, message: string, statusCode: number = 500) {
   return Object.assign(new Error(message), { code, statusCode });
 }
 
-export function buildDefaultInterpretation({ market }: any) {
+export function buildDefaultInterpretation({ market }: { market: MarketRecord }) {
   return {
     verdict: "needs_clarification",
     llm_status: "completed",
@@ -32,7 +33,7 @@ const PROMPT_PROFILE_FILES: Record<string, string[]> = {
   ]
 };
 
-const promptProfileCache = new Map();
+const promptProfileCache = new Map<string, Promise<string>>();
 
 function buildDefaultSystemPrompt() {
   return [
@@ -50,18 +51,18 @@ function buildDefaultSystemPrompt() {
   ].join(" ");
 }
 
-async function readPromptProfile(profile: any) {
+async function readPromptProfile(profile: string | null | undefined) {
   if (!profile || !PROMPT_PROFILE_FILES[profile]) {
     return buildDefaultSystemPrompt();
   }
 
   if (promptProfileCache.has(profile)) {
-    return promptProfileCache.get(profile);
+    return promptProfileCache.get(profile) as Promise<string>;
   }
 
   const promptPromise = (async () => {
     const sections = await Promise.all(
-      PROMPT_PROFILE_FILES[profile].map((relativePath: any) =>
+      PROMPT_PROFILE_FILES[profile].map((relativePath: string) =>
         readFile(new URL(relativePath, import.meta.url), "utf8")
       )
     );
@@ -83,20 +84,20 @@ async function readPromptProfile(profile: any) {
   }
 }
 
-function buildUserPrompt({ clarification, market }: any) {
+function buildUserPrompt({ clarification, market }: { clarification: Partial<ClarificationRequest>; market: MarketRecord | null | undefined }) {
   return JSON.stringify(
     {
       task: "analyze_prediction_market_clarification",
       market: {
-        marketId: market.marketId ?? null,
-        title: market.title ?? null,
-        resolution: market.resolution ?? market.resolutionText ?? null,
-        description: market.description ?? null,
-        closesAt: market.closesAt ?? market.endTime ?? null,
-        url: market.url ?? null,
-        category: market.category ?? null,
-        termsLink: market.termsLink ?? null,
-        contracts: Array.isArray(market.contracts) ? market.contracts : []
+        marketId: market?.marketId ?? null,
+        title: market?.title ?? null,
+        resolution: market?.resolution ?? market?.resolutionText ?? null,
+        description: (market as Record<string, unknown> | undefined)?.description ?? null,
+        closesAt: market?.closesAt ?? market?.endTime ?? null,
+        url: market?.url ?? null,
+        category: market?.category ?? null,
+        termsLink: market?.termsLink ?? null,
+        contracts: Array.isArray(market?.contracts) ? market.contracts : []
       },
       clarificationRequest: {
         clarificationId: clarification.clarificationId ?? null,
@@ -109,7 +110,7 @@ function buildUserPrompt({ clarification, market }: any) {
   );
 }
 
-function extractJsonObject(text: any) {
+function extractJsonObject(text: unknown) {
   if (typeof text !== "string") {
     throw validationError("LLM_INVALID_RESPONSE", "LLM response did not contain text.");
   }
@@ -167,7 +168,7 @@ function extractJsonObject(text: any) {
   throw validationError("LLM_INVALID_RESPONSE", "LLM response JSON could not be parsed.");
 }
 
-function normalizeString(value: any, fallback: any = "") {
+function normalizeString(value: unknown, fallback: string = "") {
   if (typeof value !== "string") {
     return fallback;
   }
@@ -176,7 +177,7 @@ function normalizeString(value: any, fallback: any = "") {
   return trimmed === "" ? fallback : trimmed;
 }
 
-function normalizeOptionalString(value: any) {
+function normalizeOptionalString(value: unknown) {
   if (typeof value !== "string") {
     return null;
   }
@@ -185,7 +186,7 @@ function normalizeOptionalString(value: any) {
   return trimmed === "" ? null : trimmed;
 }
 
-function normalizeScore(value: any, fallback: any = 0.5) {
+function normalizeScore(value: unknown, fallback: number = 0.5) {
   const numeric =
     typeof value === "number"
       ? value
@@ -200,8 +201,8 @@ function normalizeScore(value: any, fallback: any = 0.5) {
   return Math.max(0, Math.min(1, Number.parseFloat(numeric.toFixed(2))));
 }
 
-export function normalizeInterpretation(payload: any, { market }: any) {
-  const resolutionText = market.resolution ?? market.resolutionText ?? "";
+export function normalizeInterpretation(payload: Record<string, unknown>, { market }: { market: MarketRecord | null | undefined }) {
+  const resolutionText = market?.resolution ?? market?.resolutionText ?? "";
   const ambiguityScore = normalizeScore(payload?.ambiguity_score, 0.5);
   const verdict =
     normalizeString(payload?.verdict, ambiguityScore >= 0.5 ? "needs_clarification" : "clear")
@@ -212,7 +213,7 @@ export function normalizeInterpretation(payload: any, { market }: any) {
   const suggestedMarketText =
     verdict === "clear"
       ? normalizeOptionalString(payload?.suggested_market_text)
-      : normalizeString(payload?.suggested_market_text, market.title ?? resolutionText);
+      : normalizeString(payload?.suggested_market_text, market?.title ?? resolutionText);
   const suggestedNote =
     verdict === "clear"
       ? normalizeOptionalString(payload?.suggested_note)
@@ -239,13 +240,22 @@ export function normalizeInterpretation(payload: any, { market }: any) {
   };
 }
 
-async function readJsonResponse(response: any) {
+async function readJsonResponse(response: Response) {
   try {
     return await response.json();
   } catch {
     return null;
   }
 }
+
+type OpenAiProviderOptions = {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+  defaultHeaders?: Record<string, string>;
+};
 
 async function callOpenAiCompatibleProvider({
   apiKey,
@@ -254,7 +264,7 @@ async function callOpenAiCompatibleProvider({
   systemPrompt,
   userPrompt,
   defaultHeaders = {}
-}: any) {
+}: OpenAiProviderOptions) {
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: {
@@ -296,6 +306,15 @@ async function callOpenAiCompatibleProvider({
   };
 }
 
+type AnthropicProviderOptions = {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  anthropicVersion: string;
+  systemPrompt: string;
+  userPrompt: string;
+};
+
 async function callAnthropicCompatibleProvider({
   apiKey,
   baseUrl,
@@ -303,7 +322,7 @@ async function callAnthropicCompatibleProvider({
   anthropicVersion,
   systemPrompt,
   userPrompt
-}: any) {
+}: AnthropicProviderOptions) {
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/messages`, {
     method: "POST",
     headers: {
@@ -337,15 +356,27 @@ async function callAnthropicCompatibleProvider({
   return {
     text: Array.isArray(payload?.content)
       ? payload.content
-          .filter((item: any) => item?.type === "text" && typeof item.text === "string")
-          .map((item: any) => item.text)
+          .filter((item: Record<string, unknown>) => item?.type === "text" && typeof item.text === "string")
+          .map((item: Record<string, unknown>) => item.text)
           .join("\n")
       : null,
     modelId: payload?.model ?? model
   };
 }
 
-function resolveRuntime(llmRuntime: any = {}) {
+type LlmRuntime = {
+  provider?: string;
+  apiKey?: string | null;
+  model?: string;
+  baseUrl?: string;
+  defaultHeaders?: Record<string, string>;
+  appUrl?: string | null;
+  appName?: string | null;
+  anthropicVersion?: string;
+  requireConfiguredProvider?: boolean;
+};
+
+function resolveRuntime(llmRuntime: LlmRuntime = {}) {
   const provider = llmRuntime.provider ?? "openrouter";
 
   if (provider === "openrouter") {
@@ -357,7 +388,8 @@ function resolveRuntime(llmRuntime: any = {}) {
       defaultHeaders: {
         ...(llmRuntime.appUrl ? { "http-referer": llmRuntime.appUrl } : {}),
         ...(llmRuntime.appName ? { "x-title": llmRuntime.appName } : {})
-      }
+      } as Record<string, string>,
+      anthropicVersion: undefined as string | undefined
     };
   }
 
@@ -367,7 +399,8 @@ function resolveRuntime(llmRuntime: any = {}) {
       apiKey: llmRuntime.apiKey ?? null,
       model: llmRuntime.model ?? "gpt-4.1-mini",
       baseUrl: llmRuntime.baseUrl ?? "https://api.openai.com/v1",
-      defaultHeaders: {}
+      defaultHeaders: {} as Record<string, string>,
+      anthropicVersion: undefined as string | undefined
     };
   }
 
@@ -377,19 +410,27 @@ function resolveRuntime(llmRuntime: any = {}) {
       apiKey: llmRuntime.apiKey ?? null,
       model: llmRuntime.model ?? "claude-sonnet-4-20250514",
       baseUrl: llmRuntime.baseUrl ?? "https://api.anthropic.com",
-      anthropicVersion: llmRuntime.anthropicVersion ?? "2023-06-01"
+      anthropicVersion: llmRuntime.anthropicVersion ?? "2023-06-01",
+      defaultHeaders: {} as Record<string, string>
     };
   }
 
   throw validationError("UNSUPPORTED_LLM_PROVIDER", `Unsupported LLM provider: ${provider}`);
 }
 
+export type GenerateMarketInterpretationOptions = {
+  clarification: Partial<ClarificationRequest>;
+  market: MarketRecord | null | undefined;
+  llmRuntime: LlmRuntime;
+  promptProfile?: string | null;
+};
+
 export async function generateMarketInterpretation({
   clarification,
   market,
   llmRuntime,
-  promptProfile = null as string | null
-}: any) {
+  promptProfile = null
+}: GenerateMarketInterpretationOptions) {
   const runtime = resolveRuntime(llmRuntime);
 
   if (!runtime.apiKey) {
@@ -402,7 +443,7 @@ export async function generateMarketInterpretation({
     }
 
     return {
-      llmOutput: buildDefaultInterpretation({ market }),
+      llmOutput: buildDefaultInterpretation({ market: market as MarketRecord }),
       providerUsed: "stub",
       modelId: runtime.model,
       usedFallback: true
@@ -417,7 +458,7 @@ export async function generateMarketInterpretation({
           apiKey: runtime.apiKey,
           baseUrl: runtime.baseUrl,
           model: runtime.model,
-          anthropicVersion: runtime.anthropicVersion,
+          anthropicVersion: runtime.anthropicVersion as string,
           systemPrompt,
           userPrompt
         })

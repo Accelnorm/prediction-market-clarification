@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -41,9 +40,9 @@ test("assertTelegramWebhookSecret rejects mismatched Telegram secret tokens", ()
 
 test("sendTelegramMessage posts a message to the Telegram Bot API", async () => {
   const originalFetch = globalThis.fetch;
-  const requests = [];
+  const requests: Array<{ url: unknown; options: unknown }> = [];
 
-  globalThis.fetch = async (url: any, options: any) => {
+  globalThis.fetch = (async (url: unknown, options: unknown) => {
     requests.push({ url, options });
 
     return {
@@ -57,7 +56,7 @@ test("sendTelegramMessage posts a message to the Telegram Bot API", async () => 
         };
       }
     };
-  };
+  }) as unknown as typeof globalThis.fetch;
 
   try {
     const result = await sendTelegramMessage({
@@ -94,7 +93,7 @@ test("sendTelegramMessage posts a message to the Telegram Bot API", async () => 
 test("sendTelegramMessage surfaces Telegram API failures as structured 502 errors", async () => {
   const originalFetch = globalThis.fetch;
 
-  globalThis.fetch = async () => ({
+  globalThis.fetch = (async () => ({
     ok: false,
     async json() {
       return {
@@ -102,7 +101,7 @@ test("sendTelegramMessage surfaces Telegram API failures as structured 502 error
         description: "Forbidden: bot was blocked by the user"
       };
     }
-  });
+  })) as unknown as typeof globalThis.fetch;
 
   try {
     await assert.rejects(
@@ -125,9 +124,9 @@ test("sendTelegramMessage surfaces Telegram API failures as structured 502 error
 
 test("registerTelegramWebhook posts the webhook URL and secret to Telegram", async () => {
   const originalFetch = globalThis.fetch;
-  const requests = [];
+  const requests: Array<{ url: unknown; options: unknown }> = [];
 
-  globalThis.fetch = async (url: any, options: any) => {
+  globalThis.fetch = (async (url: unknown, options: unknown) => {
     requests.push({ url, options });
 
     return {
@@ -139,7 +138,7 @@ test("registerTelegramWebhook posts the webhook URL and secret to Telegram", asy
         };
       }
     };
-  };
+  }) as unknown as typeof globalThis.fetch;
 
   try {
     const result = await registerTelegramWebhook({

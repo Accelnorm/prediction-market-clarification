@@ -1,4 +1,11 @@
-function extractRichTextText(value: any): string {
+import type { MarketRecord, ContractRecord } from "./types.js";
+
+type RichTextNode = {
+  value?: string;
+  content?: unknown[];
+};
+
+function extractRichTextText(value: unknown): string {
   if (typeof value === "string") {
     return value;
   }
@@ -11,18 +18,20 @@ function extractRichTextText(value: any): string {
     return value.map(extractRichTextText).filter(Boolean).join(" ").trim();
   }
 
-  if (typeof value.value === "string") {
-    return value.value;
+  const node = value as RichTextNode;
+
+  if (typeof node.value === "string") {
+    return node.value;
   }
 
-  if (Array.isArray(value.content)) {
-    return value.content.map(extractRichTextText).filter(Boolean).join(" ").trim();
+  if (Array.isArray(node.content)) {
+    return node.content.map(extractRichTextText).filter(Boolean).join(" ").trim();
   }
 
   return "";
 }
 
-function normalizeNullableString(value: any) {
+function normalizeNullableString(value: unknown) {
   if (value === undefined || value === null) {
     return null;
   }
@@ -31,12 +40,12 @@ function normalizeNullableString(value: any) {
   return normalized === "" ? null : normalized;
 }
 
-function normalizeOptionalString(value: any) {
+function normalizeOptionalString(value: unknown) {
   const normalized = normalizeNullableString(value);
   return normalized === null ? undefined : normalized;
 }
 
-function normalizeOptionalNumberString(value: any) {
+function normalizeOptionalNumberString(value: unknown) {
   if (value === undefined || value === null || value === "") {
     return undefined;
   }
@@ -45,33 +54,58 @@ function normalizeOptionalNumberString(value: any) {
   return normalized === "" ? undefined : normalized;
 }
 
-function normalizeArray(values: any) {
+function normalizeArray(values: unknown) {
   if (!Array.isArray(values)) {
     return [];
   }
 
   return values
-    .map((value: any) => normalizeNullableString(value))
-    .filter((value: any) => typeof value === "string");
+    .map((value: unknown) => normalizeNullableString(value))
+    .filter((value: string | null): value is string => typeof value === "string");
 }
 
-function normalizeSubcategory(subcategory: any) {
+type SourceSubcategory = {
+  id?: unknown;
+  slug?: unknown;
+  name?: unknown;
+  path?: unknown;
+};
+
+function normalizeSubcategory(subcategory: unknown) {
   if (!subcategory || typeof subcategory !== "object") {
     return null;
   }
 
+  const sub = subcategory as SourceSubcategory;
+
   return {
     id:
-      subcategory.id === undefined || subcategory.id === null
+      sub.id === undefined || sub.id === null
         ? null
-        : String(subcategory.id),
-    slug: normalizeNullableString(subcategory.slug),
-    name: normalizeNullableString(subcategory.name),
-    path: normalizeArray(subcategory.path)
+        : String(sub.id),
+    slug: normalizeNullableString(sub.slug),
+    name: normalizeNullableString(sub.name),
+    path: normalizeArray(sub.path)
   };
 }
 
-function normalizeContract(contract: any) {
+type SourceContract = {
+  id?: unknown;
+  label?: unknown;
+  abbreviatedName?: unknown;
+  description?: unknown;
+  status?: unknown;
+  ticker?: unknown;
+  instrumentSymbol?: unknown;
+  marketState?: unknown;
+  effectiveDate?: unknown;
+  expiryDate?: unknown;
+  termsAndConditionsUrl?: unknown;
+  prices?: unknown;
+  sortOrder?: unknown;
+};
+
+function normalizeContract(contract: SourceContract): ContractRecord {
   return {
     id: normalizeNullableString(contract?.id),
     label: normalizeNullableString(contract?.label),
@@ -95,7 +129,34 @@ function normalizeContract(contract: any) {
   };
 }
 
-function buildGeminiMarketUrl(market: any) {
+type SourceMarket = {
+  id?: unknown;
+  ticker?: unknown;
+  title?: unknown;
+  description?: unknown;
+  resolution?: unknown;
+  resolutionText?: unknown;
+  closesAt?: unknown;
+  endTime?: unknown;
+  expiryDate?: unknown;
+  slug?: unknown;
+  url?: unknown;
+  category?: unknown;
+  subcategory?: unknown;
+  tags?: unknown;
+  status?: unknown;
+  createdAt?: unknown;
+  effectiveDate?: unknown;
+  startTime?: unknown;
+  resolvedAt?: unknown;
+  termsLink?: unknown;
+  contracts?: unknown[];
+  volume?: unknown;
+  liquidity?: unknown;
+  activitySignal?: unknown;
+};
+
+function buildGeminiMarketUrl(market: SourceMarket) {
   if (typeof market?.url === "string" && market.url.trim() !== "") {
     return market.url;
   }
@@ -107,7 +168,7 @@ function buildGeminiMarketUrl(market: any) {
   return null;
 }
 
-export function normalizeGeminiMarket(market: any, lastSyncedAt: any) {
+export function normalizeGeminiMarket(market: SourceMarket, lastSyncedAt: string): MarketRecord {
   const description = extractRichTextText(market?.description);
   const resolutionText = String(
     market?.resolution ?? market?.resolutionText ?? description ?? market?.title ?? ""
@@ -135,7 +196,7 @@ export function normalizeGeminiMarket(market: any, lastSyncedAt: any) {
     resolvedAt: normalizeNullableString(market?.resolvedAt),
     termsLink: normalizeNullableString(market?.termsLink),
     contracts: Array.isArray(market?.contracts)
-      ? market.contracts.map(normalizeContract)
+      ? market.contracts.map((c) => normalizeContract(c as SourceContract))
       : [],
     ...(normalizeOptionalNumberString(market?.volume)
       ? { volumeUsd: normalizeOptionalNumberString(market?.volume) }
@@ -150,7 +211,7 @@ export function normalizeGeminiMarket(market: any, lastSyncedAt: any) {
   };
 }
 
-export function mergeNormalizedMarket(existingMarket: any, normalizedMarket: any, refreshedAt: any) {
+export function mergeNormalizedMarket(existingMarket: MarketRecord, normalizedMarket: MarketRecord, refreshedAt: string | null) {
   return {
     ...existingMarket,
     ...normalizedMarket,
@@ -159,6 +220,6 @@ export function mergeNormalizedMarket(existingMarket: any, normalizedMarket: any
   };
 }
 
-export function sameNormalizedMarketShape(left: any, right: any) {
+export function sameNormalizedMarketShape(left: MarketRecord, right: MarketRecord) {
   return JSON.stringify(left) === JSON.stringify(right);
 }

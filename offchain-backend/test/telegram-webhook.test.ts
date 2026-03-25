@@ -1,21 +1,23 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp, readFile } from "node:fs/promises";
+import type { AddressInfo } from "node:net";
 
 import { createServer } from "../src/server.js";
 import { FileClarificationRequestRepository } from "../src/clarification-request-repository.js";
 
-async function startTestServer(options: any) {
-  const server = createServer(options);
+type TestServerOptions = Partial<Parameters<typeof createServer>[0]>;
 
-  await new Promise((resolve: any) => {
+async function startTestServer(options: TestServerOptions) {
+  const server = createServer(options as Parameters<typeof createServer>[0]);
+
+  await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
 
-  const address = server.address();
+  const address = server.address() as AddressInfo;
 
   return {
     server,
@@ -23,9 +25,9 @@ async function startTestServer(options: any) {
   };
 }
 
-async function stopTestServer(server: any) {
-  await new Promise((resolve: any, reject: any) => {
-    server.close((error: any) => {
+async function stopTestServer(server: ReturnType<typeof createServer>) {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error?: Error) => {
       if (error) {
         reject(error);
         return;
@@ -86,6 +88,7 @@ test("POST /api/telegram/webhook stores a pending clarification request and retu
       requestId: "clr_telegram_fixed_001",
       source: "telegram",
       status: "pending",
+      eventId: "gm_eth_above_5000",
       marketId: "gm_eth_above_5000",
       question: "Should wick trades above $5,000 count?",
       telegramChatId: "9001",
@@ -476,7 +479,7 @@ test("POST /api/telegram/requests/:requestId/status emits processing and complet
       "Gemini auction and spot prints both count toward resolution."
     );
     assert.deepEqual(
-      stored.requests[0].statusHistory.map((entry: any) => entry.status),
+      (stored.requests[0].statusHistory as Array<{ status: string }>).map((entry) => entry.status),
       ["pending", "processing", "completed"]
     );
   } finally {
@@ -489,13 +492,13 @@ test("POST /api/telegram/requests/:requestId/status sends the delivery through T
   const repository = new FileClarificationRequestRepository(
     path.join(tempDir, "clarification-requests.json")
   );
-  const sentMessages = [];
+  const sentMessages: unknown[] = [];
   const { server, baseUrl } = await startTestServer({
     clarificationRequestRepository: repository,
     now: () => new Date("2026-03-21T18:20:00.000Z"),
     createRequestId: () => "clr_telegram_delivery_001",
     telegramBotToken: "telegram-bot-token",
-    sendTelegramMessage: async (message: any) => {
+    sendTelegramMessage: async (message: unknown) => {
       sentMessages.push(message);
       return {
         ok: true,

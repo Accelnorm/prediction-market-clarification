@@ -145,7 +145,7 @@ async function createStorageRuntime() {
   };
 }
 
-async function maybeRegisterTelegramWebhook({ enabled, logger }: any) {
+async function maybeRegisterTelegramWebhook({ enabled, logger }: { enabled: boolean; logger: { info: (msg: string) => void } }) {
   if (!enabled) {
     return;
   }
@@ -216,7 +216,7 @@ await maybeRegisterTelegramWebhook({
   logger: console
 });
 
-await new Promise((resolve: any) => {
+await new Promise<void>((resolve) => {
   server.listen(port, host, resolve);
 });
 
@@ -230,7 +230,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, async () => {
     server.markShuttingDown();
 
-    await new Promise<void>((resolve: any) => {
+    await new Promise<void>((resolve) => {
       server.close(() => resolve());
     });
 

@@ -24,7 +24,7 @@ Phase 1 is:
 - real x402 payment verification
 - asynchronous LLM processing with public status lookup
 
-The public web UI is not required for this cutoff. If Gemini adopts the idea, the requester-facing experience would likely live inside Gemini's own product surface, while external agents can call this API directly.
+The repo now also includes a lightweight public console under [`apps/public-console`](/home/user/gemini-pm/apps/public-console) for manual demoing of the clarification intake and reviewer desk. The API remains the primary integration surface.
 
 Telegram is not part of the default Phase 1 runtime. It remains an optional intake and status-delivery channel, gated behind `ENABLE_TELEGRAM_ROUTES=1`, and it does not perform x402 payment natively.
 
@@ -118,16 +118,21 @@ Useful environment variables:
 - `REVIEWER_AUTH_TOKEN` when Phase 2 routes are enabled
 - `LLM_PROVIDER`, `LLM_MODEL`
 - `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`
+- `OPENROUTER_APP_URL`, `OPENROUTER_APP_NAME`
 - `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_BASE_URL`
 - `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_VERSION`
 - `PUBLIC_API_BASE_URL`
 - `SYNC_STATE_PATH`, `CATEGORY_CATALOG_PATH`, `TRADE_ACTIVITY_PATH` for file-backed Gemini sync state
+- `CLARIFICATION_REQUESTS_PATH`, `VERIFIED_PAYMENTS_PATH`, `BACKGROUND_JOBS_PATH`
+- `ARTIFACTS_PATH`, `REVIEWER_SCANS_PATH`, `UPCOMING_REVIEWER_SCANS_PATH`
+- `LLM_PROMPT_TEMPLATE_VERSION`, `LLM_MODEL_ID`, `LLM_PROCESSING_VERSION`
 - `CLARIFICATION_FINALITY_MODE`
 - `CLARIFICATION_FINALITY_STATIC_SECS`
 - `CLARIFICATION_PROCESSING_ACTIVITY_ENABLED`
 - `X402_VERSION`, `X402_SCHEME`, `X402_PRICE_USD`, `X402_MAX_AMOUNT_REQUIRED`
 - `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`, `X402_FEE_PAYER`
-- `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
+- `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `X402_FACILITATOR_AUTH_TOKEN`, `X402_VERIFICATION_SOURCE`, `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
+- `ARTIFACT_PUBLICATION_PROVIDER`, `IPFS_API_URL`, `IPFS_GATEWAY_BASE_URL`, `IPFS_AUTH_TOKEN`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_API_BASE_URL`
 
 Clarification timing modes:
@@ -203,10 +208,10 @@ LLM_PROVIDER="openrouter"
 OPENROUTER_API_KEY="replace-me"
 LLM_MODEL="openrouter/auto"
 X402_RECIPIENT_ADDRESS="<YOUR_SOLANA_USDC_RECIPIENT>"
-X402_NETWORK="solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
-X402_MINT_ADDRESS="4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
-X402_FEE_PAYER="CKPKJWNdJEqa81x7CkZ14BVPiY6y16Sxs7owznqtWYp5"
-X402_FACILITATOR_URL="https://x402.org/facilitator"
+X402_NETWORK="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
+X402_MINT_ADDRESS="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+X402_FEE_PAYER=""
+X402_FACILITATOR_URL="https://facilitator.payai.network"
 PAYAI_API_KEY_ID=""
 PAYAI_API_KEY_SECRET=""
 ARTIFACT_PUBLICATION_PROVIDER="disabled"
@@ -229,12 +234,23 @@ One-command demo deploy after creating root `.env`:
 
 The script runs `docker compose` against [`docker-compose.demo.yml`](/home/user/gemini-pm/docker-compose.demo.yml), starts a bundled Postgres instance, builds the backend image from [`offchain-backend/Dockerfile`](/home/user/gemini-pm/offchain-backend/Dockerfile), syncs Gemini markets on boot, and starts the API.
 It also prints the configured reviewer demo token after startup so you can immediately test the reviewer and prelaunch flows.
+If `.env` is absent, the script falls back to [`.env.demo`](/home/user/gemini-pm/.env.demo).
 
 Bootstrap the env file from [`.env.example`](/home/user/gemini-pm/.env.example):
 
 ```bash
 cp .env.example .env
 ```
+
+For a local UI demo, run the public console separately:
+
+```bash
+cd apps/public-console
+npm install
+npm run dev
+```
+
+Then point the console at `http://127.0.0.1:3000` and use the reviewer token from `./scripts/deploy-demo.sh` for the reviewer desk.
 
 ## Telegram
 
@@ -249,6 +265,19 @@ TELEGRAM_WEBHOOK_SECRET="<TELEGRAM_WEBHOOK_SECRET>"
 
 When Telegram is enabled, the server registers the webhook on boot. Telegram remains an intake and status-delivery channel only; it does not perform x402 payment natively.
 
+## Future Improvements
+
+### Precedent-based clarification consistency (stare decisis)
+
+When a clarification request arrives, the system should first check whether any prior clarifications exist for substantially similar markets — same underlying asset, same threshold structure, or overlapping resolution criteria. If a prior clarification addressed the same contract gap, the new response should follow that precedent rather than reasoning from scratch.
+
+Implementation steps:
+
+1. **Similarity lookup** — on each new request, search prior clarifications by market title keywords, event category, and resolution-clause tokens to surface candidate matches.
+2. **Precedent selection** — rank candidates by structural similarity and recency; surface the closest match to the LLM alongside the new request.
+3. **Consistency instruction** — instruct the LLM to treat the prior clarification as binding precedent and to deviate only when the new market has a materially different clause or fact pattern, with an explicit note explaining the deviation.
+4. **Precedent index** — maintain a lightweight index (event ID, resolution clause fingerprint, clarification ID) to make lookup fast without a full vector search in the initial version.
+
 ## Status
 
-This backend is ready for a hackathon demo as a one-command Docker Compose deployment with bundled Postgres, production-mode env vars, and Phase 2 routes disabled.
+This repo is set up for a hackathon demo as a one-command Docker Compose deployment with bundled Postgres, production-mode env vars, and reviewer routes enabled by default in the demo compose stack.

@@ -1,8 +1,8 @@
-function validationError(code: any, message: any, statusCode: any = 400) {
+function validationError(code: string, message: string, statusCode: number = 400) {
   return Object.assign(new Error(message), { code, statusCode });
 }
 
-async function readJsonResponse(response: any) {
+async function readJsonResponse(response: Response) {
   try {
     return await response.json();
   } catch {
@@ -10,7 +10,7 @@ async function readJsonResponse(response: any) {
   }
 }
 
-export function assertTelegramWebhookSecret(request: any, expectedSecret: any) {
+export function assertTelegramWebhookSecret(request: { headers: Record<string, string | string[] | undefined> }, expectedSecret: string | null | undefined) {
   if (!expectedSecret) {
     return;
   }
@@ -28,12 +28,19 @@ export function assertTelegramWebhookSecret(request: any, expectedSecret: any) {
   );
 }
 
+export type SendTelegramMessageOptions = {
+  botToken: string | null | undefined;
+  chatId: string | number | null | undefined;
+  text: string | null | undefined;
+  apiBaseUrl?: string | null | undefined;
+};
+
 export async function sendTelegramMessage({
   botToken,
   chatId,
   text,
   apiBaseUrl = "https://api.telegram.org"
-}: any) {
+}: SendTelegramMessageOptions) {
   if (!botToken) {
     throw validationError(
       "TELEGRAM_BOT_TOKEN_REQUIRED",
@@ -53,7 +60,7 @@ export async function sendTelegramMessage({
     })
   });
 
-  let payload: any = null;
+  let payload: Record<string, unknown> | null = null;
 
   try {
     payload = await response.json();
@@ -63,8 +70,8 @@ export async function sendTelegramMessage({
 
   if (!response.ok || payload?.ok === false) {
     const description =
-      typeof payload?.description === "string" && payload.description.trim() !== ""
-        ? payload.description
+      typeof payload?.description === "string" && (payload.description as string).trim() !== ""
+        ? payload.description as string
         : "Telegram Bot API request failed.";
 
     throw validationError("TELEGRAM_DELIVERY_FAILED", description, 502);
@@ -72,16 +79,23 @@ export async function sendTelegramMessage({
 
   return {
     ok: true,
-    messageId: payload?.result?.message_id ?? null
+    messageId: (payload?.result as Record<string, unknown> | undefined)?.message_id ?? null
   };
 }
+
+export type RegisterTelegramWebhookOptions = {
+  botToken: string | null | undefined;
+  webhookUrl: string | null | undefined;
+  secretToken?: string | null;
+  apiBaseUrl?: string;
+};
 
 export async function registerTelegramWebhook({
   botToken,
   webhookUrl,
-  secretToken = null as string | null,
+  secretToken = null,
   apiBaseUrl = "https://api.telegram.org"
-}: any) {
+}: RegisterTelegramWebhookOptions) {
   if (!webhookUrl) {
     throw validationError(
       "TELEGRAM_WEBHOOK_URL_REQUIRED",

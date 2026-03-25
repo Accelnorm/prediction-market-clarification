@@ -1,6 +1,8 @@
+import type { ClarificationRequest } from "./types.js";
+
 const TELEGRAM_STATUSES = new Set(["pending", "processing", "completed", "failed"]);
 
-function validationError(code: any, message: any, statusCode: any = 400) {
+function validationError(code: string, message: string, statusCode: number = 400) {
   return Object.assign(new Error(message), { code, statusCode });
 }
 
@@ -8,7 +10,7 @@ function sanitizeFailureMessage() {
   return "Please retry later.";
 }
 
-export function parseTelegramStatusUpdate(payload: any) {
+export function parseTelegramStatusUpdate(payload: Record<string, unknown>) {
   const status = typeof payload?.status === "string" ? payload.status.trim() : "";
 
   if (!TELEGRAM_STATUSES.has(status)) {
@@ -55,7 +57,7 @@ export function parseTelegramStatusUpdate(payload: any) {
   };
 }
 
-export function buildTelegramDeliveryPayload(request: any) {
+export function buildTelegramDeliveryPayload(request: ClarificationRequest & { marketId?: string }) {
   switch (request.status) {
     case "pending":
       return {

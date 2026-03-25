@@ -1,4 +1,3 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -18,8 +17,8 @@ import {
 } from "../src/gemini-markets-source.js";
 
 test("fetchActiveMarkets defaults to the live Gemini active markets endpoint", async () => {
-  const requests = [];
-  const fetchImpl = async (url: any) => {
+  const requests: string[] = [];
+  const fetchImpl = async (url: string) => {
     requests.push(url);
     return {
       ok: true,
@@ -37,8 +36,8 @@ test("fetchActiveMarkets defaults to the live Gemini active markets endpoint", a
 });
 
 test("fetchConfiguredMarkets follows paginated Gemini event responses", async () => {
-  const requests = [];
-  const fetchImpl = async (url: any) => {
+  const requests: string[] = [];
+  const fetchImpl = async (url: string) => {
     requests.push(url);
 
     if (url.endsWith("offset=0")) {
@@ -73,8 +72,8 @@ test("fetchConfiguredMarkets follows paginated Gemini event responses", async ()
 });
 
 test("fetchUpcomingMarkets defaults to the live Gemini upcoming markets endpoint", async () => {
-  const requests = [];
-  const fetchImpl = async (url: any) => {
+  const requests: string[] = [];
+  const fetchImpl = async (url: string) => {
     requests.push(url);
     return {
       ok: true,
@@ -92,8 +91,8 @@ test("fetchUpcomingMarkets defaults to the live Gemini upcoming markets endpoint
 });
 
 test("fetchNewlyListedMarkets defaults to the live Gemini newly-listed endpoint", async () => {
-  const requests = [];
-  const fetchImpl = async (url: any) => {
+  const requests: string[] = [];
+  const fetchImpl = async (url: string) => {
     requests.push(url);
     return {
       ok: true,
@@ -111,8 +110,8 @@ test("fetchNewlyListedMarkets defaults to the live Gemini newly-listed endpoint"
 });
 
 test("fetchPredictionMarketEventByTicker requests the Gemini detail endpoint", async () => {
-  const requests = [];
-  const fetchImpl = async (url: any) => {
+  const requests: string[] = [];
+  const fetchImpl = async (url: string) => {
     requests.push(url);
     return {
       ok: true,
@@ -135,10 +134,10 @@ test("fetchPredictionMarketEventByTicker requests the Gemini detail endpoint", a
 });
 
 test("fetchPredictionMarketCategories requests Gemini categories with status filters", async () => {
-  const requests = [];
+  const requests: string[] = [];
   const categories = await fetchPredictionMarketCategories({
     status: ["active", "approved"],
-    fetchImpl: async (url: any) => {
+    fetchImpl: (async (url: string) => {
       requests.push(url);
       return {
         ok: true,
@@ -146,7 +145,7 @@ test("fetchPredictionMarketCategories requests Gemini categories with status fil
           categories: ["crypto", "sports"]
         })
       };
-    }
+    }) as unknown as typeof fetch
   });
 
   assert.deepEqual(categories, ["crypto", "sports"]);
@@ -157,11 +156,11 @@ test("fetchPredictionMarketCategories requests Gemini categories with status fil
 });
 
 test("fetchTradesForSymbol requests Gemini trades with cursor params", async () => {
-  const requests = [];
+  const requests: string[] = [];
   const trades = await fetchTradesForSymbol("GEMI-BTC-YES", {
     sinceTid: 123,
     limitTrades: 250,
-    fetchImpl: async (url: any) => {
+    fetchImpl: async (url: string) => {
       requests.push(url);
       return {
         ok: true,
@@ -183,7 +182,7 @@ test("fetchEnrichedPredictionMarkets hydrates list results with per-event Gemini
       { id: "evt_1", ticker: "BTC100K2025" },
       { id: "evt_2", ticker: "ETH5K2025" }
     ],
-    fetchEventByTicker: async (ticker: any) => ({
+    fetchEventByTicker: async (ticker: string) => ({
       id: ticker === "BTC100K2025" ? "evt_1" : "evt_2",
       ticker,
       title: `${ticker} detail`

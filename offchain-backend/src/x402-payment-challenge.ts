@@ -24,12 +24,34 @@ function joinUrl(baseUrl: string | null | undefined, pathname: string): string {
   return new URL(pathname, baseUrl).toString();
 }
 
+export type X402PaymentConfig = {
+  resourceBaseUrl?: string | null;
+  feePayer?: string | null;
+  x402Version: number;
+  scheme: string;
+  network: string;
+  priceUsd: unknown;
+  maxAmountRequired: string;
+  mintAddress: string;
+  assetSymbol: string;
+  recipientAddress: string;
+  maxTimeoutSeconds: number;
+  cluster: string;
+};
+
+export type BuildPaymentRequirementsOptions = {
+  eventId: string;
+  requesterId?: string | null;
+  config: X402PaymentConfig;
+  requestUrl?: { origin?: string } | null;
+};
+
 export function buildClarificationPaymentRequirements({
   eventId,
   requesterId,
   config,
   requestUrl
-}: any) {
+}: BuildPaymentRequirementsOptions) {
   const resource = joinUrl(
     config.resourceBaseUrl ?? requestUrl?.origin ?? null,
     `/api/clarify/${encodeURIComponent(eventId)}`
@@ -68,7 +90,7 @@ export function buildClarificationPaymentRequirements({
   };
 }
 
-export function buildX402PaymentRequiredPayload({ eventId, requesterId, config, requestUrl }: any) {
+export function buildX402PaymentRequiredPayload({ eventId, requesterId, config, requestUrl }: BuildPaymentRequirementsOptions) {
   const paymentRequirements = [
     buildClarificationPaymentRequirements({
       eventId,

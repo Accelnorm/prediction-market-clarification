@@ -45,6 +45,8 @@ Start from the template if needed:
 cp .env.example .env
 ```
 
+If you already keep demo-specific secrets in `.env.demo`, `./scripts/deploy-demo.sh` will use that automatically when `.env` is absent.
+
 Edit `.env` and make sure these are real values:
 
 - `POSTGRES_PASSWORD`
@@ -104,7 +106,103 @@ Pass criteria:
 
 ## 5. Verify the unpaid clarification challenge
 
-Use a real event ID from synced Gemini data if possible. If you do not already know one, use an event visible in the reviewer queue later.
+### Find a real event ID from the Postgres market cache
+
+The stack stores all synced markets in Postgres. Query it directly while the stack is running:
+
+```bash
+# Active markets — prefer long-horizon ones; clarification is most valuable early
+docker compose -f docker-compose.demo.yml exec postgres \
+  psql -U gemini_pm -d gemini_pm -c \
+  "SELECT market_id, payload->>'title' AS title, closes_at
+   FROM market_cache
+   WHERE market_stage = 'active'
+   ORDER BY closes_at DESC
+   LIMIT 20;"
+
+# Upcoming markets
+docker compose -f docker-compose.demo.yml exec postgres \
+  psql -U gemini_pm -d gemini_pm -c \
+  "SELECT market_id, payload->>'title' AS title, closes_at
+   FROM market_cache
+   WHERE market_stage = 'upcoming'
+   ORDER BY closes_at ASC
+   LIMIT 20;"
+```
+
+Prefer markets with long horizons or open-ended resolution criteria — clarification is most valuable before trading volume builds around an ambiguous interpretation.
+
+### Suggested markets for validation
+
+The following are real markets from the current sync that have genuine resolution ambiguity.
+
+**Active markets**
+
+`4020` — *"Recession this year?"*
+Resolves on two consecutive quarters of negative GDP per the BEA advance estimate. Ambiguity: does an NBER recession declaration with no two consecutive negative quarters resolve Yes? Which GDP release vintage (advance, second, third) is authoritative if they differ?
+
+```bash
+curl -i -X POST http://127.0.0.1:3000/api/clarify/4020 \
+  -H 'content-type: application/json' \
+  -d '{
+    "requesterId": "phase1_tester",
+    "question": "If the NBER formally declares a recession before the deadline but no two consecutive quarters of negative GDP appear in the BEA advance estimates, does this market resolve Yes or No?"
+  }'
+```
+
+`2640` — *"Will crypto market structure legislation become law?"*
+Some contracts define qualifying legislation by a three-prong test (regulatory framework, agency delineation, and non-stablecoin-only scope). Ambiguity: does a bill that covers stablecoins and digital assets broadly but originated as a stablecoin bill qualify? What if the president signs it via emergency proclamation rather than normal enrollment?
+
+```bash
+curl -i -X POST http://127.0.0.1:3000/api/clarify/2640 \
+  -H 'content-type: application/json' \
+  -d '{
+    "requesterId": "phase1_tester",
+    "question": "Would a bill that began as stablecoin-only legislation but was amended to include broader digital asset market structure provisions satisfy the qualifying definition, and does the method of presidential signature affect resolution?"
+  }'
+```
+
+`4022` — *"NASA lands on the moon?"*
+Contract description specifies a "manned NASA mission" but the market title says only "NASA lands." Ambiguity: does a NASA-contracted CLPS commercial robotic lander count? Does a crewed Artemis mission that aborts before touchdown reset the clock?
+
+```bash
+curl -i -X POST http://127.0.0.1:3000/api/clarify/4022 \
+  -H 'content-type: application/json' \
+  -d '{
+    "requesterId": "phase1_tester",
+    "question": "Does a robotic lander delivered under a NASA CLPS contract satisfy the resolution condition, or is a crewed NASA Artemis surface touchdown strictly required?"
+  }'
+```
+
+**Upcoming markets**
+
+`9840` — *"Oil (Brent) price on March 25?"*
+Resolves against the `KK_RFR_BRENTOILUSDC` index at 5 pm EDT. Ambiguity: what index methodology and data provider backs that ticker, and what is the fallback if the index value is unavailable or stale at the exact snapshot time?
+
+```bash
+curl -i -X POST http://127.0.0.1:3000/api/clarify/9840 \
+  -H 'content-type: application/json' \
+  -d '{
+    "requesterId": "phase1_tester",
+    "question": "What data provider and calculation methodology backs the KK_RFR_BRENTOILUSDC index, and what is the resolution procedure if that index is delayed or unavailable at the 5pm EDT snapshot?"
+  }'
+```
+
+`9848` — *"SOL price on March 25"*
+Title implies a single price point. Ambiguity: is this the Gemini spot mid-price, a TWAP, or an external index? What happens if the Gemini SOL/USD market is halted or has abnormal spread at the snapshot time?
+
+```bash
+curl -i -X POST http://127.0.0.1:3000/api/clarify/9848 \
+  -H 'content-type: application/json' \
+  -d '{
+    "requesterId": "phase1_tester",
+    "question": "Is the resolution price the Gemini SOL/USD spot mid-price, a time-weighted average, or an external index, and what is the fallback if the Gemini market is halted at the snapshot time?"
+  }'
+```
+
+### Trigger the 402 challenge
+
+Use any of the suggested markets above, or substitute your own `<EVENT_ID>`:
 
 ```bash
 curl -i -X POST http://127.0.0.1:3000/api/clarify/<EVENT_ID> \
@@ -138,6 +236,7 @@ The script expects a usable Solana keypair at `~/.config/solana/id.json` and wil
 - create the x402 payment payload
 - retry with the payment proof
 - wait for the clarification to complete
+- install a temporary x402 client toolchain under `/tmp/x402-client-test` unless `X402_CLIENT_DIR` is already set
 
 Pass criteria:
 
@@ -166,7 +265,7 @@ Manual steps:
 2. Submit a clarification request with the same `<EVENT_ID>` used above.
 3. Confirm the UI shows `Payment required`.
 4. Confirm at least one payment requirement card is rendered.
-5. Confirm the “Open reviewer desk” link loads the reviewer surface.
+5. Confirm the built-in reviewer desk surface opens and can be configured from the same app.
 
 Pass criteria:
 
@@ -181,7 +280,7 @@ In `/reviewer`:
 1. Open settings.
 2. Set backend API base URL to `http://127.0.0.1:3000`.
 3. Set reviewer auth token to the value printed by `./scripts/deploy-demo.sh`.
-4. Save.
+4. Save. The desk stores these values in browser session storage, so recheck them after a tab reload or new session.
 
 Then verify both surfaces.
 
@@ -297,7 +396,7 @@ Do one clean demo rehearsal from scratch:
 2. Confirm health.
 3. Open the public console.
 4. Trigger a clarification request.
-5. Open the reviewer desk.
+5. Switch into the reviewer desk surface.
 6. Show upcoming review and run one scan.
 7. Show the live clarification detail for the request created earlier.
 

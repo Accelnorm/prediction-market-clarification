@@ -1,9 +1,9 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp, readFile } from "node:fs/promises";
+import type { AddressInfo } from "node:net";
 
 import { createServer } from "../src/server.js";
 import { FileArtifactRepository } from "../src/artifact-repository.js";
@@ -56,7 +56,9 @@ const UPCOMING_MARKET = {
 
 const EXPECTED_PAYMENT_FEE_PAYER = DEFAULT_X402_PAYMENT_CONFIG.feePayer;
 
-async function startTestServer(options: any) {
+type TestServerOptions = Partial<Parameters<typeof createServer>[0]>;
+
+async function startTestServer(options: TestServerOptions) {
   const verifiedPaymentRepository =
     options.verifiedPaymentRepository ??
     new FileVerifiedPaymentRepository(
@@ -67,16 +69,16 @@ async function startTestServer(options: any) {
     );
   const verifyX402Payment =
     options.verifyX402Payment ??
-    (async ({ paymentCandidate, config, now }: any) => ({
+    (async ({ paymentCandidate, config, now }: { paymentCandidate: Record<string, unknown>; config: Record<string, unknown>; now: () => Date }) => ({
       paymentProof: paymentCandidate.proof,
       paymentReference:
-        paymentCandidate.paymentReference ?? `ref_${paymentCandidate.proof.slice(0, 24)}`,
+        (paymentCandidate.paymentReference as string | undefined) ?? `ref_${(paymentCandidate.proof as string).slice(0, 24)}`,
       paymentAmount: config.priceUsd,
       paymentAsset: config.assetSymbol,
       paymentMint: config.mintAddress,
       paymentCluster: config.cluster,
       paymentRecipient: config.recipientAddress,
-      paymentTransactionSignature: `sig_${paymentCandidate.proof.slice(0, 24)}`,
+      paymentTransactionSignature: `sig_${(paymentCandidate.proof as string).slice(0, 24)}`,
       paymentVerifiedAt: now().toISOString(),
       paymentSettledAt: now().toISOString(),
       verificationSource: "test_verifier",
@@ -91,13 +93,13 @@ async function startTestServer(options: any) {
     verifiedPaymentRepository,
     verifyX402Payment,
     ...options
-  });
+  } as Parameters<typeof createServer>[0]);
 
-  await new Promise((resolve: any) => {
+  await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
 
-  const address = server.address();
+  const address = server.address() as AddressInfo;
 
   return {
     server,
@@ -105,9 +107,9 @@ async function startTestServer(options: any) {
   };
 }
 
-async function stopTestServer(server: any) {
-  await new Promise((resolve: any, reject: any) => {
-    server.close((error: any) => {
+async function stopTestServer(server: ReturnType<typeof createServer>) {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error?: Error) => {
       if (error) {
         reject(error);
         return;
@@ -118,13 +120,13 @@ async function stopTestServer(server: any) {
   });
 }
 
-function createReviewerHeaders(token: any = "reviewer-secret") {
+function createReviewerHeaders(token: string = "reviewer-secret") {
   return {
     "x-reviewer-token": token
   };
 }
 
-function createPaymentSignatureHeaders(paymentPayload: any, extraHeaders: any = {}) {
+function createPaymentSignatureHeaders(paymentPayload: unknown, extraHeaders: Record<string, string> = {}) {
   return {
     "content-type": "application/json",
     "payment-signature": Buffer.from(JSON.stringify(paymentPayload), "utf8").toString("base64"),
@@ -132,35 +134,35 @@ function createPaymentSignatureHeaders(paymentPayload: any, extraHeaders: any = 
   };
 }
 
-async function createMarketCacheRepository(tempDir: any, markets: any = [VALID_MARKET]) {
+async function createMarketCacheRepository(tempDir: string, markets: Parameters<FileMarketCacheRepository["save"]>[0] = [VALID_MARKET as Parameters<FileMarketCacheRepository["save"]>[0][0]]) {
   const repository = new FileMarketCacheRepository(path.join(tempDir, "market-cache.json"));
   await repository.save(markets);
   return repository;
 }
 
-async function createUpcomingMarketCacheRepository(tempDir: any, markets: any = [UPCOMING_MARKET]) {
+async function createUpcomingMarketCacheRepository(tempDir: string, markets: Parameters<FileMarketCacheRepository["save"]>[0] = [UPCOMING_MARKET as Parameters<FileMarketCacheRepository["save"]>[0][0]]) {
   const repository = new FileMarketCacheRepository(path.join(tempDir, "upcoming-market-cache.json"));
   await repository.save(markets);
   return repository;
 }
 
-async function createReviewerScanRepository(tempDir: any) {
+async function createReviewerScanRepository(tempDir: string) {
   const repository = new FileReviewerScanRepository(path.join(tempDir, "reviewer-scans.json"));
   await repository.save([]);
   return repository;
 }
 
-async function createBackgroundJobRepository(tempDir: any) {
+async function createBackgroundJobRepository(tempDir: string) {
   const repository = new FileBackgroundJobRepository(path.join(tempDir, "background-jobs.json"));
   await repository.save([]);
   return repository;
 }
 
-async function createTradeActivityRepository(tempDir: any) {
+async function createTradeActivityRepository(tempDir: string) {
   return new FileTradeActivityRepository(path.join(tempDir, "trade-activity.json"));
 }
 
-async function waitFor(assertion: any, { attempts = 25, delayMs = 10 }: any = {}) {
+async function waitFor(assertion: () => Promise<void>, { attempts = 25, delayMs = 10 }: { attempts?: number; delayMs?: number } = {}) {
   let lastError;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -169,7 +171,7 @@ async function waitFor(assertion: any, { attempts = 25, delayMs = 10 }: any = {}
       return;
     } catch (error) {
       lastError = error;
-      await new Promise((resolve: any) => {
+      await new Promise<void>((resolve) => {
         setTimeout(resolve, delayMs);
       });
     }
@@ -241,7 +243,7 @@ test("POST /api/clarify/:eventId rejects unpaid requests", async () => {
       }
     ]);
     assert.deepEqual(
-      JSON.parse(Buffer.from(encodedPaymentRequired, "base64").toString("utf8")),
+      JSON.parse(Buffer.from(encodedPaymentRequired!, "base64").toString("utf8")),
       buildX402PaymentRequiredHeader(responseBody)
     );
 
@@ -425,7 +427,7 @@ test("POST /api/clarify/:eventId accepts synced upcoming markets and reviewer de
     const storedClarification = await clarificationRequestRepository.findByClarificationId(
       "clar_upcoming_001"
     );
-    assert.equal(storedClarification.marketStage, "upcoming");
+    assert.equal(storedClarification!.marketStage, "upcoming");
 
     const reviewerResponse = await fetch(
       `${baseUrl}/api/reviewer/clarifications/clar_upcoming_001`,
@@ -480,9 +482,9 @@ test("POST /api/clarify/:eventId accepts PAYMENT-SIGNATURE header proofs", async
     assert.equal(typeof response.headers.get("payment-response"), "string");
 
     const stored = await repository.findByClarificationId("clar_paid_header_001");
-    assert.equal(typeof stored.paymentProof, "string");
-    assert.ok(stored.paymentProof.length > 0);
-    assert.equal(stored.paymentReference.startsWith("ref_"), true);
+    assert.equal(typeof stored!.paymentProof, "string");
+    assert.ok(stored!.paymentProof!.length > 0);
+    assert.equal(stored!.paymentReference!.startsWith("ref_"), true);
   } finally {
     await stopTestServer(server);
   }
@@ -622,12 +624,13 @@ test("POST /api/clarify/:eventId returns structured verifier failures without cr
     now: () => new Date("2026-03-21T19:08:00.000Z"),
     createClarificationId: () => "clar_paid_invalid_unused",
     verifyX402Payment: async () => {
-      const error = new Error("The supplied x402 payment proof is invalid.");
-      error.statusCode = 402;
-      error.code = "INVALID_PAYMENT";
-      error.details = {
-        invalidReason: "invalid_exact_svm_payload_transaction_amount_mismatch"
-      };
+      const error = Object.assign(new Error("The supplied x402 payment proof is invalid."), {
+        statusCode: 402,
+        code: "INVALID_PAYMENT",
+        details: {
+          invalidReason: "invalid_exact_svm_payload_transaction_amount_mismatch"
+        }
+      });
       throw error;
     }
   });
@@ -852,7 +855,7 @@ test("POST /api/clarify/:eventId stores normalized paid request input for compar
     assert.equal(stored.requests.length, 2);
     assert.equal(stored.requests[0].question, "Should Gemini auction prints count?");
     assert.equal(stored.requests[1].question, "Should Gemini auction prints count?");
-    assert.deepEqual(stored.requests.map((request: any) => request.normalizedInput), [
+    assert.deepEqual((stored.requests as Array<Record<string, unknown>>).map((request) => request.normalizedInput), [
       {
         eventId: "gm_btc_above_100k",
         question: "Should Gemini auction prints count?"
@@ -913,7 +916,7 @@ test("POST /api/clarify/:eventId automatically runs the interpretation pipeline 
     });
 
     const storedRequest = await repository.findByClarificationId("clar_paid_pipeline_001");
-    assert.deepEqual(storedRequest.statusHistory, [
+    assert.deepEqual(storedRequest!.statusHistory, [
       {
         status: "queued",
         timestamp: "2026-03-21T19:25:00.000Z"
@@ -927,7 +930,7 @@ test("POST /api/clarify/:eventId automatically runs the interpretation pipeline 
         timestamp: "2026-03-21T19:25:00.000Z"
       }
     ]);
-    assert.deepEqual(storedRequest.llmOutput, {
+    assert.deepEqual(storedRequest!.llmOutput, {
       verdict: "needs_clarification",
       llm_status: "completed",
       reasoning:
@@ -942,7 +945,7 @@ test("POST /api/clarify/:eventId automatically runs the interpretation pipeline 
       suggested_note:
         "Use Gemini's primary BTC/USD spot exchange feed and count the first eligible trade print above $100,000 before expiry."
     });
-    assert.equal(storedRequest.errorMessage, null);
+    assert.equal(storedRequest!.errorMessage, null);
   } finally {
     await stopTestServer(server);
   }
@@ -994,8 +997,9 @@ test("successful clarifications automatically publish an artifact and store a fe
     });
 
     const storedRequest = await repository.findByClarificationId("clar_paid_artifact_001");
+    const storedLlmOutput = storedRequest!.llmOutput as Record<string, unknown>;
     const unauthorizedArtifactResponse = await fetch(
-      `${baseUrl}/api/artifacts/${encodeURIComponent(storedRequest.artifactCid)}`
+      `${baseUrl}/api/artifacts/${encodeURIComponent(storedRequest!.artifactCid!)}`
     );
 
     assert.equal(unauthorizedArtifactResponse.status, 401);
@@ -1008,7 +1012,7 @@ test("successful clarifications automatically publish an artifact and store a fe
     });
 
     const artifactResponse = await fetch(
-      `${baseUrl}/api/artifacts/${encodeURIComponent(storedRequest.artifactCid)}`,
+      `${baseUrl}/api/artifacts/${encodeURIComponent(storedRequest!.artifactCid!)}`,
       {
         headers: createReviewerHeaders()
       }
@@ -1018,13 +1022,13 @@ test("successful clarifications automatically publish an artifact and store a fe
     assert.deepEqual(await artifactResponse.json(), {
       ok: true,
       artifact: {
-        cid: storedRequest.artifactCid,
-        url: storedRequest.artifactUrl,
+        cid: storedRequest!.artifactCid,
+        url: storedRequest!.artifactUrl,
         clarificationId: "clar_paid_artifact_001",
         eventId: "gm_btc_above_100k",
         marketText: VALID_MARKET.resolution,
-        suggestedEditedMarketText: storedRequest.llmOutput.suggested_market_text,
-        clarificationNote: storedRequest.llmOutput.suggested_note,
+        suggestedEditedMarketText: storedLlmOutput.suggested_market_text,
+        clarificationNote: storedLlmOutput.suggested_note,
         generatedAtUtc: "2026-03-21T19:26:00.000Z",
         publicationProvider: "disabled",
         publicationStatus: "disabled",
@@ -1039,7 +1043,7 @@ test("successful clarifications automatically publish an artifact and store a fe
     const detailResponse = await fetch(`${baseUrl}/api/clarifications/clar_paid_artifact_001`);
     assert.equal(detailResponse.status, 200);
     const detailPayload = await detailResponse.json();
-    assert.deepEqual(detailPayload.clarification.llmOutput, storedRequest.llmOutput);
+    assert.deepEqual(detailPayload.clarification.llmOutput, storedRequest!.llmOutput);
     assert.equal(detailPayload.clarification.artifact, undefined);
 
     const reviewerDetailResponse = await fetch(
@@ -1051,8 +1055,8 @@ test("successful clarifications automatically publish an artifact and store a fe
     assert.equal(reviewerDetailResponse.status, 200);
     const reviewerDetailPayload = await reviewerDetailResponse.json();
     assert.deepEqual(reviewerDetailPayload.clarification.artifact, {
-      cid: storedRequest.artifactCid,
-      url: storedRequest.artifactUrl
+      cid: storedRequest!.artifactCid,
+      url: storedRequest!.artifactUrl
     });
   } finally {
     await stopTestServer(server);
@@ -1115,7 +1119,7 @@ test("paid clarification pipeline sends the issue clarification skill in the LLM
   );
   const marketCacheRepository = await createMarketCacheRepository(tempDir);
   const originalFetch = globalThis.fetch;
-  const llmRequests = [];
+  const llmRequests: Array<{ url: unknown; options: unknown }> = [];
   let nowCallCount = 0;
   const timeline = [
     "2026-03-21T19:29:00.000Z",
@@ -1124,7 +1128,7 @@ test("paid clarification pipeline sends the issue clarification skill in the LLM
     "2026-03-21T19:29:03.000Z"
   ];
 
-  globalThis.fetch = async (url: any, options: any) => {
+  globalThis.fetch = (async (url: unknown, options: unknown) => {
     if (String(url).startsWith("https://openrouter.test/api/v1/")) {
       llmRequests.push({ url, options });
 
@@ -1156,8 +1160,8 @@ test("paid clarification pipeline sends the issue clarification skill in the LLM
       };
     }
 
-    return originalFetch(url, options);
-  };
+    return originalFetch(url as RequestInfo, options as RequestInit);
+  }) as unknown as typeof globalThis.fetch;
 
   const { server, baseUrl } = await startTestServer({
     clarificationRequestRepository: repository,
@@ -1200,7 +1204,7 @@ test("paid clarification pipeline sends the issue clarification skill in the LLM
     });
 
     assert.equal(llmRequests.length, 1);
-    const llmRequestBody = JSON.parse(llmRequests[0].options.body);
+    const llmRequestBody = JSON.parse((llmRequests[0] as { options: { body: string } }).options.body);
     assert.match(llmRequestBody.messages[0].content, /# Issue Clarification Response/);
     assert.match(
       llmRequestBody.messages[0].content,
@@ -1212,7 +1216,7 @@ test("paid clarification pipeline sends the issue clarification skill in the LLM
     );
 
     const storedRequest = await repository.findByClarificationId("clar_paid_prompt_001");
-    assert.equal(storedRequest.llmTrace.promptTemplateVersion, "issue-clarification-response-v1");
+    assert.equal((storedRequest!.llmTrace as Record<string, unknown>).promptTemplateVersion, "issue-clarification-response-v1");
   } finally {
     globalThis.fetch = originalFetch;
     await stopTestServer(server);
@@ -1230,15 +1234,15 @@ test("POST /api/clarify/:eventId returns 202 when wait window expires before com
     marketCacheRepository,
     now: () => new Date("2026-03-21T19:28:00.000Z"),
     createClarificationId: () => "clar_paid_wait_timeout_001",
-    runAutomaticClarificationPipeline: async (options: any) => {
-      await new Promise((resolve: any) => {
+    runAutomaticClarificationPipeline: async (...args: unknown[]) => {
+      await new Promise<void>((resolve) => {
         setTimeout(resolve, 100);
       });
       const { runAutomaticClarificationPipeline } = await import(
         "../src/automatic-llm-pipeline.js"
       );
 
-      return runAutomaticClarificationPipeline(options);
+      return runAutomaticClarificationPipeline(args[0] as Parameters<typeof runAutomaticClarificationPipeline>[0]);
     }
   });
 
@@ -1343,12 +1347,13 @@ test("pipeline stores publication metadata without exposing artifact metadata pu
     });
 
     const storedRequest = await repository.findByClarificationId("clar_paid_publish_001");
-    const storedArtifact = await artifactRepository.findByCid(storedRequest.artifactCid);
+    const storedArtifact = await artifactRepository.findByCid(storedRequest!.artifactCid as string);
 
-    assert.equal(storedArtifact.publicationProvider, "ipfs");
-    assert.equal(storedArtifact.publicationStatus, "published");
-    assert.equal(storedArtifact.publishedCid, "bafyrealipfscid001");
-    assert.equal(storedArtifact.publishedUrl, "https://gateway.example/ipfs/bafyrealipfscid001");
+    assert.ok(storedArtifact);
+    assert.equal((storedArtifact as Record<string, unknown>).publicationProvider, "ipfs");
+    assert.equal((storedArtifact as Record<string, unknown>).publicationStatus, "published");
+    assert.equal((storedArtifact as Record<string, unknown>).publishedCid, "bafyrealipfscid001");
+    assert.equal((storedArtifact as Record<string, unknown>).publishedUrl, "https://gateway.example/ipfs/bafyrealipfscid001");
 
     const detailResponse = await fetch(`${baseUrl}/api/clarifications/clar_paid_publish_001`);
     assert.equal(detailResponse.status, 200);
@@ -1619,7 +1624,7 @@ test("completed clarifications store immutable LLM trace metadata and expose it 
     });
 
     const firstStoredRequest = await repository.findByClarificationId("clar_paid_trace_001");
-    assert.deepEqual(firstStoredRequest.llmTrace, {
+    assert.deepEqual(firstStoredRequest!.llmTrace, {
       promptTemplateVersion: "prompt-v1",
       modelId: "gemini-reviewer-001",
       requestedAt: "2026-03-21T19:27:03.000Z",
@@ -2331,7 +2336,7 @@ test("POST /api/reviewer/clarifications/:clarificationId/funding/contributions i
 
     const storedClarification =
       await clarificationRequestRepository.findByClarificationId("clar_funding_idempotent_001");
-    assert.deepEqual(storedClarification.funding.history, [
+    assert.deepEqual((storedClarification!.funding as Record<string, unknown>).history, [
       {
         contributor: "desk.gamma",
         amount: "0.55",
@@ -2363,13 +2368,13 @@ test("POST /api/reviewer/clarifications/:clarificationId/funding/contributions i
 
     const failingRepository = {
       ...clarificationRequestRepository,
-      async findByClarificationId(clarificationId: any) {
+      async findByClarificationId(clarificationId: string) {
         return clarificationRequestRepository.findByClarificationId(clarificationId);
       },
       async updateByClarificationId() {
         throw new Error("disk write failed");
       }
-    };
+    } as unknown as typeof clarificationRequestRepository;
     const failingServer = await startTestServer({
       clarificationRequestRepository: failingRepository,
       marketCacheRepository,
@@ -2488,8 +2493,8 @@ test("POST /api/reviewer/clarifications/:clarificationId/awaiting-panel-vote sto
 
     const storedClarification =
       await clarificationRequestRepository.findByClarificationId("clar_vote_placeholder_001");
-    assert.equal(storedClarification.reviewerWorkflowStatus, "awaiting_panel_vote");
-    assert.deepEqual(storedClarification.reviewerActions, [
+    assert.equal(storedClarification!.reviewerWorkflowStatus, "awaiting_panel_vote");
+    assert.deepEqual(storedClarification!.reviewerActions, [
       {
         type: "marked_awaiting_panel_vote",
         actor: "reviewer.casey",
@@ -2628,22 +2633,22 @@ test("POST /api/reviewer/clarifications/:clarificationId/finalize stores off-cha
 
     const storedClarification =
       await clarificationRequestRepository.findByClarificationId("clar_finalize_001");
-    assert.equal(storedClarification.reviewerWorkflowStatus, "finalized");
+    assert.equal(storedClarification!.reviewerWorkflowStatus, "finalized");
     assert.equal(
-      storedClarification.finalEditedText,
+      storedClarification!.finalEditedText,
       "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC, excluding auction prints?"
     );
     assert.equal(
-      storedClarification.finalNote,
+      storedClarification!.finalNote,
       "Resolve only from Gemini's primary BTC/USD spot feed; do not count auction prints."
     );
-    assert.equal(storedClarification.finalizedAt, "2026-03-21T21:10:00.000Z");
-    assert.equal(storedClarification.finalizedBy, "reviewer.alex");
+    assert.equal(storedClarification!.finalizedAt, "2026-03-21T21:10:00.000Z");
+    assert.equal(storedClarification!.finalizedBy, "reviewer.alex");
     assert.equal(
-      storedClarification.llmOutput.suggested_market_text,
+      (storedClarification!.llmOutput as Record<string, unknown>).suggested_market_text,
       "Will Gemini BTC/USD spot trade above $100,000 on the primary exchange feed before December 31 2026 23:59 UTC?"
     );
-    assert.deepEqual(storedClarification.reviewerActions, [
+    assert.deepEqual(storedClarification!.reviewerActions, [
       {
         type: "finalized",
         actor: "reviewer.alex",
@@ -2673,8 +2678,8 @@ test("POST /api/reviewer/clarifications/:clarificationId/finalize stores off-cha
       finalizedBy: "reviewer.alex"
     });
     assert.equal(
-      (await clarificationRequestRepository.findByClarificationId("clar_finalize_001"))
-        .llmOutput.suggested_note,
+      ((await clarificationRequestRepository.findByClarificationId("clar_finalize_001"))!
+        .llmOutput as Record<string, unknown>).suggested_note,
       "Use Gemini's primary BTC/USD spot exchange feed and exclude auction-only prints."
     );
   } finally {
@@ -2700,7 +2705,7 @@ test("POST /api/clarify/:eventId enqueues a retryable interpretation job and ret
     createClarificationId: () => "clar_paid_pipeline_fail_001",
     createBackgroundJobId: () => "job_clarification_001",
     reviewerAuthToken: "reviewer-secret",
-    runAutomaticClarificationPipeline: async (options: any) => {
+    runAutomaticClarificationPipeline: async (...args: unknown[]) => {
       if (shouldFail) {
         shouldFail = false;
         throw new Error("LLM provider timeout");
@@ -2710,7 +2715,7 @@ test("POST /api/clarify/:eventId enqueues a retryable interpretation job and ret
         "../src/automatic-llm-pipeline.js"
       );
 
-      return runAutomaticClarificationPipeline(options);
+      return runAutomaticClarificationPipeline(args[0] as Parameters<typeof runAutomaticClarificationPipeline>[0]);
     }
   });
 
@@ -2777,10 +2782,10 @@ test("POST /api/clarify/:eventId enqueues a retryable interpretation job and ret
     });
 
     const storedRequest = await repository.findByClarificationId("clar_paid_pipeline_fail_001");
-    assert.equal(storedRequest.errorMessage, "LLM provider timeout");
-    assert.equal(storedRequest.retryable, true);
-    assert.equal(storedRequest.llmOutput, null);
-    assert.deepEqual(storedRequest.statusHistory, [
+    assert.equal(storedRequest!.errorMessage, "LLM provider timeout");
+    assert.equal(storedRequest!.retryable, true);
+    assert.equal(storedRequest!.llmOutput, null);
+    assert.deepEqual(storedRequest!.statusHistory, [
       {
         status: "queued",
         timestamp: "2026-03-21T19:30:00.000Z"
@@ -2846,7 +2851,7 @@ test("POST /api/clarify/:eventId enqueues a retryable interpretation job and ret
         clarificationId: "clar_paid_pipeline_fail_001",
         artifactCid: (
           await repository.findByClarificationId("clar_paid_pipeline_fail_001")
-        ).artifactCid
+        )!.artifactCid
       }
     });
 
@@ -2930,6 +2935,7 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
     });
 
     const singleScanJob = await backgroundJobRepository.findByJobId("job_scan_001");
+    assert.ok(singleScanJob);
     assert.equal(singleScanJob.jobId, "job_scan_001");
     assert.equal(singleScanJob.kind, "reviewer_scan");
     assert.equal(singleScanJob.status, "completed");
@@ -2940,8 +2946,8 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
       eventId: "gm_btc_above_100k"
     });
     assert.equal(singleScanJob.errorMessage, null);
-    assert.match(singleScanJob.updatedAt, /^2026-03-21T19:(45|50):00.000Z$/);
-    assert.match(singleScanJob.result.scanId, /^scan_gm_btc_above_100k_2026-03-21T19:/);
+    assert.match(singleScanJob.updatedAt as string, /^2026-03-21T19:(45|50):00.000Z$/);
+    assert.match((singleScanJob.result as Record<string, string>).scanId, /^scan_gm_btc_above_100k_2026-03-21T19:/);
 
     const queueResponse = await fetch(`${baseUrl}/api/reviewer/queue`, {
       headers: createReviewerHeaders()
@@ -3053,12 +3059,12 @@ test("GET /api/reviewer/queue and reviewer scan endpoints persist scan outputs f
     const storedScans = await reviewerScanRepository.list();
     assert.equal(storedScans.length, 3);
     assert.deepEqual(
-      storedScans.map((scan: any) => ({
+      storedScans.map((scan) => ({
         eventId: scan.eventId,
         jobId: scan.jobId,
         recommendation: scan.recommendation,
         hasSuggestedNote: typeof scan.suggested_note === "string",
-        hasReviewWindow: typeof scan.review_window?.review_window_secs === "number"
+        hasReviewWindow: typeof (scan.review_window as Record<string, unknown> | undefined)?.review_window_secs === "number"
       })),
       [
         {
@@ -3168,28 +3174,28 @@ test("GET /api/reviewer/scans lists historical reviewer scan records and rejects
     assert.equal(payload.ok, true);
     assert.equal(payload.scans.length, 3);
     assert.deepEqual(
-      payload.scans.map((scan: any) => scan.eventId).sort(),
+      payload.scans.map((scan: { eventId: string }) => scan.eventId).sort(),
       ["gm_btc_above_100k", "gm_btc_above_100k", "gm_eth_above_5000"]
     );
     assert.ok(
       payload.scans.every(
-        (scan: any) =>
+        (scan: Record<string, unknown>) =>
           typeof scan.scanId === "string" &&
           typeof scan.createdAt === "string" &&
           scan.ambiguityScore === 0.72 &&
           scan.recommendation === "review" &&
-          typeof scan.reviewWindow?.review_window_secs === "number"
+          typeof (scan.reviewWindow as Record<string, unknown> | undefined)?.review_window_secs === "number"
       )
     );
     assert.ok(
       payload.scans.some(
-        (scan: any) =>
+        (scan: Record<string, unknown>) =>
           scan.eventId === "gm_eth_above_5000" &&
-          scan.reviewWindow.time_to_end_bucket === "lt_6h"
+          (scan.reviewWindow as Record<string, unknown>)?.time_to_end_bucket === "lt_6h"
       )
     );
     assert.equal(
-      payload.scans.filter((scan: any) => scan.eventId === "gm_btc_above_100k").length,
+      payload.scans.filter((scan: Record<string, unknown>) => scan.eventId === "gm_btc_above_100k").length,
       2
     );
   } finally {
@@ -3214,14 +3220,14 @@ test("POST /api/reviewer/jobs/:jobId/retry reruns failed scan jobs without dupli
     now: () => new Date("2026-03-21T20:20:00.000Z"),
     reviewerAuthToken: "reviewer-secret",
     createBackgroundJobId: () => "job_scan_retry_001",
-    runReviewerMarketScan: async (options: any) => {
+    runReviewerMarketScan: async (...args: unknown[]) => {
       if (shouldFail) {
         shouldFail = false;
         throw new Error("scan worker timeout");
       }
 
       const { createReviewerMarketScan } = await import("../src/reviewer-scan-service.js");
-      return createReviewerMarketScan(options);
+      return createReviewerMarketScan(args[0] as Parameters<typeof createReviewerMarketScan>[0]);
     }
   });
 

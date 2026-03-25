@@ -3,10 +3,17 @@ import {
   generateMarketInterpretation
 } from "./llm-provider.js";
 import { buildClarificationTiming } from "./clarification-timing.js";
+import type { ClarificationRequest, MarketRecord } from "./types.js";
 
 export { buildDefaultInterpretation } from "./llm-provider.js";
 
-function buildLlmTrace({ llmTraceability, requestedAt }: any) {
+type LlmTraceability = {
+  promptTemplateVersion: string;
+  modelId: string;
+  processingVersion: string;
+};
+
+function buildLlmTrace({ llmTraceability, requestedAt }: { llmTraceability: LlmTraceability; requestedAt: string }) {
   return {
     promptTemplateVersion: llmTraceability.promptTemplateVersion,
     modelId: llmTraceability.modelId,
@@ -15,6 +22,26 @@ function buildLlmTrace({ llmTraceability, requestedAt }: any) {
   };
 }
 
+type ArtifactPublicationResult = {
+  publicationProvider?: string | null;
+  publicationStatus?: string | null;
+  publishedCid?: string | null;
+  publishedUrl?: string | null;
+  publishedUri?: string | null;
+  publishedAt?: string | null;
+  publicationError?: unknown;
+  cid?: string | null;
+  url?: string | null;
+};
+
+type ArtifactRepository = {
+  createArtifact?: (payload: Record<string, unknown>) => Promise<ArtifactPublicationResult | unknown>;
+} | null | undefined;
+
+type ArtifactPublisher = {
+  publishArtifact?: (payload: Record<string, unknown>) => Promise<ArtifactPublicationResult | unknown>;
+} | null | undefined;
+
 async function publishInterpretationArtifact({
   artifactRepository,
   artifactPublisher,
@@ -22,7 +49,14 @@ async function publishInterpretationArtifact({
   market,
   llmOutput,
   generatedAtUtc
-}: any) {
+}: {
+  artifactRepository: ArtifactRepository;
+  artifactPublisher: ArtifactPublisher;
+  clarification: ClarificationRequest;
+  market: MarketRecord;
+  llmOutput: Record<string, unknown>;
+  generatedAtUtc: string;
+}) {
   if (!artifactRepository) {
     return { cid: null, url: null };
   }
@@ -46,11 +80,30 @@ async function publishInterpretationArtifact({
       publicationError: null
     };
 
-  return artifactRepository.createArtifact({
+  return ((await artifactRepository.createArtifact?.({
     ...artifactPayload,
     ...publication
-  });
+  })) ?? { cid: null, url: null }) as ArtifactPublicationResult;
 }
+
+export type RunAutomaticClarificationPipelineOptions = {
+  clarification: ClarificationRequest;
+  clarificationRequestRepository: {
+    updateByClarificationId: (clarificationId: string, updates: Record<string, unknown>) => Promise<unknown>;
+  } | null;
+  artifactRepository: unknown;
+  artifactPublisher: unknown;
+  marketCacheRepository: {
+    findByMarketId?: (marketId: string) => Promise<MarketRecord | null>;
+  } | null | undefined;
+  resolveMarketByClarification?: ((c: ClarificationRequest) => Promise<MarketRecord | null>) | null;
+  tradeActivityRepository?: unknown;
+  clarificationFinalityConfig?: unknown;
+  now: () => Date;
+  llmRuntime: unknown;
+  fetchTradesForSymbol?: unknown;
+  llmTraceability?: LlmTraceability | unknown;
+};
 
 export async function runAutomaticClarificationPipeline({
   clarification,
@@ -58,7 +111,7 @@ export async function runAutomaticClarificationPipeline({
   artifactRepository,
   artifactPublisher,
   marketCacheRepository,
-  resolveMarketByClarification = null as ((c: any) => Promise<any>) | null,
+  resolveMarketByClarification = null,
   tradeActivityRepository,
   clarificationFinalityConfig,
   now,
@@ -69,25 +122,25 @@ export async function runAutomaticClarificationPipeline({
     modelId: "openrouter/auto",
     processingVersion: "offchain-llm-pipeline-v1"
   }
-}: any) {
+}: RunAutomaticClarificationPipelineOptions) {
   const market = resolveMarketByClarification
     ? await resolveMarketByClarification(clarification)
-    : await marketCacheRepository.findByMarketId(clarification.eventId);
+    : await marketCacheRepository?.findByMarketId?.(clarification.eventId);
   const requestedAt = now().toISOString();
   const interpretation = await generateMarketInterpretation({
     clarification,
     market,
-    llmRuntime,
+    llmRuntime: llmRuntime as Record<string, unknown>,
     promptProfile: "issue-clarification-response"
   });
   const completedTimestamp = now().toISOString();
-  const llmTrace = buildLlmTrace({ llmTraceability, requestedAt });
+  const llmTrace = buildLlmTrace({ llmTraceability: llmTraceability as LlmTraceability, requestedAt });
   const artifact = await publishInterpretationArtifact({
-    artifactRepository,
-    artifactPublisher,
+    artifactRepository: artifactRepository as ArtifactRepository,
+    artifactPublisher: artifactPublisher as ArtifactPublisher,
     clarification,
-    market,
-    llmOutput: interpretation.llmOutput,
+    market: market as MarketRecord,
+    llmOutput: interpretation.llmOutput as Record<string, unknown>,
     generatedAtUtc: completedTimestamp
   });
   const timing = await buildClarificationTiming({
@@ -97,12 +150,12 @@ export async function runAutomaticClarificationPipeline({
     },
     market,
     tradeActivityRepository,
-    finalityConfig: clarificationFinalityConfig,
+    finalityConfig: clarificationFinalityConfig as Record<string, unknown> | undefined,
     now,
-    fetchTrades: fetchTradesForSymbol
+    fetchTrades: fetchTradesForSymbol as ((...args: unknown[]) => unknown) | undefined
   });
 
-  await clarificationRequestRepository.updateByClarificationId(clarification.clarificationId, {
+  await clarificationRequestRepository?.updateByClarificationId(clarification.clarificationId as string, {
     status: "completed",
     updatedAt: completedTimestamp,
     llmOutput: interpretation.llmOutput,

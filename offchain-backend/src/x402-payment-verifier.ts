@@ -4,16 +4,17 @@ import {
 } from "./x402-paid-clarification.js";
 import { buildClarificationPaymentRequirements } from "./x402-payment-challenge.js";
 import { createPayAIAuthHeaders } from "@payai/facilitator";
+import type { X402PaymentConfig } from "./x402-payment-challenge.js";
 
-function normalizeString(value: any) {
+function normalizeString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function toBase64Value(value: any) {
+function toBase64Value(value: string) {
   return Buffer.from(value, "utf8").toString("base64");
 }
 
-function tryParseJson(value: any) {
+function tryParseJson(value: string) {
   try {
     return JSON.parse(value);
   } catch {
@@ -21,7 +22,7 @@ function tryParseJson(value: any) {
   }
 }
 
-function tryDecodeBase64Json(value: any) {
+function tryDecodeBase64Json(value: string) {
   try {
     return JSON.parse(Buffer.from(value, "base64").toString("utf8"));
   } catch {
@@ -29,15 +30,15 @@ function tryDecodeBase64Json(value: any) {
   }
 }
 
-function paymentVerificationError(statusCode: any, code: any, message: any, details: any = null) {
-  const extra: Record<string, any> = { statusCode, code };
+function paymentVerificationError(statusCode: number, code: string, message: string, details: unknown = null) {
+  const extra: Record<string, unknown> = { statusCode, code };
   if (details !== null) {
     extra.details = details;
   }
   return Object.assign(new Error(message), extra);
 }
 
-function parsePaymentPayload(rawValue: any) {
+function parsePaymentPayload(rawValue: unknown) {
   const normalized = normalizeString(rawValue);
 
   if (!normalized) {
@@ -65,7 +66,18 @@ function parsePaymentPayload(rawValue: any) {
   return null;
 }
 
-export function extractX402PaymentCandidate(request: any, body: any = null) {
+type IncomingRequest = {
+  headers: Record<string, string | string[] | undefined>;
+};
+
+type RequestBody = {
+  payment?: {
+    proof?: unknown;
+    reference?: unknown;
+  };
+} | null;
+
+export function extractX402PaymentCandidate(request: IncomingRequest, body: RequestBody = null) {
   const paymentSignatureHeader = normalizeString(request.headers["payment-signature"]);
   const legacyPaymentHeader = normalizeString(request.headers["x-payment"]);
   const headerPayload = parsePaymentPayload(paymentSignatureHeader || legacyPaymentHeader);
@@ -103,20 +115,46 @@ export function extractX402PaymentCandidate(request: any, body: any = null) {
   };
 }
 
+type PaymentCandidate = {
+  proof: string;
+  paymentPayload: Record<string, unknown>;
+  paymentReference: string | null;
+  source: string;
+} | null;
+
+type RequestContext = {
+  eventId: string;
+  requesterId?: string | null;
+};
+
+type VerifyWithFacilitatorOptions = {
+  paymentCandidate: NonNullable<PaymentCandidate>;
+  config: X402PaymentConfig & {
+    payaiApiKeyId?: string | null;
+    payaiApiKeySecret?: string | null;
+    facilitatorAuthToken?: string | null;
+    facilitatorUrl: string;
+    x402Version: number;
+  };
+  requestContext: RequestContext;
+  requestUrl?: { origin?: string } | null;
+  fetchImpl: typeof fetch;
+};
+
 async function verifyWithFacilitator({
   paymentCandidate,
   config,
   requestContext,
   requestUrl,
   fetchImpl
-}: any) {
+}: VerifyWithFacilitatorOptions) {
   const paymentRequirements = buildClarificationPaymentRequirements({
     eventId: requestContext.eventId,
     requesterId: requestContext.requesterId,
     config,
     requestUrl
   });
-  let authHeaders = {};
+  let authHeaders: Record<string, string> = {};
 
   if (config.payaiApiKeyId && config.payaiApiKeySecret) {
     authHeaders = (await createPayAIAuthHeaders(
@@ -165,6 +203,15 @@ async function verifyWithFacilitator({
   };
 }
 
+export type VerifyClarificationPaymentOptions = {
+  paymentCandidate: PaymentCandidate;
+  config: X402PaymentConfig & Record<string, unknown>;
+  now: () => Date;
+  requestContext: RequestContext;
+  requestUrl?: { origin?: string } | null;
+  fetchImpl?: typeof fetch;
+};
+
 export async function verifyClarificationPayment({
   paymentCandidate,
   config,
@@ -172,7 +219,7 @@ export async function verifyClarificationPayment({
   requestContext,
   requestUrl,
   fetchImpl = fetch
-}: any) {
+}: VerifyClarificationPaymentOptions) {
   if (!paymentCandidate) {
     throw paymentRequiredError();
   }
@@ -183,7 +230,7 @@ export async function verifyClarificationPayment({
 
   const { payload, paymentRequirements } = await verifyWithFacilitator({
     paymentCandidate,
-    config,
+    config: config as VerifyWithFacilitatorOptions["config"],
     requestContext,
     requestUrl,
     fetchImpl

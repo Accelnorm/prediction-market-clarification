@@ -1,9 +1,9 @@
-// @ts-nocheck
 import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp } from "node:fs/promises";
+import type { AddressInfo } from "node:net";
 
 import { createServer } from "../src/server.js";
 import { FileClarificationRequestRepository } from "../src/clarification-request-repository.js";
@@ -19,14 +19,14 @@ const VALID_MARKET = {
   lastSyncedAt: "2026-03-21T18:59:00.000Z"
 };
 
-async function startTestServer(options: any) {
+async function startTestServer(options: Parameters<typeof createServer>[0]) {
   const server = createServer(options);
 
-  await new Promise((resolve: any) => {
+  await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
 
-  const address = server.address();
+  const address = server.address() as AddressInfo;
 
   return {
     server,
@@ -34,9 +34,9 @@ async function startTestServer(options: any) {
   };
 }
 
-async function stopTestServer(server: any) {
-  await new Promise((resolve: any, reject: any) => {
-    server.close((error: any) => {
+async function stopTestServer(server: ReturnType<typeof createServer>) {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error?: Error) => {
       if (error) {
         reject(error);
         return;
@@ -96,7 +96,12 @@ test("telegram routes return 404 when disabled", async () => {
 });
 
 test("health endpoints report liveness and readiness", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "phase1-health-"));
+  const clarificationRequestRepository = new FileClarificationRequestRepository(
+    path.join(tempDir, "clarification-requests.json")
+  );
   const { server, baseUrl } = await startTestServer({
+    clarificationRequestRepository,
     readinessCheck: async () => ({
       ok: true,
       checks: {

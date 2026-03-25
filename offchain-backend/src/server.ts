@@ -1,4 +1,5 @@
 import http from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -6,6 +7,7 @@ import {
   fetchTradesForSymbol as fetchDefaultTradesForSymbol
 } from "./gemini-markets-source.js";
 import { runAutomaticClarificationPipeline as runDefaultAutomaticClarificationPipeline } from "./automatic-llm-pipeline.js";
+import type { RunAutomaticClarificationPipelineOptions } from "./automatic-llm-pipeline.js";
 import { buildClarificationTiming } from "./clarification-timing.js";
 import { refreshReviewerMarketData } from "./reviewer-refresh-market.js";
 import { createTelegramClarificationRequest } from "./telegram-request-flow.js";
@@ -13,22 +15,66 @@ import {
   assertTelegramWebhookSecret,
   sendTelegramMessage as sendDefaultTelegramMessage
 } from "./telegram-bot-client.js";
+import type { SendTelegramMessageOptions } from "./telegram-bot-client.js";
 import {
   buildTelegramDeliveryPayload,
   parseTelegramStatusUpdate
 } from "./telegram-status-delivery.js";
 import { buildAdaptiveReviewWindow } from "./review-window-policy.js";
 import { createReviewerMarketScan } from "./reviewer-scan-service.js";
+import type { CreateReviewerMarketScanOptions } from "./reviewer-scan-service.js";
 import { parseClarificationRequestInput } from "./x402-paid-clarification.js";
 import { buildX402PaymentRequiredPayload } from "./x402-payment-challenge.js";
 import { buildX402PaymentRequiredHeader } from "./x402-payment-challenge.js";
+import type { BuildPaymentRequirementsOptions } from "./x402-payment-challenge.js";
 import { loadX402PaymentConfig } from "./x402-payment-config.js";
+import type { X402PaymentConfig } from "./x402-payment-challenge.js";
 import {
   extractX402PaymentCandidate,
   verifyClarificationPayment as verifyDefaultClarificationPayment
 } from "./x402-payment-verifier.js";
+import type { VerifyClarificationPaymentOptions } from "./x402-payment-verifier.js";
+import type { ArtifactRecord, BackgroundJob, ClarificationRequest, MarketRecord, ReviewerScan, VerifiedPayment } from "./types.js";
 
-function sendJson(response: any, statusCode: any, payload: any, headers: any = {}) {
+interface HttpError extends Error {
+  statusCode: number;
+  code: string;
+  details?: unknown;
+}
+
+function isHttpError(error: unknown): error is HttpError {
+  return error instanceof Error && typeof (error as HttpError).statusCode === "number";
+}
+
+interface AppServer extends http.Server {
+  resumeRecoverableBackgroundJobs: () => Promise<number>;
+  markShuttingDown: () => void;
+}
+
+interface VerifiedPaymentResult {
+  paymentProof: string;
+  paymentReference?: string | null;
+  paymentAmount?: string | null;
+  paymentAsset?: string | null;
+  paymentMint?: string | null;
+  paymentCluster?: string | null;
+  paymentRecipient?: string | null;
+  paymentTransactionSignature?: string | null;
+  paymentVerifiedAt?: string | null;
+  paymentSettledAt?: string | null;
+  paymentResponseHeader?: string | null;
+  verificationSource?: string | null;
+  [key: string]: unknown;
+}
+
+interface FundingHistoryEntry {
+  contributor: string;
+  amount: string;
+  timestamp: string;
+  reference: string | null;
+}
+
+function sendJson(response: ServerResponse, statusCode: number, payload: unknown, headers: Record<string, string> = {}) {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     ...headers
@@ -36,7 +82,7 @@ function sendJson(response: any, statusCode: any, payload: any, headers: any = {
   response.end(JSON.stringify(payload));
 }
 
-function sendNotFound(response: any) {
+function sendNotFound(response: ServerResponse) {
   sendJson(response, 404, {
     ok: false,
     error: {
@@ -46,21 +92,28 @@ function sendNotFound(response: any) {
   });
 }
 
-function buildLogger(logger: any = console) {
+interface LoggerLike {
+  info?: (...args: unknown[]) => void;
+  warn?: (...args: unknown[]) => void;
+  error?: (...args: unknown[]) => void;
+  log: (...args: unknown[]) => void;
+}
+
+function buildLogger(logger: LoggerLike = console) {
   return {
-    info(message: any, fields: any = {}) {
+    info(message: string, fields: Record<string, unknown> = {}) {
       (logger.info ?? logger.log).call(logger, JSON.stringify({ level: "info", message, ...fields }));
     },
-    warn(message: any, fields: any = {}) {
+    warn(message: string, fields: Record<string, unknown> = {}) {
       (logger.warn ?? logger.log).call(logger, JSON.stringify({ level: "warn", message, ...fields }));
     },
-    error(message: any, fields: any = {}) {
+    error(message: string, fields: Record<string, unknown> = {}) {
       (logger.error ?? logger.log).call(logger, JSON.stringify({ level: "error", message, ...fields }));
     }
   };
 }
 
-function buildRequestContext(request: any) {
+function buildRequestContext(request: IncomingMessage) {
   const forwardedFor = request.headers["x-forwarded-for"];
   const forwardedClient =
     typeof forwardedFor === "string" && forwardedFor.trim() !== ""
@@ -76,11 +129,11 @@ function buildRequestContext(request: any) {
 function createInMemoryRateLimiter({
   windowMs = 60_000,
   maxRequests = 30
-}: any = {}) {
-  const buckets = new Map();
+}: { windowMs?: number; maxRequests?: number } = {}) {
+  const buckets = new Map<string, { count: number; resetAt: number }>();
 
   return {
-    check(key: any, now: any = Date.now()) {
+    check(key: string, now: number = Date.now()) {
       const existingBucket = buckets.get(key);
 
       if (!existingBucket || existingBucket.resetAt <= now) {
@@ -104,7 +157,7 @@ function createInMemoryRateLimiter({
   };
 }
 
-function hasReviewerAccess(request: any, reviewerAuthToken: any) {
+function hasReviewerAccess(request: IncomingMessage, reviewerAuthToken: string | null | undefined) {
   if (!reviewerAuthToken) {
     return false;
   }
@@ -112,7 +165,7 @@ function hasReviewerAccess(request: any, reviewerAuthToken: any) {
   return request.headers["x-reviewer-token"] === reviewerAuthToken;
 }
 
-function sendReviewerAuthRequired(response: any) {
+function sendReviewerAuthRequired(response: ServerResponse) {
   sendJson(response, 401, {
     ok: false,
     error: {
@@ -122,8 +175,8 @@ function sendReviewerAuthRequired(response: any) {
   });
 }
 
-function buildPublicClarificationPayload(clarification: any) {
-  const payload: any = {
+function buildPublicClarificationPayload(clarification: ClarificationRequest) {
+  const payload: Record<string, unknown> = {
     clarificationId: clarification.clarificationId,
     status: clarification.status,
     eventId: clarification.eventId,
@@ -148,7 +201,7 @@ function buildPublicClarificationPayload(clarification: any) {
   return payload;
 }
 
-function parseBoundedWaitOptions(requestUrl: any) {
+function parseBoundedWaitOptions(requestUrl: URL) {
   const waitValue = String(requestUrl.searchParams.get("wait") ?? "").toLowerCase();
 
   if (!["1", "true"].includes(waitValue)) {
@@ -164,23 +217,23 @@ function parseBoundedWaitOptions(requestUrl: any) {
   };
 }
 
-function sleep(ms: any) {
-  return new Promise((resolve: any) => {
+function sleep(ms: number) {
+  return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
 }
 
-function formatWorkflowLabel(state: any) {
+function formatWorkflowLabel(state: string) {
   return state
     .split("_")
-    .map((part: any) => part.charAt(0).toUpperCase() + part.slice(1))
+    .map((part: string) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 }
 
-function normalizeFundingHistory(history: any[] = []) {
+function normalizeFundingHistory(history: FundingHistoryEntry[] = []) {
   return history
     .filter(
-      (entry: any) =>
+      (entry: FundingHistoryEntry) =>
         entry &&
         typeof entry.contributor === "string" &&
         entry.contributor.trim() !== "" &&
@@ -189,16 +242,16 @@ function normalizeFundingHistory(history: any[] = []) {
         typeof entry.timestamp === "string" &&
         entry.timestamp !== ""
     )
-    .map((entry: any) => ({
+    .map((entry: FundingHistoryEntry) => ({
       contributor: entry.contributor,
       amount: Number.parseFloat(entry.amount).toFixed(2),
       timestamp: entry.timestamp,
       reference: entry.reference ?? null
     }))
-    .sort((left: any, right: any) => right.timestamp.localeCompare(left.timestamp));
+    .sort((left: FundingHistoryEntry, right: FundingHistoryEntry) => right.timestamp.localeCompare(left.timestamp));
 }
 
-function buildFundingDetailsFromHistory(history: any[] = [], targetAmount: any = "1.00") {
+function buildFundingDetailsFromHistory(history: FundingHistoryEntry[] = [], targetAmount: string = "1.00") {
   const normalizedHistory = normalizeFundingHistory(history);
 
   if (normalizedHistory.length === 0) {
@@ -212,10 +265,10 @@ function buildFundingDetailsFromHistory(history: any[] = [], targetAmount: any =
   }
 
   const raisedAmount = normalizedHistory
-    .reduce((total: any, entry: any) => total + Number.parseFloat(entry.amount), 0)
+    .reduce((total: number, entry: FundingHistoryEntry) => total + Number.parseFloat(entry.amount), 0)
     .toFixed(2);
   const contributorCount = new Set(
-    normalizedHistory.map((entry: any) => entry.contributor)
+    normalizedHistory.map((entry: FundingHistoryEntry) => entry.contributor)
   ).size;
   const fundingState =
     Number.parseFloat(raisedAmount) >= Number.parseFloat(targetAmount)
@@ -231,20 +284,20 @@ function buildFundingDetailsFromHistory(history: any[] = [], targetAmount: any =
   };
 }
 
-function buildFundingDetailsFromClarifications(clarifications: any[] = []) {
+function buildFundingDetailsFromClarifications(clarifications: ClarificationRequest[] = []) {
   const fundingProgress = buildFundingProgress(clarifications);
   const history = clarifications
     .filter(
-      (clarification: any) =>
+      (clarification: ClarificationRequest) =>
         typeof clarification.paymentAmount === "string" && clarification.paymentAmount !== ""
     )
-    .map((clarification: any) => ({
-      contributor: clarification.requesterId ?? clarification.paymentReference ?? "unknown",
-      amount: clarification.paymentAmount,
-      timestamp: clarification.paymentVerifiedAt ?? clarification.createdAt,
-      reference: clarification.paymentReference ?? null
+    .map((clarification: ClarificationRequest) => ({
+      contributor: (clarification.requesterId ?? clarification.paymentReference ?? "unknown") as string,
+      amount: clarification.paymentAmount as string,
+      timestamp: (clarification.paymentVerifiedAt ?? clarification.createdAt) as string,
+      reference: (clarification.paymentReference ?? null) as string | null
     }))
-    .sort((left: any, right: any) => right.timestamp.localeCompare(left.timestamp));
+    .sort((left: FundingHistoryEntry, right: FundingHistoryEntry) => right.timestamp.localeCompare(left.timestamp));
 
   return {
     ...fundingProgress,
@@ -252,29 +305,36 @@ function buildFundingDetailsFromClarifications(clarifications: any[] = []) {
   };
 }
 
-function buildFundingDetails(clarification: any, relatedClarifications: any[] = []) {
-  if (clarification?.funding && Array.isArray(clarification.funding.history)) {
+interface StoredFundingData {
+  history?: FundingHistoryEntry[];
+  targetAmount?: string;
+}
+
+function buildFundingDetails(clarification: ClarificationRequest, relatedClarifications: ClarificationRequest[] = []) {
+  const funding = clarification?.funding as StoredFundingData | undefined;
+  if (funding && Array.isArray(funding.history)) {
     return buildFundingDetailsFromHistory(
-      clarification.funding.history,
-      clarification.funding.targetAmount ?? "1.00"
+      funding.history,
+      funding.targetAmount ?? "1.00"
     );
   }
 
   return buildFundingDetailsFromClarifications(relatedClarifications);
 }
 
-function buildStoredFundingDetails(clarification: any) {
-  if (clarification?.funding && Array.isArray(clarification.funding.history)) {
+function buildStoredFundingDetails(clarification: ClarificationRequest) {
+  const funding = clarification?.funding as StoredFundingData | undefined;
+  if (funding && Array.isArray(funding.history)) {
     return buildFundingDetailsFromHistory(
-      clarification.funding.history,
-      clarification.funding.targetAmount ?? "1.00"
+      funding.history,
+      funding.targetAmount ?? "1.00"
     );
   }
 
   return buildFundingDetailsFromHistory([]);
 }
 
-function buildReviewerVotePayload(clarification: any) {
+function buildReviewerVotePayload(clarification: ClarificationRequest) {
   const status = clarification.reviewerWorkflowStatus ?? "not_started";
 
   return {
@@ -291,12 +351,12 @@ function buildReviewerClarificationPayload({
   adaptiveReviewWindow,
   market,
   relatedClarifications
-}: any) {
-  const clarificationPayload = {
+}: { clarification: ClarificationRequest; adaptiveReviewWindow: Record<string, unknown>; market: unknown; relatedClarifications: ClarificationRequest[] }) {
+  const clarificationPayload: Record<string, unknown> = {
     ...buildPublicClarificationPayload(clarification),
     llmOutput: clarification.llmOutput ?? null,
     llmTrace: clarification.llmTrace ?? null,
-    market: buildReviewerMarketPayload(market, clarification.eventId),
+    market: buildReviewerMarketPayload(market as Record<string, unknown> | null, clarification.eventId),
     funding: buildFundingDetails(clarification, relatedClarifications),
     vote: buildReviewerVotePayload(clarification),
     ...adaptiveReviewWindow
@@ -321,8 +381,8 @@ function buildReviewerClarificationPayload({
   return clarificationPayload;
 }
 
-function buildReviewerMarketPayload(market: any, fallbackMarketId: any = null) {
-  const payload: any = {
+function buildReviewerMarketPayload(market: Record<string, unknown> | null | undefined, fallbackMarketId: string | null = null) {
+  const payload: Record<string, unknown> = {
     marketId: market?.marketId ?? fallbackMarketId ?? null,
     title: market?.title ?? null,
     resolutionText: market?.resolution ?? market?.resolutionText ?? null,
@@ -390,14 +450,14 @@ function buildReviewerMarketPayload(market: any, fallbackMarketId: any = null) {
   return payload;
 }
 
-function buildReviewerActionDetails(action: any) {
+function buildReviewerActionDetails(action: Record<string, unknown>) {
   return Object.fromEntries(
-    Object.entries(action).filter(([key]: any) => !["type", "actor", "timestamp"].includes(key))
+    Object.entries(action).filter(([key]) => !["type", "actor", "timestamp"].includes(key))
   );
 }
 
-function buildClarificationAuditTimeline({ clarification, artifact }: any) {
-  const timeline: any[] = [];
+function buildClarificationAuditTimeline({ clarification, artifact }: { clarification: ClarificationRequest; artifact: Record<string, unknown> | null | undefined }) {
+  const timeline: Record<string, unknown>[] = [];
 
   for (const entry of Array.isArray(clarification.statusHistory)
     ? clarification.statusHistory
@@ -409,13 +469,14 @@ function buildClarificationAuditTimeline({ clarification, artifact }: any) {
     });
   }
 
-  if (clarification.llmTrace?.requestedAt) {
+  const llmTrace = clarification.llmTrace as Record<string, unknown> | null | undefined;
+  if (llmTrace?.requestedAt) {
     timeline.push({
       type: "llm_requested",
-      timestamp: clarification.llmTrace.requestedAt,
-      promptTemplateVersion: clarification.llmTrace.promptTemplateVersion ?? null,
-      modelId: clarification.llmTrace.modelId ?? null,
-      processingVersion: clarification.llmTrace.processingVersion ?? null
+      timestamp: llmTrace.requestedAt as string,
+      promptTemplateVersion: llmTrace.promptTemplateVersion ?? null,
+      modelId: llmTrace.modelId ?? null,
+      processingVersion: llmTrace.processingVersion ?? null
     });
   }
 
@@ -458,18 +519,20 @@ function buildClarificationAuditTimeline({ clarification, artifact }: any) {
     funding_contribution_recorded: 5
   };
 
-  return timeline.sort((left: any, right: any) => {
-    const timestampComparison = left.timestamp.localeCompare(right.timestamp);
+  return timeline.sort((left: Record<string, unknown>, right: Record<string, unknown>) => {
+    const leftTimestamp = left.timestamp as string;
+    const rightTimestamp = right.timestamp as string;
+    const timestampComparison = leftTimestamp.localeCompare(rightTimestamp);
 
     if (timestampComparison !== 0) {
       return timestampComparison;
     }
 
-    return (priority[left.type] ?? 99) - (priority[right.type] ?? 99);
+    return (priority[left.type as string] ?? 99) - (priority[right.type as string] ?? 99);
   });
 }
 
-function buildClarificationAuditPayload({ clarification, artifact }: any) {
+function buildClarificationAuditPayload({ clarification, artifact }: { clarification: ClarificationRequest; artifact: Record<string, unknown> | null | undefined }) {
   return {
     clarificationId: clarification.clarificationId,
     eventId: clarification.eventId ?? null,
@@ -526,9 +589,9 @@ const REVIEWER_QUEUE_FILTERS = [
   { key: "finalized", label: "Finalized" }
 ];
 
-function buildFundingProgress(clarifications: any[] = []) {
+function buildFundingProgress(clarifications: ClarificationRequest[] = []) {
   const fundedClarifications = clarifications.filter(
-    (clarification: any) =>
+    (clarification: ClarificationRequest) =>
       typeof clarification.paymentAmount === "string" && clarification.paymentAmount !== ""
   );
 
@@ -542,14 +605,14 @@ function buildFundingProgress(clarifications: any[] = []) {
   }
 
   const raisedAmount = fundedClarifications
-    .reduce((total: any, clarification: any) => {
-      const parsedAmount = Number.parseFloat(clarification.paymentAmount);
+    .reduce((total: number, clarification: ClarificationRequest) => {
+      const parsedAmount = Number.parseFloat(clarification.paymentAmount as string);
       return total + (Number.isFinite(parsedAmount) ? parsedAmount : 0);
     }, 0)
     .toFixed(2);
   const contributorCount = new Set(
     fundedClarifications.map(
-      (clarification: any) => clarification.requesterId ?? clarification.paymentReference
+      (clarification: ClarificationRequest) => clarification.requesterId ?? clarification.paymentReference
     )
   ).size;
   const fundingState =
@@ -563,13 +626,13 @@ function buildFundingProgress(clarifications: any[] = []) {
   };
 }
 
-function buildQueueFundingProgress(latestClarification: any, clarifications: any[] = []) {
+function buildQueueFundingProgress(latestClarification: ClarificationRequest | null, clarifications: ClarificationRequest[] = []) {
   return latestClarification?.funding
     ? buildFundingDetails(latestClarification, clarifications)
     : buildFundingProgress(clarifications);
 }
 
-function parseReviewerFundingContributionPayload(payload: any) {
+function parseReviewerFundingContributionPayload(payload: Record<string, unknown>) {
   const contributor = String(payload?.contributor ?? "").trim();
   const amount = String(payload?.amount ?? "").trim();
   const reference =
@@ -594,14 +657,14 @@ function parseReviewerFundingContributionPayload(payload: any) {
   };
 }
 
-function buildQueueStates({ latestScan, fundingProgress, reviewWindow, voteStatus }: any) {
+function buildQueueStates({ latestScan, fundingProgress, reviewWindow, voteStatus }: { latestScan: Record<string, unknown> | null; fundingProgress: { fundingState: string }; reviewWindow: { time_to_end_bucket: string }; voteStatus: string }) {
   const queueStates: string[] = [];
 
   if (!latestScan) {
     queueStates.push("needs_scan");
   }
 
-  if ((latestScan?.ambiguity_score ?? 0) >= 0.7) {
+  if (((latestScan?.ambiguity_score as number | undefined) ?? 0) >= 0.7) {
     queueStates.push("high_ambiguity");
   }
 
@@ -624,14 +687,14 @@ function buildQueueStates({ latestScan, fundingProgress, reviewWindow, voteStatu
   return queueStates;
 }
 
-function buildReviewerQueueFilters(queue: any) {
-  return REVIEWER_QUEUE_FILTERS.map((filter: any) => ({
+function buildReviewerQueueFilters(queue: Array<{ queueStates: string[] }>) {
+  return REVIEWER_QUEUE_FILTERS.map((filter) => ({
     ...filter,
-    count: queue.filter((item: any) => item.queueStates.includes(filter.key)).length
+    count: queue.filter((item) => item.queueStates.includes(filter.key)).length
   }));
 }
 
-function buildReviewerScanListItem(scan: any) {
+function buildReviewerScanListItem(scan: Record<string, unknown>) {
   return {
     scanId: scan.scanId,
     eventId: scan.eventId,
@@ -642,7 +705,7 @@ function buildReviewerScanListItem(scan: any) {
   };
 }
 
-function buildPrelaunchQueueItem({ market, latestScan, now }: any) {
+function buildPrelaunchQueueItem({ market, latestScan, now }: { market: Record<string, unknown>; latestScan: Record<string, unknown> | null; now: Date }) {
   const reviewWindow =
     latestScan?.review_window ??
     buildAdaptiveReviewWindow({
@@ -671,7 +734,7 @@ function buildPrelaunchQueueItem({ market, latestScan, now }: any) {
   };
 }
 
-function isFutureUpcomingMarket(market: any, referenceNow: any) {
+function isFutureUpcomingMarket(market: Record<string, unknown>, referenceNow: Date) {
   const closesAt = market?.closesAt ?? market?.endTime ?? market?.expiryDate ?? null;
 
   if (typeof closesAt !== "string" || closesAt.trim() === "") {
@@ -682,7 +745,7 @@ function isFutureUpcomingMarket(market: any, referenceNow: any) {
   return Number.isFinite(closesAtMs) && closesAtMs > referenceNow.getTime();
 }
 
-function parseReviewerFinalizationPayload(payload: any) {
+function parseReviewerFinalizationPayload(payload: Record<string, unknown>) {
   const finalEditedText = String(payload?.finalEditedText ?? "").trim();
   const finalNote = String(payload?.finalNote ?? "").trim();
   const reviewerId = String(payload?.reviewerId ?? "system").trim();
@@ -706,7 +769,7 @@ function parseReviewerFinalizationPayload(payload: any) {
   };
 }
 
-function parseReviewerWorkflowPayload(payload: any) {
+function parseReviewerWorkflowPayload(payload: Record<string, unknown>) {
   const reviewerId = String(payload?.reviewerId ?? "system").trim();
 
   if (!reviewerId) {
@@ -718,7 +781,7 @@ function parseReviewerWorkflowPayload(payload: any) {
   };
 }
 
-function buildBackgroundJobPayload(job: any) {
+function buildBackgroundJobPayload(job: Record<string, unknown>) {
   return {
     jobId: job.jobId,
     kind: job.kind,
@@ -729,8 +792,8 @@ function buildBackgroundJobPayload(job: any) {
   };
 }
 
-async function readJsonBody(request: any) {
-  const chunks: any[] = [];
+async function readJsonBody(request: IncomingMessage) {
+  const chunks: Buffer[] = [];
 
   for await (const chunk of request) {
     chunks.push(chunk);
@@ -745,34 +808,123 @@ async function readJsonBody(request: any) {
   return JSON.parse(body);
 }
 
+interface ClarificationRequestRepo {
+  create: (req: ClarificationRequest) => Promise<ClarificationRequest | null>;
+  findByTelegramIdentifiers: (opts: { telegramChatId?: string | null; telegramUserId?: string | null }) => Promise<ClarificationRequest[]>;
+  findByRequestId: (id: string) => Promise<ClarificationRequest | null>;
+  findByClarificationId: (id: string) => Promise<ClarificationRequest | null>;
+  findByPaymentProof: (proof: string) => Promise<ClarificationRequest | null>;
+  findByEventId: (id: string) => Promise<ClarificationRequest[]>;
+  list: () => Promise<ClarificationRequest[]>;
+  updateStatus: (id: string, updates: Partial<ClarificationRequest>) => Promise<ClarificationRequest | null>;
+  updateByClarificationId: (id: string, updates: Partial<ClarificationRequest>) => Promise<ClarificationRequest | null>;
+}
+
+interface ArtifactRepo {
+  createArtifact?: (input: Record<string, unknown>) => Promise<ArtifactRecord | unknown>;
+  findByCid?: (cid: string) => Promise<ArtifactRecord | Record<string, unknown> | null>;
+}
+
+interface BackgroundJobRepo {
+  create?: (job: BackgroundJob) => Promise<BackgroundJob>;
+  findByJobId?: (id: string) => Promise<BackgroundJob | null>;
+  updateByJobId?: (id: string, updates: Partial<BackgroundJob>) => Promise<BackgroundJob | null>;
+  listRecoverable?: () => Promise<BackgroundJob[]>;
+}
+
+interface ReviewerScanRepo {
+  list?: () => Promise<ReviewerScan[]>;
+  findLatestByEventId?: (id: string) => Promise<ReviewerScan | null>;
+}
+
+interface CategoryCatalogRepo {
+  getCatalog?: (scope: string) => Promise<{ categories: string[]; updatedAt: string | null }>;
+}
+
+interface MarketCacheRepo {
+  list?: () => Promise<MarketRecord[]>;
+  findByMarketId?: (id: string) => Promise<MarketRecord | null>;
+  upsert?: (market: MarketRecord) => Promise<MarketRecord>;
+}
+
+interface VerifiedPaymentRepo {
+  create?: (payment: VerifiedPayment) => Promise<VerifiedPayment | undefined>;
+  findByPaymentProof?: (proof: string) => Promise<VerifiedPayment | null>;
+  updateByPaymentProof?: (proof: string, updates: Partial<VerifiedPayment>) => Promise<VerifiedPayment | null>;
+}
+
+interface Phase1CoordinatorRepo {
+  createPaidClarification: (opts: { clarification: ClarificationRequest; verifiedPayment: VerifiedPayment; backgroundJob: BackgroundJob }) => Promise<{ created: boolean; clarification: ClarificationRequest; job: BackgroundJob | null }>;
+}
+
+interface CreateServerOptions {
+  clarificationRequestRepository: ClarificationRequestRepo;
+  artifactRepository?: ArtifactRepo | null;
+  artifactPublisher?: unknown;
+  backgroundJobRepository?: BackgroundJobRepo | null;
+  reviewerScanRepository?: ReviewerScanRepo | null;
+  categoryCatalogRepository?: CategoryCatalogRepo | null;
+  marketCacheRepository?: MarketCacheRepo | null;
+  upcomingMarketCacheRepository?: MarketCacheRepo | null;
+  upcomingReviewerScanRepository?: ReviewerScanRepo | null;
+  upcomingCategoryCatalogRepository?: CategoryCatalogRepo | null;
+  tradeActivityRepository?: unknown;
+  now: () => Date;
+  createRequestId?: () => string;
+  createClarificationId?: () => string;
+  createBackgroundJobId?: () => string;
+  llmTraceability?: unknown;
+  llmRuntime?: unknown;
+  reviewerAuthToken?: string | null;
+  telegramWebhookSecret?: string | null;
+  telegramBotToken?: string | null;
+  telegramBotApiBaseUrl?: string | null | undefined;
+  x402PaymentConfig?: X402PaymentConfig & Record<string, unknown>;
+  verifiedPaymentRepository?: VerifiedPaymentRepo | null;
+  phase1Coordinator?: Phase1CoordinatorRepo | null;
+  verifyX402Payment?: (opts: VerifyClarificationPaymentOptions) => Promise<unknown>;
+  buildX402PaymentChallenge?: (opts: BuildPaymentRequirementsOptions) => unknown;
+  fetchReviewerMarketSource?: ((eventId: string) => Promise<Record<string, unknown> | null>) | null;
+  fetchTradesForSymbol?: (symbol: string, opts?: Record<string, unknown>) => Promise<unknown[]>;
+  sendTelegramMessage?: (opts: SendTelegramMessageOptions) => Promise<unknown>;
+  runAutomaticClarificationPipeline?: (opts: RunAutomaticClarificationPipelineOptions) => Promise<unknown>;
+  runReviewerMarketScan?: (opts: CreateReviewerMarketScanOptions) => Promise<unknown>;
+  clarificationFinalityConfig?: Record<string, unknown>;
+  enablePhase2Routes?: boolean;
+  enableTelegramRoutes?: boolean;
+  logger?: LoggerLike;
+  clarifyRateLimiter?: { check: (key: string, now?: number) => { allowed: boolean; retryAfterSeconds?: number } } | null;
+  readinessCheck?: () => Promise<{ ok: boolean; checks: Record<string, string> }>;
+}
+
 export function createServer({
   clarificationRequestRepository,
-  artifactRepository,
-  artifactPublisher = null as any,
-  backgroundJobRepository,
-  reviewerScanRepository,
-  categoryCatalogRepository,
-  marketCacheRepository,
-  upcomingMarketCacheRepository,
-  upcomingReviewerScanRepository,
-  upcomingCategoryCatalogRepository,
-  tradeActivityRepository,
+  artifactRepository = null,
+  artifactPublisher = null,
+  backgroundJobRepository = null,
+  reviewerScanRepository = null,
+  categoryCatalogRepository = null,
+  marketCacheRepository = null,
+  upcomingMarketCacheRepository = null,
+  upcomingReviewerScanRepository = null,
+  upcomingCategoryCatalogRepository = null,
+  tradeActivityRepository = null,
   now,
   createRequestId = (() => randomUUID()) as () => string,
-  createClarificationId,
+  createClarificationId = (() => randomUUID()) as () => string,
   createBackgroundJobId = (() => randomUUID()) as () => string,
-  llmTraceability,
-  llmRuntime,
-  reviewerAuthToken,
-  telegramWebhookSecret,
-  telegramBotToken,
-  telegramBotApiBaseUrl,
+  llmTraceability = undefined,
+  llmRuntime = undefined,
+  reviewerAuthToken = null,
+  telegramWebhookSecret = null,
+  telegramBotToken = null,
+  telegramBotApiBaseUrl = undefined,
   x402PaymentConfig = loadX402PaymentConfig(),
-  verifiedPaymentRepository,
-  phase1Coordinator = null as any,
+  verifiedPaymentRepository = null,
+  phase1Coordinator = null,
   verifyX402Payment = verifyDefaultClarificationPayment,
   buildX402PaymentChallenge = buildX402PaymentRequiredPayload,
-  fetchReviewerMarketSource = null as any,
+  fetchReviewerMarketSource = null,
   fetchTradesForSymbol = fetchDefaultTradesForSymbol,
   sendTelegramMessage = sendDefaultTelegramMessage,
   runAutomaticClarificationPipeline = runDefaultAutomaticClarificationPipeline,
@@ -792,21 +944,21 @@ export function createServer({
       runtime: "ok"
     }
   })) as (() => Promise<{ ok: boolean; checks: Record<string, string> }>)
-}: any) {
+}: CreateServerOptions) {
   const log = buildLogger(logger);
   const rateLimiter = clarifyRateLimiter ?? createInMemoryRateLimiter();
   let isShuttingDown = false;
   const upcomingMarketTextScanLocks = new Map();
 
-  function getMarketRepositoryForStage(marketStage: any = "active") {
+  function getMarketRepositoryForStage(marketStage: string = "active") {
     return marketStage === "upcoming" ? upcomingMarketCacheRepository : marketCacheRepository;
   }
 
-  function getReviewerScanRepositoryForStage(marketStage: any = "active") {
+  function getReviewerScanRepositoryForStage(marketStage: string = "active") {
     return marketStage === "upcoming" ? upcomingReviewerScanRepository : reviewerScanRepository;
   }
 
-  async function findMarketByEventId(eventId: any, marketStage: any = "active") {
+  async function findMarketByEventId(eventId: string | null | undefined, marketStage: string = "active") {
     if (!eventId) {
       return null;
     }
@@ -814,12 +966,12 @@ export function createServer({
     return getMarketRepositoryForStage(marketStage)?.findByMarketId?.(eventId) ?? null;
   }
 
-  async function findMarketForClarification(clarification: any) {
+  async function findMarketForClarification(clarification: ClarificationRequest | null | undefined) {
     if (!clarification?.eventId) {
       return null;
     }
 
-    const preferredStage = clarification.marketStage ?? "active";
+    const preferredStage = (clarification.marketStage as string | undefined) ?? "active";
     const preferredMarket = await findMarketByEventId(clarification.eventId, preferredStage);
 
     if (preferredMarket) {
@@ -833,13 +985,13 @@ export function createServer({
     return findMarketByEventId(clarification.eventId, "active");
   }
 
-  async function getAvailableCategoriesForStage(marketStage: any = "active") {
+  async function getAvailableCategoriesForStage(marketStage: string = "active") {
     const repository =
       marketStage === "upcoming" ? upcomingCategoryCatalogRepository : categoryCatalogRepository;
     return (await repository?.getCatalog?.(marketStage)) ?? { categories: [], updatedAt: null };
   }
 
-  async function buildClarificationTimingForResponse({ clarification, market }: any) {
+  async function buildClarificationTimingForResponse({ clarification, market }: { clarification: ClarificationRequest; market: unknown }) {
     if (clarification?.timing && typeof clarification.timing === "object") {
       return clarification.timing;
     }
@@ -858,7 +1010,7 @@ export function createServer({
     });
   }
 
-  async function buildPublicClarificationResponse(clarification: any) {
+  async function buildPublicClarificationResponse(clarification: ClarificationRequest) {
     const market = clarification.eventId
       ? await findMarketForClarification(clarification)
       : null;
@@ -873,7 +1025,7 @@ export function createServer({
     };
   }
 
-  async function waitForClarificationSettlement(clarificationId: any, timeoutMs: any) {
+  async function waitForClarificationSettlement(clarificationId: string, timeoutMs: number) {
     const deadline = Date.now() + timeoutMs;
     let clarification =
       await clarificationRequestRepository.findByClarificationId(clarificationId);
@@ -902,10 +1054,10 @@ export function createServer({
     waitOptions,
     job = null,
     headers = {}
-  }: any) {
+  }: { response: ServerResponse; clarification: ClarificationRequest; waitOptions: { timeoutMs: number } | null; job?: Record<string, unknown> | null; headers?: Record<string, string> }) {
     if (waitOptions) {
       const settledClarification = await waitForClarificationSettlement(
-        clarification.clarificationId,
+        clarification.clarificationId!,
         waitOptions.timeoutMs
       );
 
@@ -936,42 +1088,41 @@ export function createServer({
     );
   }
 
-  async function markJobProcessing(job: any) {
+  async function markJobProcessing(job: Record<string, unknown> & { jobId: string; kind: string; target: Record<string, unknown> }) {
     const processingTimestamp = now().toISOString();
 
-    return (
-      (await backgroundJobRepository?.updateByJobId?.(job.jobId, {
-        status: "processing",
-        updatedAt: processingTimestamp,
-        attempts: (job.attempts ?? 0) + 1
-      })) ?? {
-        ...job,
-        status: "processing",
-        updatedAt: processingTimestamp,
-        attempts: (job.attempts ?? 0) + 1
-      }
-    );
+    const updated = (await backgroundJobRepository?.updateByJobId?.(job.jobId, {
+      status: "processing",
+      updatedAt: processingTimestamp,
+      attempts: ((job.attempts as number | undefined) ?? 0) + 1
+    } as Partial<BackgroundJob>)) ?? {
+      ...job,
+      status: "processing",
+      updatedAt: processingTimestamp,
+      attempts: ((job.attempts as number | undefined) ?? 0) + 1
+    };
+    return updated as unknown as Record<string, unknown> & { kind: string; target: Record<string, unknown>; jobId: string; updatedAt: string };
   }
 
-  async function executeClarificationPipelineJob(job: any) {
-    await clarificationRequestRepository.updateByClarificationId(job.target.clarificationId, {
+  async function executeClarificationPipelineJob(job: Record<string, unknown> & { target: Record<string, unknown>; jobId: string }) {
+    await clarificationRequestRepository.updateByClarificationId(job.target.clarificationId as string, {
       status: "processing",
-      updatedAt: job.updatedAt,
+      updatedAt: job.updatedAt as string,
       errorMessage: null,
       retryable: false
     });
 
     try {
       const clarification = await clarificationRequestRepository.findByClarificationId(
-        job.target.clarificationId
+        job.target.clarificationId as string
       );
       const artifact = await runAutomaticClarificationPipeline({
-        clarification,
+        clarification: clarification as ClarificationRequest,
         clarificationRequestRepository,
         artifactRepository,
         artifactPublisher,
         marketCacheRepository: getMarketRepositoryForStage(
-          clarification?.marketStage ?? job.target.marketStage ?? "active"
+          (clarification?.marketStage as string | undefined) ?? (job.target.marketStage as string | undefined) ?? "active"
         ),
         resolveMarketByClarification: findMarketForClarification,
         tradeActivityRepository,
@@ -989,16 +1140,17 @@ export function createServer({
         errorMessage: null,
         result: {
           clarificationId: job.target.clarificationId,
-          artifactCid: artifact?.artifact?.cid ?? null
+          artifactCid: (artifact as { artifact?: { cid?: string } } | null | undefined)?.artifact?.cid ?? null
         }
       });
-    } catch (pipelineError: any) {
+    } catch (pipelineError: unknown) {
       const failedAt = now().toISOString();
+      const pipelineErrorMessage = pipelineError instanceof Error ? pipelineError.message : String(pipelineError);
 
-      await clarificationRequestRepository.updateByClarificationId(job.target.clarificationId, {
+      await clarificationRequestRepository.updateByClarificationId(job.target.clarificationId as string, {
         status: "failed",
         updatedAt: failedAt,
-        errorMessage: pipelineError.message,
+        errorMessage: pipelineErrorMessage,
         retryable: true,
         llmOutput: null
       });
@@ -1007,18 +1159,18 @@ export function createServer({
         status: "failed",
         updatedAt: failedAt,
         retryable: true,
-        errorMessage: pipelineError.message,
+        errorMessage: pipelineErrorMessage,
         result: null
       });
     }
   }
 
-  async function executeReviewerScanJob(job: any) {
+  async function executeReviewerScanJob(job: Record<string, unknown> & { target: Record<string, unknown>; jobId: string }) {
     try {
-      const marketStage = job.target.marketStage ?? "active";
+      const marketStage = (job.target.marketStage as string | undefined) ?? "active";
       const scan = await runReviewerMarketScan({
         jobId: job.jobId,
-        eventId: job.target.eventId,
+        eventId: job.target.eventId as string,
         marketCacheRepository: getMarketRepositoryForStage(marketStage),
         reviewerScanRepository: getReviewerScanRepositoryForStage(marketStage),
         now,
@@ -1027,7 +1179,7 @@ export function createServer({
         dedupeByMarketText: marketStage === "upcoming",
         inFlightMarketTextScans:
           marketStage === "upcoming" ? upcomingMarketTextScanLocks : null
-      });
+      }) as Record<string, unknown>;
 
       await backgroundJobRepository?.updateByJobId?.(job.jobId, {
         status: "completed",
@@ -1038,18 +1190,18 @@ export function createServer({
           scanId: scan.scanId
         }
       });
-    } catch (scanError: any) {
+    } catch (scanError: unknown) {
       await backgroundJobRepository?.updateByJobId?.(job.jobId, {
         status: "failed",
         updatedAt: now().toISOString(),
         retryable: true,
-        errorMessage: scanError.message,
+        errorMessage: scanError instanceof Error ? scanError.message : String(scanError),
         result: null
       });
     }
   }
 
-  async function executeBackgroundJob(job: any) {
+  async function executeBackgroundJob(job: Record<string, unknown> & { kind: string; target: Record<string, unknown>; jobId: string }) {
     if (job.kind === "clarification_pipeline") {
       await executeClarificationPipelineJob(job);
       return;
@@ -1068,8 +1220,9 @@ export function createServer({
     throw new Error(`Unsupported background job kind: ${job.kind}`);
   }
 
-  async function startBackgroundJob(job: any) {
-    const processingJob = await markJobProcessing(job);
+  async function startBackgroundJob(job: Record<string, unknown>) {
+    const typedJob = job as Record<string, unknown> & { kind: string; target: Record<string, unknown>; jobId: string };
+    const processingJob = await markJobProcessing(typedJob);
     void Promise.resolve().then(() => executeBackgroundJob(processingJob));
     return processingJob;
   }
@@ -1084,7 +1237,7 @@ export function createServer({
     return recoverableJobs.length;
   }
 
-  const server = http.createServer(async (request: any, response: any) => {
+  const server = http.createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const requestContext = buildRequestContext(request);
     const startedAt = Date.now();
     const forwardedProto = request.headers["x-forwarded-proto"];
@@ -1128,10 +1281,10 @@ export function createServer({
             shuttingDown: isShuttingDown ? "draining" : "ok"
           }
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         log.error("readiness.failed", {
           requestId: requestContext.requestId,
-          errorMessage: error.message
+          errorMessage: error instanceof Error ? error.message : String(error)
         });
         sendJson(response, 503, {
           ok: false,
@@ -1175,7 +1328,7 @@ export function createServer({
           requestId: result.requestId,
           status: result.status
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -1187,7 +1340,7 @@ export function createServer({
           return;
         }
 
-        if (error.statusCode) {
+        if (isHttpError(error)) {
           sendJson(response, error.statusCode, {
             ok: false,
             error: {
@@ -1198,12 +1351,12 @@ export function createServer({
           return;
         }
 
-        logger.error("clarify.request.failed", {
+        log.error("clarify.request.failed", {
           requestId: requestContext.requestId,
           path: requestUrl.pathname,
-          errorName: error?.name ?? "Error",
-          errorMessage: error?.message ?? "Unknown error",
-          errorStack: error?.stack ?? null
+          errorName: error instanceof Error ? error.name : "Error",
+          errorMessage: error instanceof Error ? error.message : "Unknown error",
+          errorStack: error instanceof Error ? (error.stack ?? null) : null
         });
 
         sendJson(response, 500, {
@@ -1270,7 +1423,7 @@ export function createServer({
             requesterId: payload.requesterId,
             config: x402PaymentConfig,
             requestUrl
-          });
+          }) as { paymentRequirements?: Record<string, unknown>[] };
           const paymentRequiredHeader = buildX402PaymentRequiredHeader(challengePayload);
           sendJson(response, 402, challengePayload, {
             "payment-required": Buffer.from(
@@ -1290,7 +1443,7 @@ export function createServer({
             requesterId: payload.requesterId
           },
           requestUrl
-        });
+        }) as VerifiedPaymentResult;
 
         const existingClarification =
           await clarificationRequestRepository.findByPaymentProof(verifiedPayment.paymentProof);
@@ -1327,7 +1480,7 @@ export function createServer({
         });
         const clarificationPayload = {
           clarificationId: createClarificationId(),
-          requestId: null,
+          requestId: null as unknown as string,
           source: "paid_api",
           status: "queued",
           eventId,
@@ -1369,7 +1522,7 @@ export function createServer({
           errorMessage: null,
           result: null
         };
-        let clarification: any = null;
+        let clarification: ClarificationRequest | null = null;
         let queuedJob = null;
 
         if (phase1Coordinator) {
@@ -1379,8 +1532,8 @@ export function createServer({
               ...verifiedPayment,
               createdAt: timestamp,
               updatedAt: timestamp
-            },
-            backgroundJob: queuedJobPayload
+            } as VerifiedPayment,
+            backgroundJob: queuedJobPayload as BackgroundJob
           });
 
           if (!coordinatedResult.created) {
@@ -1412,12 +1565,12 @@ export function createServer({
               ...verifiedPayment,
               createdAt: timestamp,
               updatedAt: timestamp
-            });
+            } as VerifiedPayment);
           }
 
           clarification = await clarificationRequestRepository.create(clarificationPayload);
           await verifiedPaymentRepository?.updateByPaymentProof?.(verifiedPayment.paymentProof, {
-            clarificationId: clarification.clarificationId,
+            clarificationId: clarification?.clarificationId,
             updatedAt: timestamp
           });
           queuedJob = (await backgroundJobRepository?.create?.(queuedJobPayload)) ?? null;
@@ -1425,7 +1578,7 @@ export function createServer({
 
         const processingJob = queuedJob ? await startBackgroundJob(queuedJob) : null;
 
-        await clarificationRequestRepository.updateByClarificationId(clarification.clarificationId, {
+        await clarificationRequestRepository.updateByClarificationId(clarification!.clarificationId!, {
           status: "processing",
           updatedAt: jobTimestamp,
           errorMessage: null,
@@ -1435,17 +1588,17 @@ export function createServer({
         if (!queuedJob) {
           const processingClarification =
             await clarificationRequestRepository.findByClarificationId(
-              clarification.clarificationId
+              clarification!.clarificationId!
             );
           void Promise.resolve()
             .then(() =>
               runAutomaticClarificationPipeline({
-                clarification: processingClarification,
+                clarification: processingClarification as ClarificationRequest,
                 clarificationRequestRepository,
                 artifactRepository,
                 artifactPublisher,
                 marketCacheRepository: getMarketRepositoryForStage(
-                  processingClarification?.marketStage ?? "active"
+                  (processingClarification?.marketStage as string | undefined) ?? "active"
                 ),
                 resolveMarketByClarification: findMarketForClarification,
                 tradeActivityRepository,
@@ -1456,13 +1609,13 @@ export function createServer({
                 llmRuntime
               })
             )
-            .catch(async (pipelineError: any) => {
+            .catch(async (pipelineError: unknown) => {
               await clarificationRequestRepository.updateByClarificationId(
-                clarification.clarificationId,
+                clarification!.clarificationId!,
                 {
                   status: "failed",
                   updatedAt: now().toISOString(),
-                  errorMessage: pipelineError.message,
+                  errorMessage: pipelineError instanceof Error ? pipelineError.message : String(pipelineError),
                   retryable: true,
                   llmOutput: null
                 }
@@ -1472,7 +1625,7 @@ export function createServer({
 
         await sendClarificationCreationResponse({
           response,
-          clarification,
+          clarification: clarification!,
           waitOptions,
           job: processingJob,
           headers: verifiedPayment.paymentResponseHeader
@@ -1481,7 +1634,7 @@ export function createServer({
               }
             : {}
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -1493,7 +1646,7 @@ export function createServer({
           return;
         }
 
-        if (error.statusCode) {
+        if (isHttpError(error)) {
           sendJson(response, error.statusCode, {
             ok: false,
             error: {
@@ -1526,22 +1679,23 @@ export function createServer({
       try {
         const markets = (await marketCacheRepository?.list?.()) ?? [];
         const clarifications = (await clarificationRequestRepository?.list?.()) ?? [];
-        const queue: any[] = [];
+        const queue: Record<string, unknown>[] = [];
 
         for (const market of markets) {
+          const marketId = market.marketId as string;
           const latestScan =
-            (await reviewerScanRepository?.findLatestByEventId?.(market.marketId)) ?? null;
-          const eventClarifications = clarifications.filter(
-            (clarification: any) => clarification.eventId === market.marketId
+            (await reviewerScanRepository?.findLatestByEventId?.(marketId)) ?? null;
+          const eventClarifications = (clarifications as ClarificationRequest[]).filter(
+            (clarification) => clarification.eventId === marketId
           );
           const latestClarification =
             eventClarifications
               .slice()
-              .sort((left: any, right: any) => right.updatedAt.localeCompare(left.updatedAt))
+              .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
               .at(0) ?? null;
           const reviewWindow =
-            latestScan?.review_window ??
-            buildAdaptiveReviewWindow({
+            (latestScan?.review_window as { time_to_end_bucket: string } | undefined) ??
+            (buildAdaptiveReviewWindow({
               clarification: {
                 llmOutput: {
                   ambiguity_score: 0
@@ -1549,12 +1703,12 @@ export function createServer({
               },
               market,
               now: now()
-            });
+            }) as { time_to_end_bucket: string });
           const fundingProgress = buildQueueFundingProgress(
             latestClarification,
             eventClarifications
           );
-          const voteStatus = latestClarification?.reviewerWorkflowStatus ?? "not_started";
+          const voteStatus = (latestClarification?.reviewerWorkflowStatus ?? "not_started") as string;
           const queueStates = buildQueueStates({
             latestScan,
             fundingProgress,
@@ -1563,7 +1717,7 @@ export function createServer({
           });
 
           queue.push({
-            eventId: market.marketId,
+            eventId: marketId,
             latestClarificationId: latestClarification?.clarificationId ?? null,
             marketTitle: market.title,
             endTime: market.closesAt,
@@ -1575,12 +1729,12 @@ export function createServer({
           });
         }
 
-        const filters = buildReviewerQueueFilters(queue);
+        const filters = buildReviewerQueueFilters(queue as Array<{ queueStates: string[] }>);
         const activeFilter = requestUrl.searchParams.get("filter");
         const filteredQueue = REVIEWER_QUEUE_FILTERS.some(
-          (filter: any) => filter.key === activeFilter
+          (filter) => filter.key === activeFilter
         )
-          ? queue.filter((item: any) => item.queueStates.includes(activeFilter))
+          ? queue.filter((item) => (item.queueStates as string[]).includes(activeFilter as string))
           : queue;
         const availableCategories = await getAvailableCategoriesForStage("active");
 
@@ -1591,7 +1745,7 @@ export function createServer({
           queue: filteredQueue,
           availableCategories: availableCategories.categories
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -1612,11 +1766,11 @@ export function createServer({
 
       try {
         const markets = (await upcomingMarketCacheRepository?.list?.()) ?? [];
-        const queue: any[] = [];
+        const queue: Record<string, unknown>[] = [];
 
         for (const market of markets) {
           const latestScan =
-            (await upcomingReviewerScanRepository?.findLatestByEventId?.(market.marketId)) ?? null;
+            (await upcomingReviewerScanRepository?.findLatestByEventId?.(market.marketId as string)) ?? null;
           queue.push(
             buildPrelaunchQueueItem({
               market,
@@ -1633,7 +1787,7 @@ export function createServer({
           queue,
           availableCategories: availableCategories.categories
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -1680,7 +1834,7 @@ export function createServer({
           market: buildReviewerMarketPayload(market, eventId),
           latestScan: latestScan ? buildReviewerScanListItem(latestScan) : null
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -1701,14 +1855,14 @@ export function createServer({
 
       try {
         const scans = ((await reviewerScanRepository?.list?.()) ?? [])
-          .sort((left: any, right: any) => right.createdAt.localeCompare(left.createdAt))
+          .sort((left: Record<string, unknown>, right: Record<string, unknown>) => (right.createdAt as string).localeCompare(left.createdAt as string))
           .map(buildReviewerScanListItem);
 
         sendJson(response, 200, {
           ok: true,
           scans
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -1786,8 +1940,8 @@ export function createServer({
           ok: true,
           job: buildBackgroundJobPayload(processingJob)
         });
-      } catch (error: any) {
-        if (error.statusCode) {
+      } catch (error: unknown) {
+        if (isHttpError(error)) {
           sendJson(response, error.statusCode, {
             ok: false,
             error: {
@@ -1881,8 +2035,8 @@ export function createServer({
           ok: true,
           job: buildBackgroundJobPayload(processingJob)
         });
-      } catch (error: any) {
-        if (error.statusCode) {
+      } catch (error: unknown) {
+        if (isHttpError(error)) {
           sendJson(response, error.statusCode, {
             ok: false,
             error: {
@@ -1913,9 +2067,10 @@ export function createServer({
 
       try {
         const markets = (await marketCacheRepository?.list?.()) ?? [];
-        const jobs: any[] = [];
+        const jobs: Record<string, unknown>[] = [];
 
         for (const market of markets) {
+          const marketId = market.marketId as string;
           const timestamp = now().toISOString();
           const queuedJob =
             (await backgroundJobRepository?.create?.({
@@ -1927,7 +2082,7 @@ export function createServer({
               attempts: 0,
               retryable: false,
               target: {
-                eventId: market.marketId
+                eventId: marketId
               },
               errorMessage: null,
               result: null
@@ -1937,14 +2092,14 @@ export function createServer({
             jobs.push(await startBackgroundJob(queuedJob));
           } else {
             jobs.push(
-              await runReviewerMarketScan({
+              (await runReviewerMarketScan({
                 jobId: createBackgroundJobId(),
-                eventId: market.marketId,
+                eventId: marketId,
                 marketCacheRepository,
                 reviewerScanRepository,
                 now,
                 llmRuntime
-              })
+              })) as Record<string, unknown>
             );
           }
         }
@@ -1955,7 +2110,7 @@ export function createServer({
             ? { jobs: jobs.map(buildBackgroundJobPayload) }
             : { scans: jobs })
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -1975,12 +2130,13 @@ export function createServer({
       }
 
       try {
-        const markets = ((await upcomingMarketCacheRepository?.list?.()) ?? []).filter((market: any) =>
+        const markets = ((await upcomingMarketCacheRepository?.list?.()) ?? []).filter((market: Record<string, unknown>) =>
           isFutureUpcomingMarket(market, now())
         );
-        const jobs: any[] = [];
+        const jobs: Record<string, unknown>[] = [];
 
         for (const market of markets) {
+          const marketId = market.marketId as string;
           const timestamp = now().toISOString();
           const queuedJob =
             (await backgroundJobRepository?.create?.({
@@ -1992,7 +2148,7 @@ export function createServer({
               attempts: 0,
               retryable: false,
               target: {
-                eventId: market.marketId,
+                eventId: marketId,
                 marketStage: "upcoming"
               },
               errorMessage: null,
@@ -2003,9 +2159,9 @@ export function createServer({
             jobs.push(await startBackgroundJob(queuedJob));
           } else {
             jobs.push(
-              await runReviewerMarketScan({
+              (await runReviewerMarketScan({
                 jobId: createBackgroundJobId(),
-                eventId: market.marketId,
+                eventId: marketId,
                 marketCacheRepository: upcomingMarketCacheRepository,
                 reviewerScanRepository: upcomingReviewerScanRepository,
                 now,
@@ -2013,7 +2169,7 @@ export function createServer({
                 requireUpcomingOpenMarket: true,
                 dedupeByMarketText: true,
                 inFlightMarketTextScans: upcomingMarketTextScanLocks
-              })
+              })) as Record<string, unknown>
             );
           }
         }
@@ -2024,7 +2180,7 @@ export function createServer({
             ? { jobs: jobs.map(buildBackgroundJobPayload) }
             : { scans: jobs })
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2080,7 +2236,7 @@ export function createServer({
           ok: true,
           job: buildBackgroundJobPayload(processingJob)
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2109,7 +2265,7 @@ export function createServer({
         const cachedMarket = await marketCacheRepository?.findByMarketId?.(eventId);
         const reviewerRefreshSource =
           fetchReviewerMarketSource ??
-          (async (requestedEventId: any) => {
+          (async (_requestedEventId: string) => {
             if (!cachedMarket?.ticker) {
               throw Object.assign(new Error("Cached market does not include a Gemini ticker."), {
                 statusCode: 503,
@@ -2117,7 +2273,7 @@ export function createServer({
               });
             }
 
-            return fetchPredictionMarketEventByTicker(cachedMarket.ticker);
+            return fetchPredictionMarketEventByTicker(cachedMarket.ticker as string) as Promise<Record<string, unknown> | null>;
           });
         const market = await refreshReviewerMarketData({
           eventId,
@@ -2130,8 +2286,8 @@ export function createServer({
           ok: true,
           market
         });
-      } catch (error: any) {
-        if (error.statusCode) {
+      } catch (error: unknown) {
+        if (isHttpError(error)) {
           sendJson(response, error.statusCode, {
             ok: false,
             error: {
@@ -2180,7 +2336,7 @@ export function createServer({
           ok: true,
           clarification: await buildPublicClarificationResponse(clarification)
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2258,12 +2414,12 @@ export function createServer({
         sendJson(response, 200, {
           ok: true,
           clarification: {
-            clarificationId: updatedClarification.clarificationId,
-            reviewerWorkflowStatus: updatedClarification.reviewerWorkflowStatus,
-            vote: buildReviewerVotePayload(updatedClarification)
+            clarificationId: updatedClarification!.clarificationId,
+            reviewerWorkflowStatus: updatedClarification!.reviewerWorkflowStatus,
+            vote: buildReviewerVotePayload(updatedClarification!)
           }
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -2275,7 +2431,7 @@ export function createServer({
           return;
         }
 
-        if (error.statusCode) {
+        if (isHttpError(error)) {
           sendJson(response, error.statusCode, {
             ok: false,
             error: {
@@ -2367,17 +2523,17 @@ export function createServer({
         sendJson(response, 200, {
           ok: true,
           clarification: {
-            clarificationId: finalizedClarification.clarificationId,
-            reviewerWorkflowStatus: finalizedClarification.reviewerWorkflowStatus,
+            clarificationId: finalizedClarification!.clarificationId,
+            reviewerWorkflowStatus: finalizedClarification!.reviewerWorkflowStatus,
             finalization: {
-              finalEditedText: finalizedClarification.finalEditedText,
-              finalNote: finalizedClarification.finalNote,
-              finalizedAt: finalizedClarification.finalizedAt,
-              finalizedBy: finalizedClarification.finalizedBy
+              finalEditedText: finalizedClarification!.finalEditedText,
+              finalNote: finalizedClarification!.finalNote,
+              finalizedAt: finalizedClarification!.finalizedAt,
+              finalizedBy: finalizedClarification!.finalizedBy
             }
           }
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -2389,7 +2545,7 @@ export function createServer({
           return;
         }
 
-        if (error.statusCode) {
+        if (isHttpError(error)) {
           sendJson(response, error.statusCode, {
             ok: false,
             error: {
@@ -2446,7 +2602,7 @@ export function createServer({
           ok: true,
           funding: buildStoredFundingDetails(clarification)
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2500,7 +2656,7 @@ export function createServer({
           contribution.reference === null
             ? null
             : existingFunding.history.find(
-                (entry: any) => entry.reference === contribution.reference
+                (entry: FundingHistoryEntry) => entry.reference === contribution.reference
               ) ?? null;
 
         if (existingContribution) {
@@ -2529,9 +2685,9 @@ export function createServer({
 
         sendJson(response, 201, {
           ok: true,
-          funding: updatedClarification.funding
+          funding: updatedClarification!.funding
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -2543,7 +2699,7 @@ export function createServer({
           return;
         }
 
-        if (error.statusCode) {
+        if (isHttpError(error)) {
           sendJson(response, error.statusCode, {
             ok: false,
             error: {
@@ -2597,7 +2753,7 @@ export function createServer({
         }
 
         const artifact = clarification.artifactCid
-          ? await artifactRepository?.findByCid(clarification.artifactCid)
+          ? await artifactRepository?.findByCid?.(clarification.artifactCid as string)
           : null;
 
         sendJson(response, 200, {
@@ -2607,7 +2763,7 @@ export function createServer({
             artifact
           })
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2672,7 +2828,7 @@ export function createServer({
             relatedClarifications
           })
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2698,7 +2854,7 @@ export function createServer({
         const cid = decodeURIComponent(
           requestUrl.pathname.replace(/^\/api\/artifacts\/([^/]+)$/, "$1")
         );
-        const artifact = await artifactRepository?.findByCid(cid);
+        const artifact = await artifactRepository?.findByCid?.(cid);
 
         if (!artifact) {
           sendJson(response, 404, {
@@ -2715,7 +2871,7 @@ export function createServer({
           ok: true,
           artifact
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2751,7 +2907,7 @@ export function createServer({
 
         sendJson(response, 200, {
           ok: true,
-          requests: requests.map((storedRequest: any) => ({
+          requests: (requests as ClarificationRequest[]).map((storedRequest) => ({
             requestId: storedRequest.requestId,
             status: storedRequest.status,
             marketId: storedRequest.marketId,
@@ -2765,7 +2921,7 @@ export function createServer({
             updatedAt: storedRequest.updatedAt ?? storedRequest.createdAt
           }))
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         sendJson(response, 500, {
           ok: false,
           error: {
@@ -2804,7 +2960,7 @@ export function createServer({
         }
 
         const delivery = buildTelegramDeliveryPayload(storedRequest);
-        let deliveryResult: any = {
+        let deliveryResult: Record<string, unknown> = {
           attempted: false,
           sent: false
         };
@@ -2815,7 +2971,7 @@ export function createServer({
             chatId: delivery.chatId,
             text: delivery.text,
             apiBaseUrl: telegramBotApiBaseUrl
-          });
+          }) as { messageId?: unknown };
 
           deliveryResult = {
             attempted: true,
@@ -2831,7 +2987,7 @@ export function createServer({
           delivery,
           deliveryResult
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (error instanceof SyntaxError) {
           sendJson(response, 400, {
             ok: false,
@@ -2843,7 +2999,7 @@ export function createServer({
           return;
         }
 
-        if (error.statusCode) {
+        if (isHttpError(error)) {
           sendJson(response, error.statusCode, {
             ok: false,
             error: {
@@ -2869,10 +3025,11 @@ export function createServer({
     sendNotFound(response);
   });
 
-  (server as any).resumeRecoverableBackgroundJobs = resumeRecoverableBackgroundJobs;
-  (server as any).markShuttingDown = () => {
+  const appServer = server as AppServer;
+  appServer.resumeRecoverableBackgroundJobs = resumeRecoverableBackgroundJobs;
+  appServer.markShuttingDown = () => {
     isShuttingDown = true;
   };
 
-  return server as any;
+  return appServer;
 }

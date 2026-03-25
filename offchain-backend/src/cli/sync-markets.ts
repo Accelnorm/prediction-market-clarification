@@ -146,8 +146,8 @@ async function main() {
   );
 }
 
-main().catch((error: any) => {
-  process.stderr.write(`${error.message}\n`);
+main().catch((error: unknown) => {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   process.exitCode = 1;
 });
 import { fileURLToPath } from "node:url";

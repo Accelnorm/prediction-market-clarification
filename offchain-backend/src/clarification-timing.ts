@@ -1,4 +1,5 @@
 import { fetchTradesForSymbol } from "./gemini-markets-source.js";
+import type { MarketRecord } from "./types.js";
 
 const DEFAULT_FINALITY_CONFIG = {
   mode: "static",
@@ -6,10 +7,16 @@ const DEFAULT_FINALITY_CONFIG = {
   processingActivityEnabled: false
 };
 
-function normalizeFinalityConfig(config: any = {}) {
+type FinalityConfig = {
+  mode?: string;
+  staticWindowSecs?: number;
+  processingActivityEnabled?: boolean;
+};
+
+function normalizeFinalityConfig(config: FinalityConfig = {}) {
   const mode = config.mode === "dynamic" ? "dynamic" : "static";
   const staticWindowSecs = Number.isFinite(config.staticWindowSecs)
-    ? Math.max(3600, Math.min(86400, Math.round(config.staticWindowSecs)))
+    ? Math.max(3600, Math.min(86400, Math.round(config.staticWindowSecs as number)))
     : DEFAULT_FINALITY_CONFIG.staticWindowSecs;
 
   return {
@@ -22,17 +29,19 @@ function normalizeFinalityConfig(config: any = {}) {
   };
 }
 
-function parseTradeAmount(trade: any) {
+type Trade = Record<string, unknown>;
+
+function parseTradeAmount(trade: Trade) {
   const parsed = Number.parseFloat(String(trade?.amount ?? ""));
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function getTradeTimestampMs(trade: any) {
+function getTradeTimestampMs(trade: Trade) {
   const timestampMs = Number(trade?.timestampms ?? trade?.timestamp);
   return Number.isFinite(timestampMs) ? timestampMs : null;
 }
 
-function computeTradeMetrics(trades: any[] = [], nowDate: any) {
+function computeTradeMetrics(trades: Trade[] = [], nowDate: Date) {
   const nowMs = nowDate.getTime();
   const oneDayAgoMs = nowMs - 24 * 60 * 60 * 1000;
   let tradeCountWindow = 0;
@@ -62,7 +71,24 @@ function computeTradeMetrics(trades: any[] = [], nowDate: any) {
   };
 }
 
-function getTradeSignals(activity: any, nowDate: any) {
+type TradeActivity = {
+  lastTradeAt?: string | null;
+  tradeCountWindow?: number;
+  shareVolumeWindow?: number;
+  activeInstrumentCountWindow?: number;
+  lastFetchedAt?: string | null;
+  eventId?: string;
+  instruments?: Record<string, InstrumentActivity>;
+};
+
+type InstrumentActivity = {
+  instrumentSymbol: string;
+  lastTid: number | null;
+  recentTrades: Trade[];
+  lastFetchedAt: string;
+};
+
+function getTradeSignals(activity: TradeActivity | null | undefined, nowDate: Date) {
   const lastTradeMs =
     typeof activity?.lastTradeAt === "string" ? Date.parse(activity.lastTradeAt) : Number.NaN;
   const minutesSinceLastTrade = Number.isFinite(lastTradeMs)
@@ -78,7 +104,7 @@ function getTradeSignals(activity: any, nowDate: any) {
   };
 }
 
-function computeProcessingUrgency({ market, activity, nowDate }: any) {
+function computeProcessingUrgency({ market, activity, nowDate }: { market: MarketRecord | null | undefined; activity: TradeActivity | null | undefined; nowDate: Date }) {
   const tradeSignals = getTradeSignals(activity, nowDate);
   const closesAtMs =
     typeof market?.closesAt === "string" ? Date.parse(market.closesAt) : Number.NaN;
@@ -115,7 +141,7 @@ function computeProcessingUrgency({ market, activity, nowDate }: any) {
   };
 }
 
-function computeDynamicFinalityWindow({ clarification, market, activity, nowDate }: any) {
+function computeDynamicFinalityWindow({ clarification, market, activity, nowDate }: { clarification: { llmOutput?: { ambiguity_score?: unknown } } | null | undefined; market: MarketRecord | null | undefined; activity: TradeActivity | null | undefined; nowDate: Date }) {
   const tradeSignals = getTradeSignals(activity, nowDate);
   const ambiguityScore =
     typeof clarification?.llmOutput?.ambiguity_score === "number"
@@ -198,7 +224,7 @@ function computeDynamicFinalityWindow({ clarification, market, activity, nowDate
   };
 }
 
-function computeStaticFinalityWindow(config: any) {
+function computeStaticFinalityWindow(config: { staticWindowSecs: number }) {
   return {
     finalityMode: "static",
     finalityWindowSecs: config.staticWindowSecs,
@@ -208,12 +234,19 @@ function computeStaticFinalityWindow(config: any) {
   };
 }
 
+export type RefreshTradeActivityOptions = {
+  market: MarketRecord;
+  tradeActivityRepository: { findByEventId?: (eventId: string) => Promise<TradeActivity | null>; upsert?: (activity: TradeActivity) => Promise<unknown> } | null | undefined;
+  fetchTrades?: typeof fetchTradesForSymbol;
+  now?: () => Date;
+};
+
 export async function refreshTradeActivityForMarket({
   market,
   tradeActivityRepository,
   fetchTrades = fetchTradesForSymbol,
   now = () => new Date()
-}: any) {
+}: RefreshTradeActivityOptions) {
   if (!market?.marketId || !Array.isArray(market?.contracts) || market.contracts.length === 0) {
     return null;
   }
@@ -221,35 +254,35 @@ export async function refreshTradeActivityForMarket({
   const existingActivity =
     (await tradeActivityRepository?.findByEventId?.(market.marketId)) ?? {
       eventId: market.marketId,
-      instruments: {}
+      instruments: {} as Record<string, InstrumentActivity>
     };
   const nowDate = now();
-  const instruments: Record<string, any> = {};
-  let combinedTrades: any[] = [];
+  const instruments: Record<string, InstrumentActivity> = {};
+  let combinedTrades: Trade[] = [];
 
   for (const contract of market.contracts) {
     if (typeof contract?.instrumentSymbol !== "string" || contract.instrumentSymbol === "") {
       continue;
     }
 
-    const existingInstrument = existingActivity?.instruments?.[contract.instrumentSymbol] ?? null;
+    const existingInstrument = (existingActivity?.instruments as Record<string, InstrumentActivity> | undefined)?.[contract.instrumentSymbol] ?? null;
     const trades = await fetchTrades(contract.instrumentSymbol, {
       sinceTid: existingInstrument?.lastTid ?? null
     });
-    const filteredTrades = trades.filter((trade: any) => Number(trade?.tid) !== Number(existingInstrument?.lastTid));
+    const filteredTrades = (trades as Trade[]).filter((trade: Trade) => Number(trade?.tid) !== Number(existingInstrument?.lastTid));
     const allTrades = [...(existingInstrument?.recentTrades ?? []), ...filteredTrades]
-      .filter((trade: any) => {
+      .filter((trade: Trade) => {
         const timestampMs = getTradeTimestampMs(trade);
         return timestampMs !== null && timestampMs >= nowDate.getTime() - 24 * 60 * 60 * 1000;
       })
-      .sort((left: any, right: any) => Number(right.tid ?? 0) - Number(left.tid ?? 0))
+      .sort((left: Trade, right: Trade) => Number(right.tid ?? 0) - Number(left.tid ?? 0))
       .slice(0, 500);
 
     combinedTrades.push(...allTrades);
     instruments[contract.instrumentSymbol] = {
       instrumentSymbol: contract.instrumentSymbol,
       lastTid:
-        allTrades.reduce((maxTid: any, trade: any) => Math.max(maxTid, Number(trade?.tid ?? 0)), Number(existingInstrument?.lastTid ?? 0)) ||
+        allTrades.reduce((maxTid: number, trade: Trade) => Math.max(maxTid, Number(trade?.tid ?? 0)), Number(existingInstrument?.lastTid ?? 0)) ||
         null,
       recentTrades: allTrades,
       lastFetchedAt: nowDate.toISOString()
@@ -257,11 +290,11 @@ export async function refreshTradeActivityForMarket({
   }
 
   const metrics = computeTradeMetrics(combinedTrades, nowDate);
-  const activity = {
+  const activity: TradeActivity = {
     eventId: market.marketId,
     ...metrics,
     activeInstrumentCountWindow: Object.values(instruments).filter(
-      (instrument: any) => Array.isArray(instrument.recentTrades) && instrument.recentTrades.length > 0
+      (instrument: InstrumentActivity) => Array.isArray(instrument.recentTrades) && instrument.recentTrades.length > 0
     ).length,
     lastFetchedAt: nowDate.toISOString(),
     instruments
@@ -271,6 +304,17 @@ export async function refreshTradeActivityForMarket({
   return activity;
 }
 
+export type TradeActivityRepository = { findByEventId?: (eventId: string) => Promise<TradeActivity | null>; upsert?: (activity: TradeActivity) => Promise<unknown> } | null | undefined;
+
+export type BuildClarificationTimingOptions = {
+  clarification: unknown;
+  market: unknown;
+  tradeActivityRepository?: unknown;
+  fetchTrades?: typeof fetchTradesForSymbol | ((...args: unknown[]) => unknown);
+  now?: () => Date;
+  finalityConfig?: FinalityConfig | Record<string, unknown>;
+};
+
 export async function buildClarificationTiming({
   clarification,
   market,
@@ -278,35 +322,37 @@ export async function buildClarificationTiming({
   fetchTrades = fetchTradesForSymbol,
   now = () => new Date(),
   finalityConfig = DEFAULT_FINALITY_CONFIG
-}: any) {
-  const resolvedConfig = normalizeFinalityConfig(finalityConfig);
+}: BuildClarificationTimingOptions) {
+  const resolvedConfig = normalizeFinalityConfig(finalityConfig as FinalityConfig);
+  const typedRepo = tradeActivityRepository as TradeActivityRepository;
+  const typedMarket = market as MarketRecord | null | undefined;
   const nowDate = now();
-  let activity = (await tradeActivityRepository?.findByEventId?.(market?.marketId)) ?? null;
+  let activity = (await typedRepo?.findByEventId?.(typedMarket?.marketId ?? "")) ?? null;
 
   if (
     resolvedConfig.processingActivityEnabled &&
-    market?.status === "active" &&
-    Array.isArray(market?.contracts) &&
-    market.contracts.some((contract: any) => typeof contract?.instrumentSymbol === "string" && contract.instrumentSymbol !== "")
+    typedMarket?.status === "active" &&
+    Array.isArray(typedMarket?.contracts) &&
+    typedMarket.contracts.some((contract) => typeof contract?.instrumentSymbol === "string" && contract.instrumentSymbol !== "")
   ) {
     activity = await refreshTradeActivityForMarket({
-      market,
-      tradeActivityRepository,
-      fetchTrades,
+      market: typedMarket as MarketRecord,
+      tradeActivityRepository: typedRepo,
+      fetchTrades: fetchTrades as typeof fetchTradesForSymbol,
       now
     });
   }
 
   const processing = computeProcessingUrgency({
-    market,
+    market: typedMarket,
     activity,
     nowDate
   });
   const finality =
     resolvedConfig.mode === "dynamic"
       ? computeDynamicFinalityWindow({
-          clarification,
-          market,
+          clarification: clarification as { llmOutput?: { ambiguity_score?: unknown } } | null | undefined,
+          market: typedMarket,
           activity,
           nowDate
         })
