@@ -21,7 +21,7 @@ const DEFAULT_X402_PAYMENT_CONFIG = {
   priceUsd: "1.00",
   maxAmountRequired: "1000000",
   assetSymbol: "USDC",
-  network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+  network: "solana-devnet",
   cluster: "devnet",
   mintAddress: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
   recipientAddress: "11111111111111111111111111111111",
@@ -223,7 +223,7 @@ test("POST /api/clarify/:eventId rejects unpaid requests", async () => {
         feePayer: EXPECTED_PAYMENT_FEE_PAYER,
         x402Version: 2,
         scheme: "exact",
-        network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+        network: "solana-devnet",
         amount: "1000000",
         maxAmountRequired: "1000000",
         asset: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
@@ -467,7 +467,7 @@ test("POST /api/clarify/:eventId accepts PAYMENT-SIGNATURE header proofs", async
       headers: createPaymentSignatureHeaders({
         x402Version: 2,
         scheme: "exact",
-        network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+        network: "solana-devnet",
         payload: {
           transaction: "tx_001"
         }

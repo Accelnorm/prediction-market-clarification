@@ -1,5 +1,7 @@
-const SOLANA_MAINNET_CAIP2 = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
-const SOLANA_DEVNET_CAIP2 = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
+// payai facilitator /verify validates network against the x402 SDK's NetworkSchema,
+// which uses short names ("solana", "solana-devnet"), not CAIP-2 identifiers.
+const SOLANA_MAINNET_NETWORK = "solana";
+const SOLANA_DEVNET_NETWORK = "solana-devnet";
 const SOLANA_MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const SOLANA_DEVNET_USDC_MINT = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU";
 
@@ -22,8 +24,8 @@ function resolveFacilitatorAuthConfig(env: NodeJS.ProcessEnv) {
 function resolveNetworkIdentifier(value: unknown): string {
   const normalized = normalizeString(value).toLowerCase();
 
-  if (!normalized || normalized === "solana:devnet" || normalized === "devnet") {
-    return SOLANA_DEVNET_CAIP2;
+  if (!normalized || normalized === "solana:devnet" || normalized === "devnet" || normalized === "solana-devnet") {
+    return SOLANA_DEVNET_NETWORK;
   }
 
   if (
@@ -32,14 +34,14 @@ function resolveNetworkIdentifier(value: unknown): string {
     normalized === "mainnet" ||
     normalized === "mainnet-beta"
   ) {
-    return SOLANA_MAINNET_CAIP2;
+    return SOLANA_MAINNET_NETWORK;
   }
 
   return normalizeString(value);
 }
 
 function resolveCluster(network: string): "mainnet" | "devnet" {
-  if (network === SOLANA_MAINNET_CAIP2) {
+  if (network === SOLANA_MAINNET_NETWORK) {
     return "mainnet";
   }
 
@@ -47,7 +49,7 @@ function resolveCluster(network: string): "mainnet" | "devnet" {
 }
 
 function resolveDefaultMint(network: string): string {
-  return network === SOLANA_MAINNET_CAIP2
+  return network === SOLANA_MAINNET_NETWORK
     ? SOLANA_MAINNET_USDC_MINT
     : SOLANA_DEVNET_USDC_MINT;
 }

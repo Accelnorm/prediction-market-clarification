@@ -175,7 +175,11 @@ async function verifyWithFacilitator({
     },
     body: JSON.stringify({
       x402Version: config.x402Version,
-      paymentPayload: paymentCandidate.paymentPayload,
+      // payai requires `accepted` inside the payload (the requirement the client agreed to)
+      paymentPayload: {
+        ...paymentCandidate.paymentPayload,
+        accepted: paymentRequirements
+      },
       paymentRequirements
     })
   });

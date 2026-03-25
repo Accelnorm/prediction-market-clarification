@@ -12,7 +12,7 @@ const VALID_X402_CONFIG = {
   payaiApiKeyId: "payai-key-id",
   payaiApiKeySecret: "payai_sk_test-secret",
   recipientAddress: "7Y9Yk3Lx4n1u4V7S1k4U6yWw2o1j9mA8Y7h6R5q4P3d2",
-  network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+  network: "solana",
   mintAddress: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 };
 
