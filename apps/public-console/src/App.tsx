@@ -370,32 +370,6 @@ function SurfaceSwitch({
   );
 }
 
-function SectionCard({
-  eyebrow,
-  title,
-  children,
-  actions
-}: {
-  eyebrow: string;
-  title: string;
-  children: React.ReactNode;
-  actions?: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-[2rem] border border-border-low bg-panel/85 p-6 shadow-[0_24px_80px_-48px_rgba(4,13,22,0.6)] backdrop-blur">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border-low pb-4">
-        <div className="space-y-1">
-          <p className="text-xs uppercase tracking-[0.26em] text-muted">{eyebrow}</p>
-          <h2 className="font-display text-[clamp(1.4rem,2vw,2rem)] leading-none text-foreground">
-            {title}
-          </h2>
-        </div>
-        {actions}
-      </div>
-      <div className="mt-5">{children}</div>
-    </section>
-  );
-}
 
 function SettingsIcon() {
   return (
@@ -929,213 +903,155 @@ function ReviewerConsole() {
   ).length;
 
   return (
-    <div className="min-h-screen bg-bg1 text-foreground">
-      <div className="mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
-        {isSettingsOpen ? (
-          <SettingsFlyout
-            description="Connect this desk to a backend and reviewer token when you need queue and detail access."
-            onClose={() => setIsSettingsOpen(false)}
-            title="Reviewer connection"
-          >
-            <form className="grid gap-4" onSubmit={connectReviewer}>
-              <label className="grid gap-2 text-sm">
-                <span className="text-muted">Backend API base URL</span>
-                <input
-                  className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
-                  onChange={(event) => setDraftApiBaseUrl(event.target.value)}
-                  placeholder="http://127.0.0.1:3000"
-                  value={draftApiBaseUrl}
-                />
-              </label>
-              <label className="grid gap-2 text-sm">
-                <span className="text-muted">Reviewer auth token</span>
-                <input
-                  className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
-                  onChange={(event) => setDraftReviewerToken(event.target.value)}
-                  placeholder="demo-reviewer-token"
-                  type="password"
-                  value={draftReviewerToken}
-                />
-              </label>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  className="rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:translate-y-[-1px]"
-                  disabled={!draftApiBaseUrl.trim() || !draftReviewerToken.trim()}
-                  type="submit"
-                >
-                  Save
-                </button>
-                <button
-                  className="rounded-full border border-border-low px-5 py-3 text-sm text-muted transition hover:text-foreground"
-                  onClick={refreshReviewerData}
-                  type="button"
-                >
-                  Refresh
-                </button>
-                <button
-                  className="rounded-full border border-border-low px-5 py-3 text-sm text-muted transition hover:text-foreground"
-                  onClick={clearReviewer}
-                  type="button"
-                >
-                  Clear
-                </button>
-              </div>
-            </form>
-          </SettingsFlyout>
-        ) : null}
-        <header className="grid gap-6 border-b border-border-low pb-8 lg:grid-cols-[1.2fr_0.8fr]">
-          <div className="space-y-4">
-            <div className="flex items-start justify-between gap-4">
-              <p className="pt-1 text-xs uppercase tracking-[0.34em] text-muted">Review Desk</p>
+    <div className="min-h-screen">
+      {isSettingsOpen ? (
+        <SettingsFlyout
+          description="Connect this desk to a backend and reviewer token when you need queue and detail access."
+          onClose={() => setIsSettingsOpen(false)}
+          title="Reviewer connection"
+        >
+          <form className="grid gap-4" onSubmit={connectReviewer}>
+            <label className="grid gap-2 text-sm">
+              <span className="text-muted">Backend API base URL</span>
+              <input
+                className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
+                onChange={(event) => setDraftApiBaseUrl(event.target.value)}
+                placeholder="http://127.0.0.1:3000"
+                value={draftApiBaseUrl}
+              />
+            </label>
+            <label className="grid gap-2 text-sm">
+              <span className="text-muted">Reviewer auth token</span>
+              <input
+                className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
+                onChange={(event) => setDraftReviewerToken(event.target.value)}
+                placeholder="demo-reviewer-token"
+                type="password"
+                value={draftReviewerToken}
+              />
+            </label>
+            <div className="flex flex-wrap gap-3">
               <button
-                aria-label="Open settings"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border-low bg-panel/80 text-muted transition hover:text-foreground"
-                onClick={() => setIsSettingsOpen(true)}
+                className="rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:translate-y-[-1px]"
+                disabled={!draftApiBaseUrl.trim() || !draftReviewerToken.trim()}
+                type="submit"
+              >
+                Save
+              </button>
+              <button
+                className="rounded-full border border-border-low px-5 py-3 text-sm text-muted transition hover:text-foreground"
+                onClick={refreshReviewerData}
                 type="button"
               >
-                <SettingsIcon />
+                Refresh
+              </button>
+              <button
+                className="rounded-full border border-border-low px-5 py-3 text-sm text-muted transition hover:text-foreground"
+                onClick={clearReviewer}
+                type="button"
+              >
+                Clear
               </button>
             </div>
-            <h1 className="font-display text-[clamp(3rem,8vw,6.6rem)] leading-[0.9] text-foreground">
-              Signal
-              <br />
-              Market Review
+          </form>
+        </SettingsFlyout>
+      ) : null}
+
+      <NavBar onOpenSettings={() => setIsSettingsOpen(true)} contextLink={{ href: "/", label: "Public intake" }} />
+
+      <div className="border-b border-border-low">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-6 px-5 py-6 sm:px-8 lg:px-10">
+          <div>
+            <p className="text-xs uppercase tracking-[0.34em] text-muted">Review Desk</p>
+            <h1 className="animate-fade-up mt-1 font-display text-[clamp(2rem,4vw,3.6rem)] leading-none text-foreground">
+              The Oracle's Desk
             </h1>
-            <p className="max-w-2xl text-base leading-7 text-muted sm:text-lg">
-              Review live clarification requests and screen upcoming markets before launch.
-            </p>
           </div>
-
-          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
-            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
-              <p className="text-xs uppercase tracking-[0.22em] text-muted">Surface</p>
-              <p className="mt-3 text-3xl font-semibold text-foreground">
-                {reviewerSurface === "prelaunch" ? "Upcoming" : "Live"}
-              </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="rounded-[1.2rem] border border-border-low bg-panel/80 px-4 py-3 backdrop-blur">
+              <p className="text-xs uppercase tracking-[0.22em] text-muted">Unscanned</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{openCount}</p>
             </div>
-            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
-              <p className="text-xs uppercase tracking-[0.22em] text-muted">Unscanned Upcoming</p>
-              <p className="mt-3 text-3xl font-semibold text-foreground">{openCount}</p>
-            </div>
-            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
-              <p className="text-xs uppercase tracking-[0.22em] text-muted">Live Attention</p>
-              <p className="mt-3 text-3xl font-semibold text-foreground">{liveNeedsAttention}</p>
+            <div className="rounded-[1.2rem] border border-border-low bg-panel/80 px-4 py-3 backdrop-blur">
+              <p className="text-xs uppercase tracking-[0.22em] text-muted">Needs attention</p>
+              <p className="mt-1 text-2xl font-semibold text-foreground">{liveNeedsAttention}</p>
             </div>
           </div>
-        </header>
+        </div>
+      </div>
 
-        <main className="mt-8 grid gap-6 xl:grid-cols-[0.88fr_1.12fr]">
-          <div className="space-y-6">
-            <SectionCard eyebrow="Overview" title="What this desk is for">
-              <div className="grid gap-4">
-                <div className="rounded-[1.6rem] border border-border-low bg-card/70 p-4">
-                  <p className="text-sm font-medium text-foreground">Live clarifications</p>
-                  <p className="mt-2 text-sm leading-6 text-muted">
-                    Review paid clarification requests for Gemini prediction markets,
-                    including ambiguity, funding, timing, and final wording.
-                  </p>
-                </div>
-                <div className="rounded-[1.6rem] border border-border-low bg-card/70 p-4">
-                  <p className="text-sm font-medium text-foreground">Upcoming review</p>
-                  <p className="mt-2 text-sm leading-6 text-muted">
-                    Screen markets before trading starts so unclear resolution text
-                    and contract structure can be caught early.
-                  </p>
-                </div>
-              </div>
-            </SectionCard>
+      <div className="mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
+        <main className="grid gap-6 xl:grid-cols-[0.88fr_1.12fr]">
+          <div className="animate-fade-up overflow-hidden rounded-[2rem] border border-border-low bg-panel/85 shadow-[0_24px_80px_-48px_rgba(4,13,22,0.6)] backdrop-blur">
+            {/* Surface switch + scan-all */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border-low p-5">
+              <SurfaceSwitch
+                onChange={(next) => {
+                  setReviewerSurface(next);
+                  if (next === "active") {
+                    setSelectedPrelaunchEventId(null);
+                  } else {
+                    setSelectedClarificationId(null);
+                  }
+                }}
+                value={reviewerSurface}
+              />
+              {reviewerSurface === "prelaunch" && session.apiBaseUrl ? (
+                <button
+                  className="rounded-full border border-border-low px-4 py-2 text-sm text-muted transition hover:text-foreground disabled:opacity-60"
+                  disabled={isPrelaunchScanAllRunning}
+                  onClick={runPrelaunchScanAll}
+                  type="button"
+                >
+                  {isPrelaunchScanAllRunning ? "Scanning…" : "Scan all upcoming"}
+                </button>
+              ) : null}
+            </div>
 
-            <SectionCard
-              eyebrow="Modes"
-              title="Move between live clarifications and upcoming review"
-              actions={
-                reviewerSurface === "prelaunch" && session.apiBaseUrl ? (
+            {/* Filter / category chips */}
+            {reviewerSurface === "active" ? (
+              <div className="flex flex-wrap gap-2 border-b border-border-low px-5 py-3">
+                <button
+                  className={`rounded-full px-3 py-1.5 text-sm transition ${activeFilter === "all" ? "bg-foreground text-background" : "border border-border-low text-muted"}`}
+                  onClick={() => setActiveFilter("all")}
+                  type="button"
+                >
+                  All
+                </button>
+                {filters.map((filter) => (
                   <button
-                    className="rounded-full border border-border-low px-4 py-2 text-sm text-muted transition hover:text-foreground disabled:opacity-60"
-                    disabled={isPrelaunchScanAllRunning}
-                    onClick={runPrelaunchScanAll}
+                    key={filter.key}
+                    className={`rounded-full px-3 py-1.5 text-sm transition ${activeFilter === filter.key ? "bg-foreground text-background" : "border border-border-low text-muted"}`}
+                    onClick={() => setActiveFilter(filter.key)}
                     type="button"
                   >
-                    {isPrelaunchScanAllRunning ? "Scanning…" : "Scan all upcoming"}
+                    {filter.label} ({filter.count})
                   </button>
-                ) : null
-              }
-            >
-              <div className="space-y-4">
-                <SurfaceSwitch
-                  onChange={(next) => {
-                    setReviewerSurface(next);
-                    if (next === "active") {
-                      setSelectedPrelaunchEventId(null);
-                    } else {
-                      setSelectedClarificationId(null);
-                    }
-                  }}
-                  value={reviewerSurface}
-                />
-                {reviewerSurface === "active" ? (
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      className={`rounded-full px-3 py-2 text-sm transition ${
-                        activeFilter === "all"
-                          ? "bg-foreground text-background"
-                          : "border border-border-low text-muted"
-                      }`}
-                      onClick={() => setActiveFilter("all")}
-                      type="button"
-                    >
-                      All
-                    </button>
-                    {filters.map((filter) => (
-                      <button
-                        key={filter.key}
-                        className={`rounded-full px-3 py-2 text-sm transition ${
-                          activeFilter === filter.key
-                            ? "bg-foreground text-background"
-                            : "border border-border-low text-muted"
-                        }`}
-                        onClick={() => setActiveFilter(filter.key)}
-                        type="button"
-                      >
-                        {filter.label} ({filter.count})
-                      </button>
-                    ))}
-                  </div>
-                ) : availableCategories.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {availableCategories.slice(0, 8).map((category) => (
-                      <span
-                        key={category}
-                        className="rounded-full border border-border-low px-3 py-2 text-xs uppercase tracking-[0.16em] text-muted"
-                      >
-                        {category}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
+                ))}
               </div>
-            </SectionCard>
+            ) : availableCategories.length > 0 ? (
+              <div className="flex flex-wrap gap-2 border-b border-border-low px-5 py-3">
+                {availableCategories.slice(0, 8).map((category) => (
+                  <span key={category} className="rounded-full border border-border-low px-3 py-1.5 text-xs uppercase tracking-[0.16em] text-muted">
+                    {category}
+                  </span>
+                ))}
+              </div>
+            ) : null}
 
-            <SectionCard
-              eyebrow="Queue"
-              title={
-                reviewerSurface === "prelaunch"
-                  ? "Upcoming markets waiting for editorial review"
-                  : "Live clarification operations"
-              }
-            >
+            {/* Queue list */}
+            <div className="space-y-3 p-4">
               {!session.apiBaseUrl || !session.reviewerToken ? (
                 <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-sm leading-6 text-muted">
-                  Add reviewer credentials to load queue data. The interface stays closed
-                  until the token is present.
+                  Add reviewer credentials to load queue data.
                 </div>
               ) : null}
 
               {reviewerSurface === "active" && isLoading ? (
-                <div className="text-sm text-muted">Loading live queue…</div>
+                <div className="py-4 text-sm text-muted">Loading live queue…</div>
               ) : null}
               {reviewerSurface === "prelaunch" && isPrelaunchLoading ? (
-                <div className="text-sm text-muted">Loading upcoming queue…</div>
+                <div className="py-4 text-sm text-muted">Loading upcoming queue…</div>
               ) : null}
               {reviewerSurface === "active" && errorMessage ? (
                 <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">
@@ -1164,78 +1080,39 @@ function ReviewerConsole() {
               ) : null}
 
               {reviewerSurface === "active" && activeQueue.length > 0 ? (
-                <div className="grid gap-4">
+                <div className="grid gap-3">
                   {activeQueue.map((item) => (
                     <article
                       key={item.eventId}
-                      className={`rounded-[1.6rem] border p-5 transition ${
+                      className={`rounded-[1.6rem] border p-4 transition ${
                         item.latestClarificationId &&
                         item.latestClarificationId === selectedClarificationId
-                          ? "border-foreground bg-card shadow-[0_18px_50px_-35px_rgba(4,13,22,0.9)]"
+                          ? "border-foreground/50 bg-card shadow-[0_12px_40px_-24px_rgba(4,13,22,0.5)]"
                           : "border-border-low bg-card/70"
                       }`}
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div className="space-y-2">
-                          <p className="text-xs uppercase tracking-[0.2em] text-muted">
-                            {item.eventId}
-                          </p>
-                          <h3 className="text-xl font-semibold text-foreground">
-                            {item.marketTitle}
-                          </h3>
-                          <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-1.5">
+                          <p className="text-xs uppercase tracking-[0.2em] text-muted">{item.eventId}</p>
+                          <h3 className="text-base font-medium text-foreground">{item.marketTitle}</h3>
+                          <div className="flex flex-wrap gap-1.5">
                             {item.queueStates.map((state) => (
-                              <span
-                                key={state}
-                                className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-muted"
-                              >
+                              <span key={state} className="rounded-full border border-border-low px-2.5 py-0.5 text-xs uppercase tracking-[0.14em] text-muted">
                                 {formatQueueStateLabel(state)}
                               </span>
                             ))}
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-xs uppercase tracking-[0.18em] text-muted">
-                            Ambiguity
-                          </p>
-                          <p className="mt-2 text-3xl font-semibold text-foreground">
+                        {item.ambiguityScore !== null ? (
+                          <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${item.ambiguityScore >= 0.6 ? "bg-signal/[0.12] text-signal" : "bg-foreground/[0.08] text-muted"}`}>
                             {formatAmbiguityScore(item.ambiguityScore)}
-                          </p>
-                        </div>
+                          </span>
+                        ) : null}
                       </div>
-                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
-                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Funding</p>
-                          <p className="mt-2 text-sm text-foreground">
-                            {item.fundingProgress.raisedAmount}/{item.fundingProgress.targetAmount}
-                          </p>
-                        </div>
-                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
-                          <p className="text-xs uppercase tracking-[0.14em] text-muted">
-                            Review window
-                          </p>
-                          <p className="mt-2 text-sm text-foreground">
-                            {Math.round(item.reviewWindow.review_window_secs / 3600)}h
-                          </p>
-                        </div>
-                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
-                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Ends</p>
-                          <p className="mt-2 text-sm text-foreground">
-                            {formatTimestamp(item.endTime)}
-                          </p>
-                        </div>
-                      </div>
-                      <p className="mt-4 text-sm leading-6 text-muted">
-                        {item.reviewWindow.review_window_reason}
-                      </p>
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border-low pt-4">
-                        <span className="text-xs uppercase tracking-[0.16em] text-muted">
-                          {item.latestClarificationId
-                            ? `Latest ${item.latestClarificationId}`
-                            : "Waiting for first paid clarification"}
-                        </span>
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-low pt-3">
+                        <p className="text-xs text-muted">{formatTimestamp(item.endTime)}</p>
                         <button
-                          className="rounded-full border border-border-low px-4 py-2 text-sm text-muted transition hover:text-foreground disabled:opacity-50"
+                          className="rounded-full border border-border-low px-3 py-1.5 text-sm text-muted transition hover:text-foreground disabled:opacity-50"
                           disabled={!item.latestClarificationId}
                           onClick={() => setSelectedClarificationId(item.latestClarificationId)}
                           type="button"
@@ -1249,84 +1126,51 @@ function ReviewerConsole() {
               ) : null}
 
               {reviewerSurface === "prelaunch" && prelaunchQueue.length > 0 ? (
-                <div className="grid gap-4">
+                <div className="grid gap-3">
                   {prelaunchQueue.map((item) => (
                     <article
                       key={item.eventId}
-                      className={`rounded-[1.6rem] border p-5 transition ${
+                      className={`rounded-[1.6rem] border p-4 transition ${
                         item.eventId === selectedPrelaunchEventId
-                          ? "border-foreground bg-card shadow-[0_18px_50px_-35px_rgba(4,13,22,0.9)]"
+                          ? "border-foreground/50 bg-card shadow-[0_12px_40px_-24px_rgba(4,13,22,0.5)]"
                           : "border-border-low bg-card/70"
                       }`}
                     >
-                      <div className="flex flex-wrap items-start justify-between gap-4">
-                        <div className="space-y-2">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-1.5">
                           <p className="text-xs uppercase tracking-[0.2em] text-muted">
-                            {item.eventId} {item.ticker ? `• ${item.ticker}` : ""}
+                            {item.eventId}{item.ticker ? ` · ${item.ticker}` : ""}
                           </p>
-                          <h3 className="text-xl font-semibold text-foreground">
-                            {item.marketTitle}
-                          </h3>
-                          <div className="flex flex-wrap gap-2">
-                            <span className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-muted">
+                          <h3 className="text-base font-medium text-foreground">{item.marketTitle}</h3>
+                          <div className="flex flex-wrap gap-1.5">
+                            <span className="rounded-full border border-border-low px-2.5 py-0.5 text-xs uppercase tracking-[0.14em] text-muted">
                               {item.category ?? "Uncategorized"}
                             </span>
-                            <span className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-muted">
-                              {item.status ?? "upcoming"}
-                            </span>
                             {item.needsScan ? (
-                              <span className="rounded-full border border-border-low px-3 py-1 text-xs uppercase tracking-[0.16em] text-signal">
+                              <span className="rounded-full bg-signal/[0.12] px-2.5 py-0.5 text-xs uppercase tracking-[0.14em] text-signal">
                                 Needs scan
                               </span>
                             ) : null}
                           </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-xs uppercase tracking-[0.18em] text-muted">
-                            Editorial temperature
-                          </p>
-                          <p className="mt-2 text-xl font-semibold text-foreground">
-                            {getReviewTemperature(item.ambiguityScore)}
-                          </p>
-                        </div>
+                        {item.ambiguityScore !== null ? (
+                          <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${item.ambiguityScore >= 0.6 ? "bg-signal/[0.12] text-signal" : "bg-foreground/[0.08] text-muted"}`}>
+                            {formatAmbiguityScore(item.ambiguityScore)}
+                          </span>
+                        ) : null}
                       </div>
-                      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
-                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Starts</p>
-                          <p className="mt-2 text-sm text-foreground">
-                            {formatOptionalTimestamp(item.startsAt)}
-                          </p>
-                        </div>
-                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
-                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Ends</p>
-                          <p className="mt-2 text-sm text-foreground">
-                            {formatTimestamp(item.endTime)}
-                          </p>
-                        </div>
-                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
-                          <p className="text-xs uppercase tracking-[0.14em] text-muted">
-                            Contracts
-                          </p>
-                          <p className="mt-2 text-sm text-foreground">{item.contracts.length}</p>
-                        </div>
-                      </div>
-                      <p className="mt-4 text-sm leading-6 text-muted">
-                        {item.reviewWindow.review_window_reason}
-                      </p>
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border-low pt-4">
-                        <span className="text-xs uppercase tracking-[0.16em] text-muted">
-                          {item.latestScanId ? `Latest ${item.latestScanId}` : "No stored scan"}
-                        </span>
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-low pt-3">
+                        <p className="text-xs text-muted">{formatTimestamp(item.endTime)}</p>
                         <div className="flex flex-wrap gap-2">
                           <button
-                            className="rounded-full border border-border-low px-4 py-2 text-sm text-muted transition hover:text-foreground"
+                            className="rounded-full border border-border-low px-3 py-1.5 text-sm text-muted transition hover:text-foreground"
                             onClick={() => setSelectedPrelaunchEventId(item.eventId)}
                             type="button"
                           >
                             Inspect
                           </button>
                           <button
-                            className="rounded-full bg-foreground px-4 py-2 text-sm text-background transition disabled:opacity-60"
+                            className="rounded-full bg-foreground px-3 py-1.5 text-sm text-background transition disabled:opacity-60"
                             disabled={prelaunchScanTargetId === item.eventId}
                             onClick={() => void runPrelaunchScan(item.eventId)}
                             type="button"
@@ -1339,54 +1183,54 @@ function ReviewerConsole() {
                   ))}
                 </div>
               ) : null}
-            </SectionCard>
-
+            </div>
           </div>
 
-          <div className="space-y-6">
-            <SectionCard
-              eyebrow="Detail"
-              title={
-                reviewerSurface === "prelaunch"
-                  ? "Upcoming market inspection"
-                  : "Clarification dossier"
-              }
-            >
-              {reviewerSurface === "active" && isDetailLoading ? (
-                <div className="text-sm text-muted">Loading clarification detail…</div>
-              ) : null}
-              {reviewerSurface === "prelaunch" && isPrelaunchDetailLoading ? (
-                <div className="text-sm text-muted">Loading upcoming market detail…</div>
-              ) : null}
-              {reviewerSurface === "active" && detailErrorMessage ? (
-                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">
-                  {detailErrorMessage}
-                </div>
-              ) : null}
-              {reviewerSurface === "prelaunch" && prelaunchDetailErrorMessage ? (
-                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">
-                  {prelaunchDetailErrorMessage}
-                </div>
-              ) : null}
+          <div className="animate-fade-up animation-delay-100 overflow-hidden rounded-[2rem] border border-border-low bg-panel/85 shadow-[0_24px_80px_-48px_rgba(4,13,22,0.6)] backdrop-blur">
+            {reviewerSurface === "active" && isDetailLoading ? (
+              <div className="p-6 text-sm text-muted">Loading clarification detail…</div>
+            ) : null}
+            {reviewerSurface === "prelaunch" && isPrelaunchDetailLoading ? (
+              <div className="p-6 text-sm text-muted">Loading upcoming market detail…</div>
+            ) : null}
+            {reviewerSurface === "active" && detailErrorMessage ? (
+              <div className="p-6">
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">{detailErrorMessage}</div>
+              </div>
+            ) : null}
+            {reviewerSurface === "prelaunch" && prelaunchDetailErrorMessage ? (
+              <div className="p-6">
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">{prelaunchDetailErrorMessage}</div>
+              </div>
+            ) : null}
 
-              {reviewerSurface === "active" && !detail && !isDetailLoading && !detailErrorMessage ? (
-                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-sm leading-6 text-muted">
-                  Select a live clarification to inspect wording, funding history, artifact output,
-                  and the current review window.
-                </div>
-              ) : null}
+            {reviewerSurface === "active" && !detail && !isDetailLoading && !detailErrorMessage ? (
+              <div className="flex min-h-[32rem] flex-col items-center justify-center gap-4 p-10 text-center">
+                <span className="text-muted/30">
+                  <svg aria-hidden="true" className="h-12 w-12" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.2" />
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.2" />
+                  </svg>
+                </span>
+                <h3 className="font-display text-[1.6rem] leading-none text-foreground/60">Select a clarification</h3>
+                <p className="max-w-xs text-sm leading-6 text-muted">Choose a live clarification from the queue to inspect its wording, funding, and oracle output.</p>
+              </div>
+            ) : null}
 
-              {reviewerSurface === "prelaunch" &&
-              !prelaunchDetail &&
-              !isPrelaunchDetailLoading &&
-              !prelaunchDetailErrorMessage ? (
-                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-sm leading-6 text-muted">
-                  Select an upcoming market to inspect contract structure, category context, and
-                  the latest ambiguity scan.
-                </div>
-              ) : null}
+            {reviewerSurface === "prelaunch" && !prelaunchDetail && !isPrelaunchDetailLoading && !prelaunchDetailErrorMessage ? (
+              <div className="flex min-h-[32rem] flex-col items-center justify-center gap-4 p-10 text-center">
+                <span className="text-muted/30">
+                  <svg aria-hidden="true" className="h-12 w-12" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.2" />
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.2" />
+                  </svg>
+                </span>
+                <h3 className="font-display text-[1.6rem] leading-none text-foreground/60">Select a market</h3>
+                <p className="max-w-xs text-sm leading-6 text-muted">Choose an upcoming market from the queue to inspect its contract structure and ambiguity scan.</p>
+              </div>
+            ) : null}
 
-              {reviewerSurface === "active" && detail ? (
+            {reviewerSurface === "active" && detail ? (
                 <div className="grid gap-5">
                   <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
                     <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1778,7 +1622,6 @@ function ReviewerConsole() {
                   </div>
                 </div>
               ) : null}
-            </SectionCard>
           </div>
         </main>
       </div>
@@ -1786,14 +1629,258 @@ function ReviewerConsole() {
   );
 }
 
+function OracleEyeIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-5 w-5"
+      fill="none"
+      viewBox="0 0 24 24"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+      <circle
+        className="oracle-pupil"
+        cx="12"
+        cy="12"
+        r="3"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
+}
+
+function NavBar({ onOpenSettings, contextLink }: { onOpenSettings: () => void; contextLink: { href: string; label: string } }) {
+  return (
+    <nav className="sticky top-0 z-30 border-b border-border-low bg-panel/90 backdrop-blur-xl">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-3.5 sm:px-8 lg:px-10">
+        <div className="flex items-center gap-2.5">
+          <span className="text-signal">
+            <OracleEyeIcon />
+          </span>
+          <span className="font-display text-[1.35rem] leading-none text-foreground">
+            The Oracle's Wakeup Call
+          </span>
+          <span className="hidden rounded-full border border-border-low px-2.5 py-0.5 text-[10px] uppercase tracking-[0.22em] text-muted sm:inline">
+            Beta
+          </span>
+        </div>
+        <div className="flex items-center gap-4">
+          <a
+            href={contextLink.href}
+            className="hidden text-sm text-muted transition hover:text-foreground sm:inline"
+          >
+            {contextLink.label}
+          </a>
+          <button
+            aria-label="Open settings"
+            onClick={onOpenSettings}
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border-low bg-card/80 text-muted transition hover:text-foreground"
+          >
+            <SettingsIcon />
+          </button>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+function PublicHero() {
+  return (
+    <section className="mx-auto max-w-7xl px-5 pb-16 pt-20 sm:px-8 lg:px-10">
+      <div>
+        <h1 className="animate-fade-up font-display text-[clamp(3.4rem,8vw,7.5rem)] leading-[0.86] text-foreground">
+          Ambiguous markets
+          <br />
+          <em className="not-italic text-signal">cost everyone.</em>
+        </h1>
+        <p className="animate-fade-up animation-delay-100 mt-8 max-w-2xl text-lg leading-8 text-muted sm:text-xl">
+          When resolution criteria are unclear, traders dispute outcomes, platforms absorb
+          reputational damage, and edge cases go to lawyers — not editors. The Oracle's
+          Wakeup Call sends an AI-powered alert the moment ambiguous wording surfaces,
+          before it becomes a settlement problem.
+        </p>
+        <div className="animate-fade-up animation-delay-200 mt-10 flex flex-wrap gap-4">
+          <a
+            href="#intake"
+            className="rounded-full bg-foreground px-6 py-3.5 text-base font-medium text-background transition hover:translate-y-[-1px]"
+          >
+            Submit a clarification
+          </a>
+          <a
+            href="/reviewer"
+            className="rounded-full border border-border-low px-6 py-3.5 text-base text-muted transition hover:text-foreground"
+          >
+            See the reviewer desk
+          </a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const HOW_IT_WORKS_STEPS = [
+  {
+    step: "01",
+    title: "Trader submits a question",
+    body: "A trader who spots vague resolution criteria opens a clarification request against the market ID for $1. The fee keeps submissions honest — not expensive."
+  },
+  {
+    step: "02",
+    title: "The oracle wakes up",
+    body: "An LLM reads the market's full resolution text, scores ambiguity 0–1, and cites the specific clause at issue. It issues a clarification note — and suggests a light edit to the wording only if the wording itself is the problem."
+  },
+  {
+    step: "03",
+    title: "Verdict published automatically",
+    body: "The clarification and any suggested note are published immediately — no human gate. The full reasoning trace is stored for audit. Crowdfunded escalation to a review panel is available for high-stakes disputes."
+  }
+] as const;
+
+function HowItWorksStrip() {
+  return (
+    <section className="border-t border-border-low bg-card/40">
+      <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
+        <p className="text-xs uppercase tracking-[0.30em] text-muted">How it works</p>
+        <h2 className="mt-2 font-display text-[clamp(2rem,4vw,3.2rem)] leading-none text-foreground">
+          Three steps from question to decision
+        </h2>
+        <div className="mt-12 grid gap-0 lg:grid-cols-3">
+          {HOW_IT_WORKS_STEPS.map(({ step, title, body }, i) => (
+            <div
+              key={step}
+              className={`scroll-fade-up relative p-8 ${i < HOW_IT_WORKS_STEPS.length - 1 ? "border-b border-border-low lg:border-b-0 lg:border-r" : ""}`}
+            >
+              <p className="select-none font-display text-[5rem] leading-none text-foreground/[0.06]">
+                {step}
+              </p>
+              <h3 className="mt-4 text-xl font-semibold text-foreground">{title}</h3>
+              <p className="mt-3 text-base leading-7 text-muted">{body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const BEFORE_ISSUES = [
+  "\"SOL price\" — which price? (spot mid, TWAP, or an external index?)",
+  "No fallback defined if the Gemini SOL/USD market is halted at snapshot time",
+  "No tolerance stated if the index value is delayed or stale at 5 pm EDT"
+] as const;
+
+const AFTER_FIXES = [
+  "Price source specified as Gemini SOL/USD last-trade spot mid-price",
+  "Snapshot time confirmed as 17:00:00 EDT on the contract end date",
+  "Fallback: if SOL/USD is halted, resolution deferred to next available uncrossed mid"
+] as const;
+
+function BeforeAfterDemo() {
+  return (
+    <section className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
+      <p className="text-xs uppercase tracking-[0.30em] text-muted">Real Gemini market · #9848</p>
+      <h2 className="mt-2 font-display text-[clamp(2rem,4vw,3.2rem)] leading-none text-foreground">
+        See the difference clarity makes
+      </h2>
+      <p className="mt-4 max-w-2xl text-base leading-7 text-muted">
+        The left card shows market wording as-written. The right shows the oracle's clarification
+        note and light edit — published automatically, seconds after submission.
+      </p>
+
+      <div className="mt-10 grid gap-6 lg:grid-cols-2">
+        {/* BEFORE */}
+        <div className="card-lift rounded-[2rem] border border-border-low bg-panel/80 p-7 backdrop-blur">
+          <div className="mb-5 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-signal/[0.12] px-3 py-1 text-sm font-medium text-signal">
+              <span className="h-1.5 w-1.5 rounded-full bg-signal" />
+              Ambiguity score 0.81 — High
+            </span>
+          </div>
+          <p className="mb-3 text-xs uppercase tracking-[0.22em] text-muted">Original resolution text</p>
+          <blockquote className="rounded-xl border border-signal/25 bg-signal/[0.05] px-5 py-4 text-base leading-7 text-foreground">
+            "SOL price on March 25" — resolves to the SOL price at 5 pm EDT.
+          </blockquote>
+          <div className="mt-5 space-y-2.5">
+            <p className="text-xs uppercase tracking-[0.20em] text-muted">Identified issues</p>
+            {BEFORE_ISSUES.map((issue) => (
+              <div key={issue} className="flex gap-2 text-base text-muted">
+                <span className="mt-0.5 shrink-0 text-signal">✕</span>
+                <span>{issue}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* AFTER */}
+        <div className="card-lift rounded-[2rem] border border-border-low bg-panel/80 p-7 backdrop-blur ring-1 ring-foreground/10">
+          <div className="mb-5 flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-foreground/10 px-3 py-1 text-sm font-medium text-foreground">
+              <span className="h-1.5 w-1.5 rounded-full bg-foreground" />
+              Oracle clarification — auto-published
+            </span>
+          </div>
+          <p className="mb-3 text-xs uppercase tracking-[0.22em] text-muted">Suggested resolution text</p>
+          <blockquote className="rounded-xl border border-border-low bg-card px-5 py-4 text-base leading-7 text-foreground">
+            Resolves to the Gemini SOL/USD last-trade spot mid-price at 17:00:00 EDT on March 25.
+            If the SOL/USD market is halted at that time, resolution uses the next available
+            uncrossed mid-price.
+          </blockquote>
+          <div className="mt-5 space-y-2.5">
+            <p className="text-xs uppercase tracking-[0.20em] text-muted">Clarifications applied</p>
+            {AFTER_FIXES.map((fix) => (
+              <div key={fix} className="flex gap-2 text-base text-muted">
+                <span className="mt-0.5 shrink-0 text-foreground">✓</span>
+                <span>{fix}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-[1.6rem] border border-border-low bg-card/60 p-6">
+        <p className="text-xs uppercase tracking-[0.22em] text-muted">Oracle reasoning excerpt (illustrative)</p>
+        <p className="mt-3 text-base leading-7 text-muted">
+          "The title 'SOL price on March 25' does not specify whether resolution uses the Gemini
+          spot mid, a time-weighted average, or an external index. Additionally, no fallback is
+          stated for a halted or illiquid market at the snapshot time. These omissions create two
+          independent dispute surfaces. Ambiguity score: 0.76. A clarification note and light edit
+          to the resolution text have been issued."
+        </p>
+        <p className="mt-3 text-sm text-muted/60">Based on Gemini market #9848 — illustrative oracle output.</p>
+      </div>
+    </section>
+  );
+}
+
+function FooterStrip() {
+  return (
+    <footer className="border-t border-border-low">
+      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-8 sm:px-8 lg:px-10">
+        <p className="text-xs text-muted">The Oracle's Wakeup Call — prediction market clarification</p>
+        <p className="text-xs text-muted">AI analysis · Human review · Audit trace</p>
+      </div>
+    </footer>
+  );
+}
+
 function PublicConsole() {
   const initialSession = useMemo(() => loadStoredSession(PUBLIC_SESSION_STORAGE_KEY), []);
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl);
   const [apiBaseUrl, setApiBaseUrl] = useState(initialSession.apiBaseUrl);
-  const [draftRequesterId, setDraftRequesterId] = useState("phase1_tester");
-  const [draftEventId, setDraftEventId] = useState("gm_sol_above_500");
+  const [draftEventId, setDraftEventId] = useState("9848");
   const [draftQuestion, setDraftQuestion] = useState(
-    "If trading opens later than planned, does the same end timestamp still control resolution?"
+    "Is the resolution price the Gemini SOL/USD spot mid-price, a time-weighted average, or an external index, and what is the fallback if the Gemini market is halted at the snapshot time?"
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [intakeState, setIntakeState] = useState<IntakeResponseState | null>(null);
@@ -1838,7 +1925,6 @@ function PublicConsole() {
           "content-type": "application/json"
         },
         body: JSON.stringify({
-          requesterId: draftRequesterId.trim() || "phase1_tester",
           question: draftQuestion.trim()
         })
       });
@@ -1880,108 +1966,60 @@ function PublicConsole() {
 
   return (
     <div className="min-h-screen bg-bg1 text-foreground">
-      <div className="mx-auto max-w-7xl px-5 py-8 sm:px-8 lg:px-10">
-        {isSettingsOpen ? (
-          <SettingsFlyout
-            description="Choose which backend this intake form should use for clarification requests."
-            onClose={() => setIsSettingsOpen(false)}
-            title="Connection"
-          >
-            <form className="grid gap-4" onSubmit={savePublicApiBaseUrl}>
-              <label className="grid gap-2 text-sm">
-                <span className="text-muted">Backend API base URL</span>
-                <input
-                  className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
-                  onChange={(event) => setDraftApiBaseUrl(event.target.value)}
-                  placeholder="http://127.0.0.1:3000"
-                  value={draftApiBaseUrl}
-                />
-              </label>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  className="rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:translate-y-[-1px]"
-                  disabled={!draftApiBaseUrl.trim()}
-                  type="submit"
-                >
-                  Save endpoint
-                </button>
-                {apiBaseUrl ? (
-                  <span className="rounded-full border border-border-low px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted">
-                    {apiBaseUrl}
-                  </span>
-                ) : null}
-              </div>
-            </form>
-          </SettingsFlyout>
-        ) : null}
-        <header className="grid gap-6 border-b border-border-low pb-10 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="space-y-5">
-            <div className="flex items-start justify-between gap-4">
-              <p className="pt-1 text-xs uppercase tracking-[0.34em] text-muted">
-                Clarification Network
-              </p>
-              <button
-                aria-label="Open settings"
-                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-border-low bg-panel/80 text-muted transition hover:text-foreground"
-                onClick={() => setIsSettingsOpen(true)}
-                type="button"
-              >
-                <SettingsIcon />
-              </button>
-            </div>
-            <h1 className="font-display text-[clamp(3.2rem,8vw,7rem)] leading-[0.88] text-foreground">
-              Markets need
-              <br />
-              editorial truth
-            </h1>
-            <p className="max-w-2xl text-base leading-7 text-muted sm:text-lg">
-              Ask for clarification on Gemini prediction markets, track the payment
-              challenge, and route disputed market wording into review.
-            </p>
+      {isSettingsOpen ? (
+        <SettingsFlyout
+          description="Choose which backend this intake form should use for clarification requests."
+          onClose={() => setIsSettingsOpen(false)}
+          title="Connection"
+        >
+          <form className="grid gap-4" onSubmit={savePublicApiBaseUrl}>
+            <label className="grid gap-2 text-sm">
+              <span className="text-muted">Backend API base URL</span>
+              <input
+                className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
+                onChange={(event) => setDraftApiBaseUrl(event.target.value)}
+                placeholder="http://127.0.0.1:3000"
+                value={draftApiBaseUrl}
+              />
+            </label>
             <div className="flex flex-wrap gap-3">
-              <a
+              <button
                 className="rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:translate-y-[-1px]"
-                href="/reviewer"
+                disabled={!draftApiBaseUrl.trim()}
+                type="submit"
               >
-                Open reviewer desk
-              </a>
+                Save endpoint
+              </button>
+              {apiBaseUrl ? (
+                <span className="rounded-full border border-border-low px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted">
+                  {apiBaseUrl}
+                </span>
+              ) : null}
             </div>
-          </div>
+          </form>
+        </SettingsFlyout>
+      ) : null}
 
-          <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
-            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
-              <p className="text-xs uppercase tracking-[0.22em] text-muted">Requests</p>
-              <p className="mt-3 text-3xl font-semibold text-foreground">Paid</p>
-            </div>
-            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
-              <p className="text-xs uppercase tracking-[0.22em] text-muted">Upcoming markets</p>
-              <p className="mt-3 text-lg font-semibold text-foreground">Reviewable</p>
-            </div>
-            <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-5">
-              <p className="text-xs uppercase tracking-[0.22em] text-muted">Decisions</p>
-              <p className="mt-3 text-lg font-semibold text-foreground">Tracked</p>
-            </div>
-          </div>
-        </header>
+      <NavBar onOpenSettings={() => setIsSettingsOpen(true)} contextLink={{ href: "/reviewer", label: "Reviewer desk" }} />
+      <PublicHero />
+      <HowItWorksStrip />
+      <BeforeAfterDemo />
 
-        <main className="mt-8 grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <div className="space-y-6">
-            <SectionCard eyebrow="Clarification intake" title="Request a clarification">
-              <p className="mb-4 max-w-2xl text-sm leading-6 text-muted">
-                Use this form when a Gemini prediction market needs clearer resolution
-                criteria, timing, or source-of-truth wording.
+      <section id="intake" className="border-t border-border-low">
+        <div className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
+          <div className="grid gap-10 lg:grid-cols-[1fr_400px]">
+            <div>
+              <p className="text-xs uppercase tracking-[0.30em] text-muted">Try it now</p>
+              <h2 className="mt-2 font-display text-[clamp(2rem,4vw,3.2rem)] leading-none text-foreground">
+                Submit a real clarification request
+              </h2>
+              <p className="mt-4 max-w-xl text-base leading-7 text-muted">
+                Point this form at any running backend. The request is processed
+                live — you will see the payment challenge or acceptance state below.
               </p>
-              <form className="grid gap-4" onSubmit={requestChallenge}>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="grid gap-2 text-sm">
-                    <span className="text-muted">Requester ID</span>
-                    <input
-                      className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
-                      onChange={(event) => setDraftRequesterId(event.target.value)}
-                      value={draftRequesterId}
-                    />
-                  </label>
-                  <label className="grid gap-2 text-sm">
+              <div className="mt-8 rounded-[2rem] border border-border-low bg-panel/85 p-6 shadow-[0_24px_80px_-48px_rgba(4,13,22,0.45)] backdrop-blur">
+                <form className="grid gap-4" onSubmit={requestChallenge}>
+                  <label className="grid gap-2 text-base">
                     <span className="text-muted">Event ID</span>
                     <input
                       className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
@@ -1989,100 +2027,99 @@ function PublicConsole() {
                       value={draftEventId}
                     />
                   </label>
-                </div>
-                <label className="grid gap-2 text-sm">
-                  <span className="text-muted">Clarification question</span>
-                  <textarea
-                    className="min-h-32 rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
-                    onChange={(event) => setDraftQuestion(event.target.value)}
-                    value={draftQuestion}
-                  />
-                </label>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    className="rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:translate-y-[-1px] disabled:opacity-60"
-                    disabled={isSubmitting}
-                    type="submit"
-                  >
-                    {isSubmitting ? "Requesting…" : "Submit request"}
-                  </button>
-                  <span className="rounded-full border border-border-low px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted">
-                    Live or upcoming markets
-                  </span>
-                </div>
-              </form>
+                  <label className="grid gap-2 text-base">
+                    <span className="text-muted">Clarification question</span>
+                    <textarea
+                      className="min-h-32 rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
+                      onChange={(event) => setDraftQuestion(event.target.value)}
+                      value={draftQuestion}
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      className="rounded-full bg-foreground px-5 py-3.5 text-base font-medium text-background transition hover:translate-y-[-1px] disabled:opacity-60"
+                      disabled={isSubmitting}
+                      type="submit"
+                    >
+                      {isSubmitting ? "Requesting…" : "Submit request"}
+                    </button>
+                    <span className="rounded-full border border-border-low px-4 py-3 text-xs uppercase tracking-[0.16em] text-muted">
+                      Live or upcoming markets
+                    </span>
+                  </div>
+                </form>
 
-              {intakeState ? (
-                <div className="mt-5 rounded-[1.6rem] border border-border-low bg-card p-5">
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted">
-                    Latest response for {intakeState.eventId}
-                  </p>
-                  {intakeState.kind === "payment_required" ? (
-                    <div className="mt-4 space-y-4">
-                      <p className="text-2xl font-semibold text-foreground">
-                        Payment required
-                      </p>
-                      {intakeState.payload.paymentRequirements?.map((requirement, index) => (
-                        <div
-                          key={`${requirement.network ?? "network"}-${index}`}
-                          className="rounded-2xl border border-border-low bg-bg1/80 p-4"
-                        >
-                          <p className="text-sm text-foreground">
-                            {requirement.description ?? "Clarification payment request"}
-                          </p>
-                          <p className="mt-2 text-sm text-muted">
-                            {requirement.amount} {requirement.assetSymbol} on{" "}
-                            {requirement.network}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  {intakeState.kind === "accepted" ? (
-                    <div className="mt-4 space-y-3">
-                      <p className="text-2xl font-semibold text-foreground">
-                        Request accepted
-                      </p>
-                      <p className="text-sm text-muted">
-                        Clarification ID {intakeState.payload.clarificationId ?? "pending"} with status{" "}
-                        {intakeState.payload.status ?? "processing"}.
-                      </p>
-                    </div>
-                  ) : null}
-                  {intakeState.kind === "error" ? (
-                    <div className="mt-4 space-y-3">
-                      <p className="text-2xl font-semibold text-foreground">Request failed</p>
-                      <p className="text-sm text-muted">{intakeState.message}</p>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </SectionCard>
-          </div>
-
-          <div className="space-y-6">
-            <SectionCard eyebrow="Features" title="What each part does">
-              <div className="grid gap-4">
-                <div className="rounded-[1.6rem] border border-border-low bg-card p-5">
-                  <p className="text-lg font-semibold text-foreground">Clarification requests</p>
-                  <p className="mt-2 text-sm leading-6 text-muted">
-                    Submit a question about how a Gemini market should be interpreted.
-                    The backend returns the payment challenge required to open the request.
-                  </p>
-                </div>
-                <div className="rounded-[1.6rem] border border-border-low bg-card p-5">
-                  <p className="text-lg font-semibold text-foreground">Reviewer desk</p>
-                  <p className="mt-2 text-sm leading-6 text-muted">
-                    Internal reviewers can inspect live requests, review upcoming markets,
-                    and trigger ambiguity scans before launch.
-                  </p>
-                </div>
+                {intakeState ? (
+                  <div className="mt-5 rounded-[1.6rem] border border-border-low bg-card p-5">
+                    <p className="text-xs uppercase tracking-[0.18em] text-muted">
+                      Latest response for {intakeState.eventId}
+                    </p>
+                    {intakeState.kind === "payment_required" ? (
+                      <div className="mt-4 space-y-4">
+                        <p className="text-2xl font-semibold text-foreground">Payment required</p>
+                        {intakeState.payload.paymentRequirements?.map((requirement, index) => (
+                          <div
+                            key={`${requirement.network ?? "network"}-${index}`}
+                            className="rounded-2xl border border-border-low bg-bg1/80 p-4"
+                          >
+                            <p className="text-base text-foreground">
+                              {requirement.description ?? "Clarification payment request"}
+                            </p>
+                            <p className="mt-2 text-base text-muted">
+                              {requirement.amount} {requirement.assetSymbol} on{" "}
+                              {requirement.network}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {intakeState.kind === "accepted" ? (
+                      <div className="mt-4 space-y-3">
+                        <p className="text-2xl font-semibold text-foreground">Request accepted</p>
+                        <p className="text-base text-muted">
+                          Clarification ID {intakeState.payload.clarificationId ?? "pending"} with
+                          status {intakeState.payload.status ?? "processing"}.
+                        </p>
+                      </div>
+                    ) : null}
+                    {intakeState.kind === "error" ? (
+                      <div className="mt-4 space-y-3">
+                        <p className="text-2xl font-semibold text-foreground">Request failed</p>
+                        <p className="text-base text-muted">{intakeState.message}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
-            </SectionCard>
+            </div>
 
+            <div className="space-y-4 lg:pt-24">
+              <div className="rounded-[1.6rem] border border-border-low bg-panel/80 p-6 backdrop-blur">
+                <p className="text-xs uppercase tracking-[0.22em] text-muted">What happens next</p>
+                <ol className="mt-4 space-y-4">
+                  {(
+                    [
+                      "A payment challenge for $1 is returned immediately",
+                      "On payment, the oracle wakes — LLM analysis runs automatically",
+                      "A clarification note is published with the ambiguity score and reasoning",
+                      "A light suggested edit is included if the wording itself needs it"
+                    ] as const
+                  ).map((step, i) => (
+                    <li key={i} className="flex gap-3 text-base leading-6 text-muted">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border-low text-sm font-medium text-foreground">
+                        {i + 1}
+                      </span>
+                      {step}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
           </div>
-        </main>
-      </div>
+        </div>
+      </section>
+
+      <FooterStrip />
     </div>
   );
 }

@@ -11,6 +11,7 @@
   --border-low: rgba(16, 31, 45, 0.11);
   --accent: #101f2d;
   --signal: #a5472a;
+  --highlight: rgba(165, 71, 42, 0.12);
   --muted: rgba(16, 31, 45, 0.68);
   --radius: 0.9rem;
   --font-sans: "IBM Plex Sans", sans-serif;
@@ -90,5 +91,80 @@
 
   textarea {
     resize: vertical;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Oracle eye — pupil dilation pulse */
+@keyframes oracle-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.65; }
+}
+
+@layer utilities {
+  .animate-fade-up {
+    animation: fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .animation-delay-100 {
+    animation-delay: 0.12s;
+  }
+  .animation-delay-200 {
+    animation-delay: 0.24s;
+  }
+  .animation-delay-300 {
+    animation-delay: 0.36s;
+  }
+
+  /* Oracle pupil — slow, breathing dilation */
+  .oracle-pupil {
+    animation: oracle-pulse 3.6s ease-in-out infinite;
+    transform-origin: 12px 12px; /* SVG center — cx/cy of the circle */
+  }
+
+  /* Scroll-driven step reveal — browsers that support it */
+  @supports (animation-timeline: view()) {
+    .scroll-fade-up {
+      animation: fade-up linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 28%;
+    }
+  }
+
+  /* Hover lift for demo cards */
+  .card-lift {
+    transition:
+      transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .card-lift:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 36px 80px -32px rgba(16, 31, 45, 0.16);
+  }
+}
+
+/* Respect reduced motion — collapse everything to instant */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up,
+  .scroll-fade-up,
+  .oracle-pupil {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .card-lift,
+  .card-lift:hover {
+    transition: none !important;
+    transform: none !important;
   }
 }
