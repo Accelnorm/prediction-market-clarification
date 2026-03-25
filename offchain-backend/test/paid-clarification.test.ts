@@ -16,7 +16,7 @@ import { FileVerifiedPaymentRepository } from "../src/verified-payment-repositor
 import { buildX402PaymentRequiredHeader } from "../src/x402-payment-challenge.js";
 
 const DEFAULT_X402_PAYMENT_CONFIG = {
-  x402Version: 2,
+  x402Version: 1,
   scheme: "exact",
   priceUsd: "1.00",
   maxAmountRequired: "1000000",
@@ -221,7 +221,7 @@ test("POST /api/clarify/:eventId rejects unpaid requests", async () => {
     assert.deepEqual(paymentRequirements, [
       {
         feePayer: EXPECTED_PAYMENT_FEE_PAYER,
-        x402Version: 2,
+        x402Version: 1,
         scheme: "exact",
         network: "solana-devnet",
         amount: "1000000",
@@ -465,7 +465,7 @@ test("POST /api/clarify/:eventId accepts PAYMENT-SIGNATURE header proofs", async
     const response = await fetch(`${baseUrl}/api/clarify/gm_btc_above_100k`, {
       method: "POST",
       headers: createPaymentSignatureHeaders({
-        x402Version: 2,
+        x402Version: 1,
         scheme: "exact",
         network: "solana-devnet",
         payload: {

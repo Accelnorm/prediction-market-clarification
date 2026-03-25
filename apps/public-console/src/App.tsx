@@ -1110,7 +1110,7 @@ function ReviewerConsole() {
                         ) : null}
                       </div>
                       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-low pt-3">
-                        <p className="text-xs text-muted">{formatTimestamp(item.endTime)}</p>
+                        <p className="text-xs text-muted">{formatOptionalTimestamp(item.endTime)}</p>
                         <button
                           className="rounded-full border border-border-low px-3 py-1.5 text-sm text-muted transition hover:text-foreground disabled:opacity-50"
                           disabled={!item.latestClarificationId}
@@ -1160,7 +1160,7 @@ function ReviewerConsole() {
                         ) : null}
                       </div>
                       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-low pt-3">
-                        <p className="text-xs text-muted">{formatTimestamp(item.endTime)}</p>
+                        <p className="text-xs text-muted">{formatOptionalTimestamp(item.endTime)}</p>
                         <div className="flex flex-wrap gap-2">
                           <button
                             className="rounded-full border border-border-low px-3 py-1.5 text-sm text-muted transition hover:text-foreground"
@@ -1254,9 +1254,9 @@ function ReviewerConsole() {
                       <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
                         <p className="text-xs uppercase tracking-[0.14em] text-muted">Timing</p>
                         <p className="mt-2 text-sm leading-6 text-foreground">
-                          Requested {formatTimestamp(detail.createdAt)}
+                          Requested {formatOptionalTimestamp(detail.createdAt)}
                           <br />
-                          Updated {formatTimestamp(detail.updatedAt)}
+                          Updated {formatOptionalTimestamp(detail.updatedAt)}
                         </p>
                       </div>
                     </div>

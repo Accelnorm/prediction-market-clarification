@@ -1,5 +1,5 @@
-// payai facilitator /verify validates network against the x402 SDK's NetworkSchema,
-// which uses short names ("solana", "solana-devnet"), not CAIP-2 identifiers.
+// payai facilitator supports Solana with x402Version=1 using short network names
+// ("solana", "solana-devnet"). x402Version=2 uses CAIP-2 identifiers and is for EVM chains.
 const SOLANA_MAINNET_NETWORK = "solana";
 const SOLANA_DEVNET_NETWORK = "solana-devnet";
 const SOLANA_MAINNET_USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -60,7 +60,7 @@ export function loadX402PaymentConfig(env: NodeJS.ProcessEnv = process.env) {
   const authConfig = resolveFacilitatorAuthConfig(env);
 
   return {
-    x402Version: Number.parseInt(env.X402_VERSION ?? "2", 10),
+    x402Version: Number.parseInt(env.X402_VERSION ?? "1", 10),
     scheme: normalizeString(env.X402_SCHEME) || "exact",
     priceUsd: normalizeString(env.X402_PRICE_USD) || "1.00",
     maxAmountRequired:
