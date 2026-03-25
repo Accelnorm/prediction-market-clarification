@@ -2068,8 +2068,10 @@ function PublicConsole() {
                               {requirement.description ?? "Clarification payment request"}
                             </p>
                             <p className="mt-2 text-base text-muted">
-                              {requirement.amount} {requirement.assetSymbol} on{" "}
-                              {requirement.network}
+                              {requirement.assetSymbol === "USDC"
+                                ? (Number(requirement.amount) / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })
+                                : requirement.amount}{" "}
+                              {requirement.assetSymbol} on {requirement.network}
                             </p>
                           </div>
                         ))}
