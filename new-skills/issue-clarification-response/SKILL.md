@@ -22,7 +22,7 @@ Return output with these exact keys:
 
 ## Response Workflow
 
-1. Read the user's question together with the title, resolution text, close time, and any source hints in the market payload.
+1. Read the user's question together with the title, resolution text, close time, and any source hints in the market payload. If `termsContent` is non-null, treat it as the authoritative contract terms that supplement the resolution text — use it to resolve questions about index methodology, fallback procedures, or any detail not explicit in the resolution text. A market is clear if the resolution text and terms together fully specify the source, threshold, and timing, even if those details appear only in the terms.
 2. Identify the decisive ambiguity behind the question. Prefer the clause most likely to create a bad settlement, post-resolution dispute, or "bet on resolver" behavior.
 3. Answer from the written contract, not from assumed platform policy. If the contract does not bind the key detail, treat that as ambiguity.
 4. Distinguish event uncertainty from contract ambiguity. Hard-to-predict events can still be clear contracts.

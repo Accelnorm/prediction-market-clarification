@@ -22,7 +22,7 @@ Return output that fits the repo's reviewer scan shape:
 
 ## Review Workflow
 
-1. Extract the operative contract from the title, resolution text, close time, source references, and any fallback language.
+1. Extract the operative contract from the title, resolution text, close time, source references, and any fallback language. If `termsContent` is non-null in the market payload, treat it as the authoritative contract terms — use it to resolve questions about index methodology, fallback procedures, or any detail not stated in the resolution text. A market is clear if the resolution text and terms together fully specify the source, threshold, and timing, even if those details appear only in the terms.
 2. Identify the single highest-risk issue. Prefer the clause most likely to create a dispute, bad resolution, or "bet on resolver" behavior.
 3. Test determinism. Ask whether an uninvolved resolver could settle the market from the written rules plus named evidence without discretionary judgment.
 4. Score the ambiguity using the bands below. Do not punish ordinary forecasting difficulty when the contract is precise.

@@ -1,5 +1,11 @@
 import { readFile } from "node:fs/promises";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { MarketRecord, ClarificationRequest } from "./types.js";
+
+GlobalWorkerOptions.workerSrc = new URL(
+  "../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+  import.meta.url
+).href;
 
 function validationError(code: string, message: string, statusCode: number = 500) {
   return Object.assign(new Error(message), { code, statusCode });
@@ -47,6 +53,9 @@ function buildDefaultSystemPrompt() {
     "cited_clause must quote or restate the most relevant resolution clause.",
     'When verdict is "clear", suggested_market_text and suggested_note may be omitted or null.',
     'When verdict is "needs_clarification", suggested_market_text and suggested_note are required.',
+    "If the market payload includes a non-null termsContent field, that text is the authoritative contract terms.",
+    "Use it to resolve questions about index methodology, fallback procedures, and any detail not stated in the resolution text.",
+    "A market whose resolution text and terms together fully specify the outcome source, threshold, and timing is clear even if those details appear only in the terms.",
     "Do not include markdown fences or extra commentary."
   ].join(" ");
 }
@@ -84,7 +93,83 @@ async function readPromptProfile(profile: string | null | undefined) {
   }
 }
 
-function buildUserPrompt({ clarification, market }: { clarification: Partial<ClarificationRequest>; market: MarketRecord | null | undefined }) {
+async function extractPdfText(buffer: ArrayBuffer): Promise<string> {
+  const pdf = await getDocument({ data: buffer }).promise;
+  const pageTexts: string[] = [];
+  const pageLimit = Math.min(pdf.numPages, 20);
+
+  for (let i = 1; i <= pageLimit; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items
+      .map((item) => ("str" in item ? (item as { str: string }).str : ""))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (pageText) {
+      pageTexts.push(pageText);
+    }
+  }
+
+  return pageTexts.join("\n\n");
+}
+
+async function fetchTermsContent(url: string): Promise<string | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    let response: Response;
+
+    try {
+      response = await fetch(url, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+
+    if (contentType.includes("application/pdf")) {
+      const buffer = await response.arrayBuffer();
+      const text = await extractPdfText(buffer);
+      const trimmed = text.replace(/\s+/g, " ").trim();
+      return trimmed.length > 6000 ? trimmed.slice(0, 6000) + "…" : trimmed || null;
+    }
+
+    if (contentType.includes("text/html") || contentType.includes("text/plain")) {
+      const html = await response.text();
+      const text = html
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&nbsp;/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return text.length > 6000 ? text.slice(0, 6000) + "…" : text || null;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function buildUserPrompt({
+  clarification,
+  market,
+  termsContent
+}: {
+  clarification: Partial<ClarificationRequest>;
+  market: MarketRecord | null | undefined;
+  termsContent?: string | null;
+}) {
   return JSON.stringify(
     {
       task: "analyze_prediction_market_clarification",
@@ -97,6 +182,7 @@ function buildUserPrompt({ clarification, market }: { clarification: Partial<Cla
         url: market?.url ?? null,
         category: market?.category ?? null,
         termsLink: market?.termsLink ?? null,
+        termsContent: termsContent ?? null,
         contracts: Array.isArray(market?.contracts) ? market.contracts : []
       },
       clarificationRequest: {
@@ -451,7 +537,8 @@ export async function generateMarketInterpretation({
   }
 
   const systemPrompt = await readPromptProfile(promptProfile);
-  const userPrompt = buildUserPrompt({ clarification, market });
+  const termsContent = market?.termsLink ? await fetchTermsContent(market.termsLink) : null;
+  const userPrompt = buildUserPrompt({ clarification, market, termsContent });
   const response =
     runtime.provider === "anthropic-compatible"
       ? await callAnthropicCompatibleProvider({

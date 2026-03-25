@@ -188,18 +188,6 @@ curl -i -X POST http://127.0.0.1:3000/api/clarify/9840 \
   }'
 ```
 
-`9848` — *"SOL price on March 25"*
-Title implies a single price point. Ambiguity: is this the Gemini spot mid-price, a TWAP, or an external index? What happens if the Gemini SOL/USD market is halted or has abnormal spread at the snapshot time?
-
-```bash
-curl -i -X POST http://127.0.0.1:3000/api/clarify/9848 \
-  -H 'content-type: application/json' \
-  -d '{
-    "requesterId": "phase1_tester",
-    "question": "Is the resolution price the Gemini SOL/USD spot mid-price, a time-weighted average, or an external index, and what is the fallback if the Gemini market is halted at the snapshot time?"
-  }'
-```
-
 ### Trigger the 402 challenge
 
 Use any of the suggested markets above, or substitute your own `<EVENT_ID>`:
