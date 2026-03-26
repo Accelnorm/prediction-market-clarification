@@ -58,6 +58,12 @@ Default `verdict` to `needs_clarification` at `0.50` or above.
 - Make `suggested_note` useful to an operator. State the binding source, edge-case treatment, or missing branch that must be added.
 - If the text is already precise, keep the rewrite small and explain why the market is clear.
 
+## Global Terms Handling
+
+- Some upcoming markets share the same `termsLink` and can be put on the reviewer's skip-scan list as global standard terms.
+- If the operative ambiguity question is already answered by shared `termsContent`, do not invent a market-specific issue just because the title changes.
+- When reviewing one of these markets manually, focus on whether the shared terms plus the market-specific resolution text leave any unresolved branch unique to that market.
+
 ## Escalation Boundary
 
 - Use this skill to diagnose and tighten the market text.

@@ -18,7 +18,7 @@ Escalate unresolved Gemini market ambiguity into a paid clarification request th
 
 ## Form the Request
 
-- Use the exact Gemini `eventId` or market identifier that the backend recognizes.
+- Use the exact Gemini `eventId` that the backend recognizes. In repo docs this may also be called a `marketId`, but the live route and tests use `:eventId`.
 - Ask one concrete ambiguity at a time.
 - Keep the question specific to the market text and the operational doubt you need resolved.
 - Keep `question` under 500 characters. Empty questions are rejected.
@@ -29,7 +29,14 @@ Escalate unresolved Gemini market ambiguity into a paid clarification request th
 1. `POST /api/clarify/:eventId` with JSON `{ "requesterId": "...", "question": "..." }`.
 2. If the server returns `402 PAYMENT_REQUIRED`, obtain or attach the x402 proof and retry with `PAYMENT-SIGNATURE`.
 3. If low latency matters, optionally add `?wait=true&timeoutMs=10000` to the paid request.
-4. Poll `GET /api/clarifications/:clarificationId` until the clarification reaches a terminal state.
+4. On successful paid submission, read the returned `clarificationId`.
+5. Poll `GET /api/clarifications/:clarificationId` until the clarification reaches a terminal state.
+
+## Implementation Notes
+
+- The backend normalizes whitespace in `question` before validation and storage.
+- The live helper script for the full x402 flow is `scripts/request-clarification.sh`.
+- Source of truth for request parsing and route behavior lives in `offchain-backend/src/server.ts` and `offchain-backend/src/x402-paid-clarification.ts`.
 
 ## Failure Handling
 

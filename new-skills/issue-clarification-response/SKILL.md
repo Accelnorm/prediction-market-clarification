@@ -20,6 +20,8 @@ Return output with these exact keys:
 - `suggested_market_text`: optional when `verdict` is `clear`
 - `suggested_note`: optional when `verdict` is `clear`
 
+When `verdict` is `needs_clarification`, include both `suggested_market_text` and `suggested_note`.
+
 ## Response Workflow
 
 1. Read the user's question together with the title, resolution text, close time, and any source hints in the market payload. If `termsContent` is non-null, treat it as the authoritative contract terms that supplement the resolution text — use it to resolve questions about index methodology, fallback procedures, or any detail not explicit in the resolution text. A market is clear if the resolution text and terms together fully specify the source, threshold, and timing, even if those details appear only in the terms.

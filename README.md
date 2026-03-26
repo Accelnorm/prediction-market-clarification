@@ -39,7 +39,7 @@ Skills live under [`new-skills/`](new-skills/).
 Trader / AI agent
        │
        ▼
-POST /api/clarify/:marketId
+POST /api/clarify/:eventId
        │
        ├─► 402 Payment Required (x402 challenge, $1 USDC on Solana)
        │
@@ -211,5 +211,4 @@ Prediction market resolution disputes are a recurring cost with no clean solutio
 - **No database migration system.** Schema changes require manual SQL; there is no migration framework.
 
 ---
-
 

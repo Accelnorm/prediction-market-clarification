@@ -188,6 +188,13 @@ Use this structure mentally even if the calling context wraps it differently:
 - `suggested_market_text`: minimally sufficient rewrite
 - `suggested_note`: operator-facing implementation note
 
+## Shared Terms And Skip-Scan
+
+Some upcoming markets now share a common `termsLink` that reviewers can place on a persistent skip-scan list. Treat those shared terms as precedent material, not missing context.
+
+- If `termsContent` already resolves the methodological question, do not flag a duplicate ambiguity just because many sibling markets point to the same document.
+- Only escalate when the market-specific title, threshold, deadline, or branch logic adds a new unresolved issue on top of the shared terms.
+
 ## Rewrite Rules
 
 - Preserve the market's intent. Do not silently change the economic question.

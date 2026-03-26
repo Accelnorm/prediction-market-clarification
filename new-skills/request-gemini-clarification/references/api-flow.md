@@ -8,13 +8,15 @@ Load this file when an agent needs the exact request flow, endpoint behavior, or
 
 - The backend must know the market as an active or upcoming synced event.
 - `POST /api/clarify/:eventId` rejects unknown event ids with `404 UNSUPPORTED_EVENT_ID`.
+- The route parameter is named `eventId` in the live backend and tests, even if some repo docs still say `marketId`.
 - The JSON body must include a non-empty `question`. The backend trims whitespace and enforces a 500-character maximum.
 
 Relevant source files:
 
 - [README.md](/home/user/gemini-pm/README.md)
-- [server.js](/home/user/gemini-pm/offchain-backend/src/server.js)
-- [x402-paid-clarification.js](/home/user/gemini-pm/offchain-backend/src/x402-paid-clarification.js)
+- [server.ts](/home/user/gemini-pm/offchain-backend/src/server.ts)
+- [x402-paid-clarification.ts](/home/user/gemini-pm/offchain-backend/src/x402-paid-clarification.ts)
+- [request-clarification.sh](/home/user/gemini-pm/scripts/request-clarification.sh)
 
 ## Request Flow
 
@@ -65,3 +67,4 @@ curl http://127.0.0.1:3000/api/clarifications/<CLARIFICATION_ID>
 - A duplicate paid retry with the same verified payment proof returns the existing clarification instead of creating a new one.
 - The backend rate-limits clarification creation and may return `429` with `retry-after`.
 - Clarification requests enter the asynchronous pipeline with initial status `queued`.
+- The backend returns a `clarificationId` on successful paid creation; use that id for public polling.
