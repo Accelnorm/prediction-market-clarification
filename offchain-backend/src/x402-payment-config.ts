@@ -24,7 +24,8 @@ function resolveFacilitatorAuthConfig(env: NodeJS.ProcessEnv) {
 function resolveNetworkIdentifier(value: unknown): string {
   const normalized = normalizeString(value).toLowerCase();
 
-  if (!normalized || normalized === "solana:devnet" || normalized === "devnet" || normalized === "solana-devnet") {
+  // EtWTRABZaYq6iMfeYKouRu166VU2xqa1 is the Solana devnet genesis hash (CAIP-2 format)
+  if (!normalized || normalized === "solana:devnet" || normalized === "devnet" || normalized === "solana-devnet" || normalized === "solana:etwtrabzayq6imfeykouru166vu2xqa1") {
     return SOLANA_DEVNET_NETWORK;
   }
 

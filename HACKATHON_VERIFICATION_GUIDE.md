@@ -47,6 +47,8 @@ cp .env.example .env
 
 If you already keep demo-specific secrets in `.env.demo`, `./scripts/deploy-demo.sh` will use that automatically when `.env` is absent.
 
+`npm run start` (local dev) now auto-loads `.env` via dotenv. No manual sourcing required.
+
 Edit `.env` and make sure these are real values:
 
 - `POSTGRES_PASSWORD`
@@ -139,31 +141,31 @@ The following are real markets from the current sync that have genuine resolutio
 **Active markets**
 
 `4020` — *"Recession this year?"*
-Resolves on two consecutive quarters of negative GDP per the BEA advance estimate. Ambiguity: does an NBER recession declaration with no two consecutive negative quarters resolve Yes? Which GDP release vintage (advance, second, third) is authoritative if they differ?
+Resolves on two consecutive quarters of negative BEA GDP — not an NBER declaration. The narrow drafting gap: the terms tie expiration to the Advance Estimate of Q4 GDP and settlement to the "official BEA value at expiration," which strongly implies advance-only, but never explicitly states that a later revision showing a positive quarter is ignored. Good test of whether the system can identify a subtle drafting gap while correctly reading the trigger as BEA-quarters-only.
 
 ```bash
 curl -i -X POST http://127.0.0.1:3000/api/clarify/4020 \
   -H 'content-type: application/json' \
   -d '{
     "requesterId": "phase1_tester",
-    "question": "If the NBER formally declares a recession before the deadline but no two consecutive quarters of negative GDP appear in the BEA advance estimates, does this market resolve Yes or No?"
+    "question": "If the BEA advance estimate shows two consecutive negative quarters but a subsequent revision turns one of those quarters positive before settlement, which figure controls resolution?"
   }'
 ```
 
 `2640` — *"Will crypto market structure legislation become law?"*
-Some contracts define qualifying legislation by a three-prong test (regulatory framework, agency delineation, and non-stablecoin-only scope). Ambiguity: does a bill that covers stablecoins and digital assets broadly but originated as a stablecoin bill qualify? What if the president signs it via emergency proclamation rather than normal enrollment?
+Some contracts define qualifying legislation by a three-prong test (regulatory framework, agency delineation, and non-stablecoin-only scope). Ambiguity: a bill that originated as stablecoin-only legislation but was amended to include broader digital asset market structure provisions may or may not satisfy the qualifying definition — the rules are flexible enough to allow a content-based match but that same flexibility requires a judgment call at settlement.
 
 ```bash
 curl -i -X POST http://127.0.0.1:3000/api/clarify/2640 \
   -H 'content-type: application/json' \
   -d '{
     "requesterId": "phase1_tester",
-    "question": "Would a bill that began as stablecoin-only legislation but was amended to include broader digital asset market structure provisions satisfy the qualifying definition, and does the method of presidential signature affect resolution?"
+    "question": "Would a bill that began as stablecoin-only legislation but was amended to include broader digital asset market structure provisions satisfy the qualifying definition for this market?"
   }'
 ```
 
 `4022` — *"NASA lands on the moon?"*
-Contract description specifies a "manned NASA mission" but the market title says only "NASA lands." Ambiguity: does a NASA-contracted CLPS commercial robotic lander count? Does a crewed Artemis mission that aborts before touchdown reset the clock?
+The market title says "NASA lands" but the resolution rules specify a "manned NASA mission." This is a good test of the full-terms fetch: the system should read the linked resolution criteria, surface the crewed-only requirement, and explain why a NASA-contracted CLPS robotic lander would not qualify. The value here is that the answer *is* in the terms — it just requires fetching and parsing them correctly.
 
 ```bash
 curl -i -X POST http://127.0.0.1:3000/api/clarify/4022 \
@@ -171,20 +173,6 @@ curl -i -X POST http://127.0.0.1:3000/api/clarify/4022 \
   -d '{
     "requesterId": "phase1_tester",
     "question": "Does a robotic lander delivered under a NASA CLPS contract satisfy the resolution condition, or is a crewed NASA Artemis surface touchdown strictly required?"
-  }'
-```
-
-**Upcoming markets**
-
-`9840` — *"Oil (Brent) price on March 25?"*
-Resolves against the `KK_RFR_BRENTOILUSDC` index at 5 pm EDT. Ambiguity: what index methodology and data provider backs that ticker, and what is the fallback if the index value is unavailable or stale at the exact snapshot time?
-
-```bash
-curl -i -X POST http://127.0.0.1:3000/api/clarify/9840 \
-  -H 'content-type: application/json' \
-  -d '{
-    "requesterId": "phase1_tester",
-    "question": "What data provider and calculation methodology backs the KK_RFR_BRENTOILUSDC index, and what is the resolution procedure if that index is delayed or unavailable at the 5pm EDT snapshot?"
   }'
 ```
 

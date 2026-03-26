@@ -1499,7 +1499,7 @@ export function createServer({
             eventId,
             question: payload.question
           },
-          requesterId: payload.requesterId,
+          requesterId: payload.requesterId || verifiedPayment.paymentPayer || null,
           paymentAmount: verifiedPayment.paymentAmount,
           paymentAsset: verifiedPayment.paymentAsset,
           paymentReference: verifiedPayment.paymentReference,

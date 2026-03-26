@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { buildArtifactLinkHref } from "./reviewer-artifact-links";
+import { useWalletSession, useWalletConnection } from "@solana/react-hooks";
+import { createWalletTransactionSigner } from "@solana/client";
+import { exact } from "x402/schemes";
 
 type ReviewerQueueFilter = {
   key: string;
@@ -196,17 +199,31 @@ type ReviewerArtifactRecord = {
   url: string;
 };
 
+type X402PaymentRequirement = {
+  feePayer?: string;
+  x402Version?: number;
+  scheme?: string;
+  network?: string;
+  amount?: string;
+  maxAmountRequired?: string;
+  asset?: string;
+  assetSymbol?: string;
+  description?: string;
+  payTo?: string;
+  resource?: string;
+  maxTimeoutSeconds?: number;
+  extra?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 type IntakeResponseState =
   | {
       kind: "payment_required";
       eventId: string;
+      question: string;
+      endpoint: string;
       payload: {
-        paymentRequirements?: Array<{
-          assetSymbol?: string;
-          amount?: string;
-          description?: string;
-          network?: string;
-        }>;
+        paymentRequirements?: X402PaymentRequirement[];
       };
     }
   | {
@@ -222,6 +239,26 @@ type IntakeResponseState =
       eventId: string;
       message: string;
     };
+
+type PublicClarificationResult = {
+  clarificationId: string;
+  status: string;
+  eventId: string;
+  question: string;
+  createdAt: string;
+  updatedAt: string;
+  errorMessage?: string | null;
+  retryable?: boolean;
+  llmOutput?: {
+    verdict: string;
+    llm_status: string;
+    reasoning: string;
+    cited_clause: string;
+    ambiguity_score: number;
+    ambiguity_summary: string;
+    suggested_market_text: string | null;
+  } | null;
+};
 
 const REVIEWER_SESSION_STORAGE_KEY = "gemini-reviewer-session";
 const PUBLIC_SESSION_STORAGE_KEY = "signal-public-session";
@@ -265,6 +302,14 @@ function saveStoredSession(
 
 function hasVisibleText(value: string | null | undefined) {
   return typeof value === "string" && value.trim() !== "";
+}
+
+function friendlyFetchError(error: unknown, baseUrl: string, fallback: string): string {
+  const msg = error instanceof Error ? error.message : "";
+  if (msg === "Failed to fetch") {
+    return `Could not reach backend at ${baseUrl}. Is the server running?`;
+  }
+  return msg || fallback;
 }
 
 function clearStoredSession(key: string) {
@@ -422,11 +467,11 @@ function SettingsFlyout({
           <div className="space-y-2">
             <p className="text-xs uppercase tracking-[0.26em] text-muted">Settings</p>
             <h2 className="font-display text-[1.7rem] leading-none text-foreground">{title}</h2>
-            <p className="max-w-md text-sm leading-6 text-muted">{description}</p>
+            <p className="max-w-md text-base leading-7 text-muted">{description}</p>
           </div>
           <button
             aria-label="Close settings"
-            className="rounded-full border border-border-low px-3 py-2 text-sm text-muted transition hover:text-foreground"
+            className="rounded-full border border-border-low px-3 py-2 text-base text-muted transition hover:text-foreground"
             onClick={onClose}
             type="button"
           >
@@ -444,9 +489,13 @@ function ReviewerConsole() {
     () => loadStoredSession(REVIEWER_SESSION_STORAGE_KEY),
     []
   );
-  const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl);
-  const [draftReviewerToken, setDraftReviewerToken] = useState(initialSession.reviewerToken);
-  const [session, setSession] = useState(initialSession);
+  const defaultedSession = useMemo(() => ({
+    apiBaseUrl: initialSession.apiBaseUrl || "http://127.0.0.1:3000",
+    reviewerToken: initialSession.reviewerToken || "demo-reviewer-token"
+  }), [initialSession]);
+  const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(defaultedSession.apiBaseUrl);
+  const [draftReviewerToken, setDraftReviewerToken] = useState(defaultedSession.reviewerToken);
+  const [session, setSession] = useState(defaultedSession);
   const [reviewerSurface, setReviewerSurface] = useState<ReviewerSurface>("prelaunch");
   const [activeFilter, setActiveFilter] = useState("all");
   const [queueResponse, setQueueResponse] = useState<ReviewerQueueResponse | null>(null);
@@ -518,11 +567,7 @@ function ReviewerConsole() {
       } catch (error) {
         if (!cancelled) {
           setQueueResponse(null);
-          setErrorMessage(
-            error instanceof Error
-              ? error.message
-              : "Reviewer queue could not be loaded with the current session."
-          );
+          setErrorMessage(friendlyFetchError(error, session.apiBaseUrl, "Reviewer queue could not be loaded with the current session."));
         }
       } finally {
         if (!cancelled) {
@@ -576,11 +621,7 @@ function ReviewerConsole() {
       } catch (error) {
         if (!cancelled) {
           setPrelaunchQueueResponse(null);
-          setPrelaunchErrorMessage(
-            error instanceof Error
-              ? error.message
-              : "Upcoming review queue could not be loaded with the current session."
-          );
+          setPrelaunchErrorMessage(friendlyFetchError(error, session.apiBaseUrl, "Upcoming review queue could not be loaded with the current session."));
         }
       } finally {
         if (!cancelled) {
@@ -641,11 +682,7 @@ function ReviewerConsole() {
       } catch (error) {
         if (!cancelled) {
           setDetailResponse(null);
-          setDetailErrorMessage(
-            error instanceof Error
-              ? error.message
-              : "Reviewer detail could not be loaded with the current session."
-          );
+          setDetailErrorMessage(friendlyFetchError(error, session.apiBaseUrl, "Reviewer detail could not be loaded with the current session."));
         }
       } finally {
         if (!cancelled) {
@@ -706,11 +743,7 @@ function ReviewerConsole() {
       } catch (error) {
         if (!cancelled) {
           setPrelaunchDetailResponse(null);
-          setPrelaunchDetailErrorMessage(
-            error instanceof Error
-              ? error.message
-              : "Upcoming market detail could not be loaded with the current session."
-          );
+          setPrelaunchDetailErrorMessage(friendlyFetchError(error, session.apiBaseUrl, "Upcoming market detail could not be loaded with the current session."));
         }
       } finally {
         if (!cancelled) {
@@ -811,8 +844,8 @@ function ReviewerConsole() {
 
   function clearReviewer() {
     clearStoredSession(REVIEWER_SESSION_STORAGE_KEY);
-    setDraftApiBaseUrl("");
-    setDraftReviewerToken("");
+    setDraftApiBaseUrl("http://127.0.0.1:3000");
+    setDraftReviewerToken("demo-reviewer-token");
     setSession({ apiBaseUrl: "", reviewerToken: "" });
     setQueueResponse(null);
     setPrelaunchQueueResponse(null);
@@ -911,7 +944,7 @@ function ReviewerConsole() {
           title="Reviewer connection"
         >
           <form className="grid gap-4" onSubmit={connectReviewer}>
-            <label className="grid gap-2 text-sm">
+            <label className="grid gap-2 text-base">
               <span className="text-muted">Backend API base URL</span>
               <input
                 className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
@@ -920,7 +953,7 @@ function ReviewerConsole() {
                 value={draftApiBaseUrl}
               />
             </label>
-            <label className="grid gap-2 text-sm">
+            <label className="grid gap-2 text-base">
               <span className="text-muted">Reviewer auth token</span>
               <input
                 className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
@@ -932,21 +965,21 @@ function ReviewerConsole() {
             </label>
             <div className="flex flex-wrap gap-3">
               <button
-                className="rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:translate-y-[-1px]"
+                className="rounded-full bg-foreground px-5 py-3 text-base font-medium text-background transition hover:translate-y-[-1px]"
                 disabled={!draftApiBaseUrl.trim() || !draftReviewerToken.trim()}
                 type="submit"
               >
                 Save
               </button>
               <button
-                className="rounded-full border border-border-low px-5 py-3 text-sm text-muted transition hover:text-foreground"
+                className="rounded-full border border-border-low px-5 py-3 text-base text-muted transition hover:text-foreground"
                 onClick={refreshReviewerData}
                 type="button"
               >
                 Refresh
               </button>
               <button
-                className="rounded-full border border-border-low px-5 py-3 text-sm text-muted transition hover:text-foreground"
+                className="rounded-full border border-border-low px-5 py-3 text-base text-muted transition hover:text-foreground"
                 onClick={clearReviewer}
                 type="button"
               >
@@ -998,7 +1031,7 @@ function ReviewerConsole() {
               />
               {reviewerSurface === "prelaunch" && session.apiBaseUrl ? (
                 <button
-                  className="rounded-full border border-border-low px-4 py-2 text-sm text-muted transition hover:text-foreground disabled:opacity-60"
+                  className="rounded-full border border-border-low px-4 py-2 text-base text-muted transition hover:text-foreground disabled:opacity-60"
                   disabled={isPrelaunchScanAllRunning}
                   onClick={runPrelaunchScanAll}
                   type="button"
@@ -1042,30 +1075,30 @@ function ReviewerConsole() {
             {/* Queue list */}
             <div className="space-y-3 p-4">
               {!session.apiBaseUrl || !session.reviewerToken ? (
-                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-sm leading-6 text-muted">
+                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-base leading-7 text-muted">
                   Add reviewer credentials to load queue data.
                 </div>
               ) : null}
 
               {reviewerSurface === "active" && isLoading ? (
-                <div className="py-4 text-sm text-muted">Loading live queue…</div>
+                <div className="py-4 text-base text-muted">Loading live queue…</div>
               ) : null}
               {reviewerSurface === "prelaunch" && isPrelaunchLoading ? (
-                <div className="py-4 text-sm text-muted">Loading upcoming queue…</div>
+                <div className="py-4 text-base text-muted">Loading upcoming queue…</div>
               ) : null}
               {reviewerSurface === "active" && errorMessage ? (
-                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-base text-muted">
                   {errorMessage}
                 </div>
               ) : null}
               {reviewerSurface === "prelaunch" && prelaunchErrorMessage ? (
-                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-base text-muted">
                   {prelaunchErrorMessage}
                 </div>
               ) : null}
 
               {reviewerSurface === "active" && !isLoading && !errorMessage && activeQueue.length === 0 ? (
-                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-sm leading-6 text-muted">
+                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-base leading-7 text-muted">
                   No live markets match the current filter.
                 </div>
               ) : null}
@@ -1074,7 +1107,7 @@ function ReviewerConsole() {
               !isPrelaunchLoading &&
               !prelaunchErrorMessage &&
               prelaunchQueue.length === 0 ? (
-                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-sm leading-6 text-muted">
+                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-base leading-7 text-muted">
                   No upcoming markets are currently queued for review.
                 </div>
               ) : null}
@@ -1094,7 +1127,7 @@ function ReviewerConsole() {
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0 space-y-1.5">
                           <p className="text-xs uppercase tracking-[0.2em] text-muted">{item.eventId}</p>
-                          <h3 className="text-base font-medium text-foreground">{item.marketTitle}</h3>
+                          <h3 className="text-lg font-medium text-foreground">{item.marketTitle}</h3>
                           <div className="flex flex-wrap gap-1.5">
                             {item.queueStates.map((state) => (
                               <span key={state} className="rounded-full border border-border-low px-2.5 py-0.5 text-xs uppercase tracking-[0.14em] text-muted">
@@ -1112,7 +1145,7 @@ function ReviewerConsole() {
                       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-low pt-3">
                         <p className="text-xs text-muted">{formatOptionalTimestamp(item.endTime)}</p>
                         <button
-                          className="rounded-full border border-border-low px-3 py-1.5 text-sm text-muted transition hover:text-foreground disabled:opacity-50"
+                          className="rounded-full border border-border-low px-3 py-1.5 text-base text-muted transition hover:text-foreground disabled:opacity-50"
                           disabled={!item.latestClarificationId}
                           onClick={() => setSelectedClarificationId(item.latestClarificationId)}
                           type="button"
@@ -1141,7 +1174,7 @@ function ReviewerConsole() {
                           <p className="text-xs uppercase tracking-[0.2em] text-muted">
                             {item.eventId}{item.ticker ? ` · ${item.ticker}` : ""}
                           </p>
-                          <h3 className="text-base font-medium text-foreground">{item.marketTitle}</h3>
+                          <h3 className="text-lg font-medium text-foreground">{item.marketTitle}</h3>
                           <div className="flex flex-wrap gap-1.5">
                             <span className="rounded-full border border-border-low px-2.5 py-0.5 text-xs uppercase tracking-[0.14em] text-muted">
                               {item.category ?? "Uncategorized"}
@@ -1163,14 +1196,14 @@ function ReviewerConsole() {
                         <p className="text-xs text-muted">{formatOptionalTimestamp(item.endTime)}</p>
                         <div className="flex flex-wrap gap-2">
                           <button
-                            className="rounded-full border border-border-low px-3 py-1.5 text-sm text-muted transition hover:text-foreground"
+                            className="rounded-full border border-border-low px-3 py-1.5 text-base text-muted transition hover:text-foreground"
                             onClick={() => setSelectedPrelaunchEventId(item.eventId)}
                             type="button"
                           >
                             Inspect
                           </button>
                           <button
-                            className="rounded-full bg-foreground px-3 py-1.5 text-sm text-background transition disabled:opacity-60"
+                            className="rounded-full bg-foreground px-3 py-1.5 text-base text-background transition disabled:opacity-60"
                             disabled={prelaunchScanTargetId === item.eventId}
                             onClick={() => void runPrelaunchScan(item.eventId)}
                             type="button"
@@ -1188,19 +1221,19 @@ function ReviewerConsole() {
 
           <div className="animate-fade-up animation-delay-100 overflow-hidden rounded-[2rem] border border-border-low bg-panel/85 shadow-[0_24px_80px_-48px_rgba(4,13,22,0.6)] backdrop-blur">
             {reviewerSurface === "active" && isDetailLoading ? (
-              <div className="p-6 text-sm text-muted">Loading clarification detail…</div>
+              <div className="p-6 text-base text-muted">Loading clarification detail…</div>
             ) : null}
             {reviewerSurface === "prelaunch" && isPrelaunchDetailLoading ? (
-              <div className="p-6 text-sm text-muted">Loading upcoming market detail…</div>
+              <div className="p-6 text-base text-muted">Loading upcoming market detail…</div>
             ) : null}
             {reviewerSurface === "active" && detailErrorMessage ? (
               <div className="p-6">
-                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">{detailErrorMessage}</div>
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-base text-muted">{detailErrorMessage}</div>
               </div>
             ) : null}
             {reviewerSurface === "prelaunch" && prelaunchDetailErrorMessage ? (
               <div className="p-6">
-                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-sm text-muted">{prelaunchDetailErrorMessage}</div>
+                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-base text-muted">{prelaunchDetailErrorMessage}</div>
               </div>
             ) : null}
 
@@ -1213,7 +1246,7 @@ function ReviewerConsole() {
                   </svg>
                 </span>
                 <h3 className="font-display text-[1.6rem] leading-none text-foreground/60">Select a clarification</h3>
-                <p className="max-w-xs text-sm leading-6 text-muted">Choose a live clarification from the queue to inspect its wording, funding, and oracle output.</p>
+                <p className="max-w-xs text-base leading-7 text-muted">Choose a live clarification from the queue to inspect its wording, funding, and oracle output.</p>
               </div>
             ) : null}
 
@@ -1226,7 +1259,7 @@ function ReviewerConsole() {
                   </svg>
                 </span>
                 <h3 className="font-display text-[1.6rem] leading-none text-foreground/60">Select a market</h3>
-                <p className="max-w-xs text-sm leading-6 text-muted">Choose an upcoming market from the queue to inspect its contract structure and ambiguity scan.</p>
+                <p className="max-w-xs text-base leading-7 text-muted">Choose an upcoming market from the queue to inspect its contract structure and ambiguity scan.</p>
               </div>
             ) : null}
 
@@ -1249,11 +1282,11 @@ function ReviewerConsole() {
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
                       <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
                         <p className="text-xs uppercase tracking-[0.14em] text-muted">Question</p>
-                        <p className="mt-2 text-sm leading-6 text-foreground">{detail.question}</p>
+                        <p className="mt-2 text-base leading-7 text-foreground">{detail.question}</p>
                       </div>
                       <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
                         <p className="text-xs uppercase tracking-[0.14em] text-muted">Timing</p>
-                        <p className="mt-2 text-sm leading-6 text-foreground">
+                        <p className="mt-2 text-base leading-7 text-foreground">
                           Requested {formatOptionalTimestamp(detail.createdAt)}
                           <br />
                           Updated {formatOptionalTimestamp(detail.updatedAt)}
@@ -1264,7 +1297,7 @@ function ReviewerConsole() {
                       <p className="text-xs uppercase tracking-[0.16em] text-muted">
                         Source market text
                       </p>
-                      <p className="mt-3 text-sm leading-7 text-foreground">
+                      <p className="mt-3 text-base leading-7 text-foreground">
                         {detail.market.resolutionText ?? "No market text cached."}
                       </p>
                     </div>
@@ -1281,7 +1314,7 @@ function ReviewerConsole() {
                             <p className="text-2xl font-semibold text-foreground">
                               {getReviewTemperature(detail.llmOutput.ambiguity_score)}
                             </p>
-                            <p className="mt-2 text-sm text-muted">
+                            <p className="mt-2 text-base text-muted">
                               {detail.llmOutput.ambiguity_summary}
                             </p>
                           </div>
@@ -1290,7 +1323,7 @@ function ReviewerConsole() {
                               <p className="text-xs uppercase tracking-[0.14em] text-muted">
                                 Suggested wording
                               </p>
-                              <p className="mt-2 text-sm leading-6 text-foreground">
+                              <p className="mt-2 text-base leading-7 text-foreground">
                                 {detail.llmOutput.suggested_market_text}
                               </p>
                             </div>
@@ -1300,14 +1333,14 @@ function ReviewerConsole() {
                               <p className="text-xs uppercase tracking-[0.14em] text-muted">
                                 Note
                               </p>
-                              <p className="mt-2 text-sm leading-6 text-foreground">
+                              <p className="mt-2 text-base leading-7 text-foreground">
                                 {detail.llmOutput.suggested_note}
                               </p>
                             </div>
                           ) : null}
                         </div>
                       ) : (
-                        <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-sm text-muted">
+                        <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-base text-muted">
                           No LLM output has been persisted for this clarification.
                         </div>
                       )}
@@ -1318,7 +1351,7 @@ function ReviewerConsole() {
                       <div className="mt-4 grid gap-3">
                         <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
                           <p className="text-xs uppercase tracking-[0.14em] text-muted">Funding</p>
-                          <p className="mt-2 text-sm text-foreground">
+                          <p className="mt-2 text-base text-foreground">
                             {formatCurrency(detail.funding.raisedAmount)} of{" "}
                             {formatCurrency(detail.funding.targetAmount)}
                           </p>
@@ -1327,13 +1360,13 @@ function ReviewerConsole() {
                           <p className="text-xs uppercase tracking-[0.14em] text-muted">
                             Review window
                           </p>
-                          <p className="mt-2 text-sm text-foreground">
+                          <p className="mt-2 text-base text-foreground">
                             {detail.review_window_reason}
                           </p>
                         </div>
                         <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
                           <p className="text-xs uppercase tracking-[0.14em] text-muted">Vote state</p>
-                          <p className="mt-2 text-sm text-foreground">{detail.vote.label}</p>
+                          <p className="mt-2 text-base text-foreground">{detail.vote.label}</p>
                         </div>
                       </div>
                     </article>
@@ -1346,7 +1379,7 @@ function ReviewerConsole() {
                       </p>
                       {selectedArtifactHref ? (
                         <a
-                          className="text-sm text-muted underline underline-offset-4 transition hover:text-foreground"
+                          className="text-base text-muted underline underline-offset-4 transition hover:text-foreground"
                           href={selectedArtifactHref}
                           rel="noreferrer"
                           target="_blank"
@@ -1361,30 +1394,30 @@ function ReviewerConsole() {
                           Artifact preview
                         </p>
                         {isArtifactPreviewLoading ? (
-                          <p className="mt-3 text-sm text-muted">Loading artifact preview…</p>
+                          <p className="mt-3 text-base text-muted">Loading artifact preview…</p>
                         ) : artifactPreviewError ? (
-                          <p className="mt-3 text-sm text-muted">{artifactPreviewError}</p>
+                          <p className="mt-3 text-base text-muted">{artifactPreviewError}</p>
                         ) : artifactPreview ? (
                           <div className="mt-3 space-y-3">
                             {hasVisibleText(artifactPreview.suggestedEditedMarketText) ? (
-                              <p className="text-sm text-foreground">
+                              <p className="text-base text-foreground">
                                 {artifactPreview.suggestedEditedMarketText}
                               </p>
                             ) : null}
                             {hasVisibleText(artifactPreview.clarificationNote) ? (
-                              <p className="text-sm text-muted">
+                              <p className="text-base text-muted">
                                 {artifactPreview.clarificationNote}
                               </p>
                             ) : null}
                             {!hasVisibleText(artifactPreview.suggestedEditedMarketText) &&
                             !hasVisibleText(artifactPreview.clarificationNote) ? (
-                              <p className="text-sm text-muted">
+                              <p className="text-base text-muted">
                                 This clarification answered the question without proposing an edit.
                               </p>
                             ) : null}
                           </div>
                         ) : (
-                          <p className="mt-3 text-sm text-muted">
+                          <p className="mt-3 text-base text-muted">
                             No artifact preview is available for this clarification.
                           </p>
                         )}
@@ -1398,15 +1431,17 @@ function ReviewerConsole() {
                             >
                               <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div>
-                                  <p className="text-sm font-medium text-foreground">
-                                    {entry.contributor}
+                                  <p className="text-base font-medium text-foreground">
+                                    {entry.contributor || entry.reference || "Unknown"}
                                   </p>
-                                  <p className="mt-1 text-xs uppercase tracking-[0.14em] text-muted">
-                                    {entry.reference ?? "No payment reference"}
-                                  </p>
+                                  {entry.reference && entry.contributor && entry.reference !== entry.contributor && (
+                                    <p className="mt-1 text-xs uppercase tracking-[0.14em] text-muted">
+                                      {entry.reference}
+                                    </p>
+                                  )}
                                 </div>
                                 <div className="text-right">
-                                  <p className="text-sm font-medium text-foreground">
+                                  <p className="text-base font-medium text-foreground">
                                     {formatCurrency(entry.amount)}
                                   </p>
                                   <p className="mt-1 text-xs text-muted">
@@ -1417,7 +1452,7 @@ function ReviewerConsole() {
                             </div>
                           ))
                         ) : (
-                          <div className="rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-sm text-muted">
+                          <div className="rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-base text-muted">
                             No funding history is recorded yet.
                           </div>
                         )}
@@ -1454,7 +1489,7 @@ function ReviewerConsole() {
                     </div>
                     <div className="mt-4 rounded-[1.4rem] border border-border-low bg-bg1/80 p-4">
                       <p className="text-xs uppercase tracking-[0.16em] text-muted">Market text</p>
-                      <p className="mt-3 text-sm leading-7 text-foreground">
+                      <p className="mt-3 text-base leading-7 text-foreground">
                         {prelaunchDetail.description ??
                           prelaunchDetail.resolutionText ??
                           "No market text cached for this market."}
@@ -1463,13 +1498,13 @@ function ReviewerConsole() {
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
                       <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
                         <p className="text-xs uppercase tracking-[0.14em] text-muted">Category</p>
-                        <p className="mt-2 text-sm text-foreground">
+                        <p className="mt-2 text-base text-foreground">
                           {prelaunchDetail.category ?? "Uncategorized"}
                         </p>
                       </div>
                       <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
                         <p className="text-xs uppercase tracking-[0.14em] text-muted">Window</p>
-                        <p className="mt-2 text-sm text-foreground">
+                        <p className="mt-2 text-base text-foreground">
                           Starts {formatOptionalTimestamp(prelaunchDetail.effectiveDate)}
                           <br />
                           Ends{" "}
@@ -1482,7 +1517,7 @@ function ReviewerConsole() {
                     <div className="mt-4 flex flex-wrap gap-3">
                       {prelaunchDetail.url ? (
                         <a
-                          className="text-sm text-muted underline underline-offset-4 transition hover:text-foreground"
+                          className="text-base text-muted underline underline-offset-4 transition hover:text-foreground"
                           href={prelaunchDetail.url}
                           rel="noreferrer"
                           target="_blank"
@@ -1492,7 +1527,7 @@ function ReviewerConsole() {
                       ) : null}
                       {prelaunchDetail.termsLink ? (
                         <a
-                          className="text-sm text-muted underline underline-offset-4 transition hover:text-foreground"
+                          className="text-base text-muted underline underline-offset-4 transition hover:text-foreground"
                           href={prelaunchDetail.termsLink}
                           rel="noreferrer"
                           target="_blank"
@@ -1517,7 +1552,7 @@ function ReviewerConsole() {
                           </p>
                         </div>
                         <button
-                          className="rounded-full bg-foreground px-4 py-2 text-sm text-background transition disabled:opacity-60"
+                          className="rounded-full bg-foreground px-4 py-2 text-base text-background transition disabled:opacity-60"
                           disabled={prelaunchScanTargetId === selectedPrelaunchEventId}
                           onClick={() =>
                             selectedPrelaunchEventId
@@ -1537,7 +1572,7 @@ function ReviewerConsole() {
                             <p className="text-xs uppercase tracking-[0.14em] text-muted">
                               Score
                             </p>
-                            <p className="mt-2 text-sm text-foreground">
+                            <p className="mt-2 text-base text-foreground">
                               {formatAmbiguityScore(prelaunchLatestScan.ambiguityScore)}
                             </p>
                           </div>
@@ -1545,7 +1580,7 @@ function ReviewerConsole() {
                             <p className="text-xs uppercase tracking-[0.14em] text-muted">
                               Recommendation
                             </p>
-                            <p className="mt-2 text-sm text-foreground">
+                            <p className="mt-2 text-base text-foreground">
                               {formatQueueStateLabel(prelaunchLatestScan.recommendation)}
                             </p>
                           </div>
@@ -1553,13 +1588,13 @@ function ReviewerConsole() {
                             <p className="text-xs uppercase tracking-[0.14em] text-muted">
                               Reason
                             </p>
-                            <p className="mt-2 text-sm text-foreground">
+                            <p className="mt-2 text-base text-foreground">
                               {prelaunchLatestScan.reviewWindow.review_window_reason}
                             </p>
                           </div>
                         </div>
                       ) : (
-                        <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-sm text-muted">
+                        <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-base text-muted">
                           This market has not been scanned yet.
                         </div>
                       )}
@@ -1576,7 +1611,7 @@ function ReviewerConsole() {
                             >
                               <div className="flex flex-wrap items-start justify-between gap-3">
                                 <div>
-                                  <p className="text-sm font-medium text-foreground">
+                                  <p className="text-base font-medium text-foreground">
                                     {contract.label ?? "Unnamed contract"}
                                   </p>
                                   <p className="mt-1 text-xs uppercase tracking-[0.14em] text-muted">
@@ -1589,7 +1624,7 @@ function ReviewerConsole() {
                                   </span>
                                 ) : null}
                               </div>
-                              <p className="mt-3 text-sm leading-6 text-muted">
+                              <p className="mt-3 text-base leading-7 text-muted">
                                 {contract.description ?? "No contract description cached."}
                               </p>
                               <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -1597,7 +1632,7 @@ function ReviewerConsole() {
                                   <p className="text-xs uppercase tracking-[0.14em] text-muted">
                                     Expiry
                                   </p>
-                                  <p className="mt-2 text-sm text-foreground">
+                                  <p className="mt-2 text-base text-foreground">
                                     {formatOptionalTimestamp(contract.expiryDate)}
                                   </p>
                                 </div>
@@ -1605,7 +1640,7 @@ function ReviewerConsole() {
                                   <p className="text-xs uppercase tracking-[0.14em] text-muted">
                                     Price
                                   </p>
-                                  <p className="mt-2 text-sm text-foreground">
+                                  <p className="mt-2 text-base text-foreground">
                                     {formatContractPriceSummary(contract.prices)}
                                   </p>
                                 </div>
@@ -1614,7 +1649,7 @@ function ReviewerConsole() {
                           ))}
                         </div>
                       ) : (
-                        <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-sm text-muted">
+                        <div className="mt-4 rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-base text-muted">
                           No contracts were cached for this upcoming market.
                         </div>
                       )}
@@ -1937,15 +1972,65 @@ function FooterStrip() {
 
 function PublicConsole() {
   const initialSession = useMemo(() => loadStoredSession(PUBLIC_SESSION_STORAGE_KEY), []);
-  const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl);
+  const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl || "http://127.0.0.1:3000");
   const [apiBaseUrl, setApiBaseUrl] = useState(initialSession.apiBaseUrl);
   const [draftEventId, setDraftEventId] = useState("4020");
   const [draftQuestion, setDraftQuestion] = useState(
     "If the NBER formally declares a recession before the deadline but no two consecutive quarters of negative GDP appear in the BEA advance estimates, does this market resolve Yes or No?"
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPaying, setIsPaying] = useState(false);
   const [intakeState, setIntakeState] = useState<IntakeResponseState | null>(null);
+  const [clarificationResult, setClarificationResult] = useState<PublicClarificationResult | null>(null);
+  const [isClarificationPolling, setIsClarificationPolling] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const walletSession = useWalletSession();
+  const { connectors, connect, connecting } = useWalletConnection();
+
+  useEffect(() => {
+    if (intakeState?.kind !== "accepted" || !intakeState.payload.clarificationId) {
+      setClarificationResult(null);
+      return;
+    }
+
+    const clarificationId = intakeState.payload.clarificationId;
+    let cancelled = false;
+
+    async function poll() {
+      setIsClarificationPolling(true);
+
+      while (!cancelled) {
+        try {
+          const path = `/api/clarifications/${encodeURIComponent(clarificationId)}?wait=true&timeoutMs=10000`;
+          const endpoint = apiBaseUrl ? new URL(path, apiBaseUrl) : path;
+          const res = await fetch(endpoint.toString());
+          if (cancelled) break;
+
+          if (!res.ok) break;
+
+          const data = await res.json();
+          if (cancelled) break;
+
+          const result: PublicClarificationResult = data.clarification;
+          setClarificationResult(result);
+
+          if (result.status === "completed" || result.status === "failed") break;
+        } catch {
+          if (cancelled) break;
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+
+      if (!cancelled) setIsClarificationPolling(false);
+    }
+
+    poll();
+
+    return () => {
+      cancelled = true;
+      setIsClarificationPolling(false);
+    };
+  }, [intakeState, apiBaseUrl]);
 
   function savePublicApiBaseUrl(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1984,6 +2069,8 @@ function PublicConsole() {
         setIntakeState({
           kind: "payment_required",
           eventId: draftEventId.trim(),
+          question: draftQuestion.trim(),
+          endpoint: endpoint.toString(),
           payload
         });
         return;
@@ -2014,6 +2101,66 @@ function PublicConsole() {
     }
   }
 
+  async function payWithWallet() {
+    if (!walletSession || intakeState?.kind !== "payment_required") return;
+    const requirements = intakeState.payload.paymentRequirements?.[0];
+    if (!requirements) return;
+
+    setIsPaying(true);
+    try {
+      const { signer } = createWalletTransactionSigner(walletSession);
+      const rpcUrl = requirements.network === "solana"
+        ? "https://api.mainnet-beta.solana.com"
+        : "https://api.devnet.solana.com";
+      const payment = await exact.svm.createAndSignPayment(
+        signer,
+        requirements.x402Version ?? 1,
+        requirements as Parameters<typeof exact.svm.createAndSignPayment>[2],
+        { svmConfig: { rpcUrl } }
+      );
+      const paymentWithAccepted = { ...payment, accepted: requirements };
+      const encoded = btoa(JSON.stringify(paymentWithAccepted));
+
+      const response = await fetch(intakeState.endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "payment-signature": encoded
+        },
+        body: JSON.stringify({ question: intakeState.question })
+      });
+      const payload = await response.json();
+
+      if (response.ok) {
+        setIntakeState({
+          kind: "accepted",
+          eventId: intakeState.eventId,
+          payload
+        });
+      } else {
+        setIntakeState({
+          kind: "error",
+          eventId: intakeState.eventId,
+          message: payload?.error?.message ?? "Payment verification failed."
+        });
+      }
+    } catch (error) {
+      console.error("Payment error:", error);
+      if (error instanceof Error && "cause" in error) console.error("Cause:", (error as Error & { cause: unknown }).cause);
+      const raw = error instanceof Error ? error.message : "Payment failed.";
+      const isSimulation = raw.toLowerCase().includes("simulat");
+      setIntakeState({
+        kind: "error",
+        eventId: intakeState.eventId,
+        message: isSimulation
+          ? "Transaction simulation failed. Your wallet likely has no devnet USDC. Fund it at faucet.circle.com (select Solana Devnet) or via the Phantom devnet airdrop tool."
+          : raw
+      });
+    } finally {
+      setIsPaying(false);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-bg1 text-foreground">
       {isSettingsOpen ? (
@@ -2023,7 +2170,7 @@ function PublicConsole() {
           title="Connection"
         >
           <form className="grid gap-4" onSubmit={savePublicApiBaseUrl}>
-            <label className="grid gap-2 text-sm">
+            <label className="grid gap-2 text-base">
               <span className="text-muted">Backend API base URL</span>
               <input
                 className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
@@ -2034,7 +2181,7 @@ function PublicConsole() {
             </label>
             <div className="flex flex-wrap gap-3">
               <button
-                className="rounded-full bg-foreground px-5 py-3 text-sm font-medium text-background transition hover:translate-y-[-1px]"
+                className="rounded-full bg-foreground px-5 py-3 text-base font-medium text-background transition hover:translate-y-[-1px]"
                 disabled={!draftApiBaseUrl.trim()}
                 type="submit"
               >
@@ -2123,14 +2270,100 @@ function PublicConsole() {
                             </p>
                           </div>
                         ))}
+                        {walletSession ? (
+                          <button
+                            className="w-full rounded-full bg-foreground px-5 py-3.5 text-base font-medium text-background transition hover:translate-y-[-1px] disabled:opacity-60"
+                            disabled={isPaying}
+                            onClick={payWithWallet}
+                            type="button"
+                          >
+                            {isPaying ? "Signing & submitting…" : `Pay ${(Number(intakeState.payload.paymentRequirements?.[0]?.amount ?? 0) / 1_000_000).toFixed(2)} USDC`}
+                          </button>
+                        ) : (
+                          <div className="space-y-2">
+                            <p className="text-base text-muted">Connect a wallet to pay:</p>
+                            <div className="flex flex-wrap gap-2">
+                              {connectors.map((connector) => (
+                                <button
+                                  key={connector.id}
+                                  className="flex items-center gap-2 rounded-full border border-border-low bg-card px-4 py-2.5 text-base text-foreground transition hover:border-border-strong disabled:opacity-60"
+                                  disabled={connecting}
+                                  onClick={() => connect(connector.id)}
+                                  type="button"
+                                >
+                                  {connector.icon ? (
+                                    <img alt="" className="h-4 w-4 rounded-sm" src={connector.icon} />
+                                  ) : null}
+                                  {connector.name}
+                                </button>
+                              ))}
+                              {connectors.length === 0 ? (
+                                <p className="text-base text-muted">No wallets detected. Install Phantom or Backpack.</p>
+                              ) : null}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : null}
                     {intakeState.kind === "accepted" ? (
                       <div className="mt-4 space-y-3">
                         <p className="text-2xl font-semibold text-foreground">Request accepted</p>
-                        <p className="text-base text-muted">
-                          Clarification ID {intakeState.payload.clarificationId ?? "pending"} with
-                          status {intakeState.payload.status ?? "processing"}.
+                        {!clarificationResult || clarificationResult.status === "queued" || clarificationResult.status === "processing" ? (
+                          <div className="flex items-center gap-3 rounded-2xl border border-border-low bg-bg1/80 px-4 py-3">
+                            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-foreground/40" />
+                            <p className="text-base text-muted">
+                              {clarificationResult?.status === "processing"
+                                ? "Oracle is running LLM analysis…"
+                                : "Queued for processing…"}
+                            </p>
+                          </div>
+                        ) : null}
+                        {clarificationResult?.status === "completed" && clarificationResult.llmOutput ? (
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-foreground/10 px-3 py-1 text-sm font-medium text-foreground">
+                                <span className="h-1.5 w-1.5 rounded-full bg-foreground" />
+                                {clarificationResult.llmOutput.verdict}
+                              </span>
+                              <span className="text-sm text-muted">
+                                Ambiguity {clarificationResult.llmOutput.ambiguity_score.toFixed(2)}
+                              </span>
+                            </div>
+                            {clarificationResult.llmOutput.ambiguity_summary ? (
+                              <p className="text-base text-foreground">{clarificationResult.llmOutput.ambiguity_summary}</p>
+                            ) : null}
+                            {clarificationResult.llmOutput.reasoning ? (
+                              <div className="rounded-2xl border border-border-low bg-bg1/80 p-4">
+                                <p className="mb-1 text-xs uppercase tracking-[0.18em] text-muted">Reasoning</p>
+                                <p className="text-base text-muted">{clarificationResult.llmOutput.reasoning}</p>
+                              </div>
+                            ) : null}
+                            {clarificationResult.llmOutput.cited_clause ? (
+                              <div className="rounded-2xl border border-border-low bg-bg1/80 p-4">
+                                <p className="mb-1 text-xs uppercase tracking-[0.18em] text-muted">Cited clause</p>
+                                <p className="text-base text-muted">{clarificationResult.llmOutput.cited_clause}</p>
+                              </div>
+                            ) : null}
+                            {clarificationResult.llmOutput.suggested_market_text ? (
+                              <div className="rounded-2xl border border-border-low bg-bg1/80 p-4">
+                                <p className="mb-1 text-xs uppercase tracking-[0.18em] text-muted">Suggested resolution text</p>
+                                <p className="text-base text-muted">{clarificationResult.llmOutput.suggested_market_text}</p>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {clarificationResult?.status === "failed" ? (
+                          <div className="rounded-2xl border border-border-low bg-bg1/80 p-4">
+                            <p className="text-base text-muted">
+                              {clarificationResult.errorMessage ?? "The oracle pipeline failed to process this request."}
+                            </p>
+                          </div>
+                        ) : null}
+                        <p className="text-xs text-muted">
+                          ID: {intakeState.payload.clarificationId ?? "pending"}
+                          {clarificationResult && clarificationResult.status !== "queued" && clarificationResult.status !== "processing"
+                            ? ` · ${clarificationResult.status}`
+                            : isClarificationPolling ? " · live" : ""}
                         </p>
                       </div>
                     ) : null}

@@ -98,7 +98,7 @@ async function main() {
     }
   };
   const paymentPayload = await client.createPaymentPayload({
-    x402Version: 2,
+    x402Version: requirement.x402Version ?? 1,
     accepts: [requirement],
     resource: requirement.resource,
     extensions: {}

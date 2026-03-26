@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { FileCategoryCatalogRepository } from "../category-catalog-repository.js";
 import { FileMarketCacheRepository } from "../market-cache-repository.js";
 import {
