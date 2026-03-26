@@ -262,6 +262,7 @@ type PublicClarificationResult = {
 
 const REVIEWER_SESSION_STORAGE_KEY = "gemini-reviewer-session";
 const PUBLIC_SESSION_STORAGE_KEY = "signal-public-session";
+const PUBLIC_INTAKE_STATE_KEY = "signal-public-intake";
 
 function loadStoredSession(key: string) {
   if (typeof window === "undefined") {
@@ -310,6 +311,28 @@ function friendlyFetchError(error: unknown, baseUrl: string, fallback: string): 
     return `Could not reach backend at ${baseUrl}. Is the server running?`;
   }
   return msg || fallback;
+}
+
+function loadStoredIntakeState(): (IntakeResponseState & { kind: "accepted" }) | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PUBLIC_INTAKE_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.kind !== "accepted" || !parsed?.payload?.clarificationId) return null;
+    return parsed as IntakeResponseState & { kind: "accepted" };
+  } catch {
+    return null;
+  }
+}
+
+function persistIntakeState(state: IntakeResponseState | null) {
+  if (typeof window === "undefined") return;
+  if (state?.kind === "accepted" && state.payload.clarificationId) {
+    window.localStorage.setItem(PUBLIC_INTAKE_STATE_KEY, JSON.stringify(state));
+  } else {
+    window.localStorage.removeItem(PUBLIC_INTAKE_STATE_KEY);
+  }
 }
 
 function clearStoredSession(key: string) {
@@ -491,12 +514,12 @@ function ReviewerConsole() {
   );
   const defaultedSession = useMemo(() => ({
     apiBaseUrl: initialSession.apiBaseUrl || "http://127.0.0.1:3000",
-    reviewerToken: initialSession.reviewerToken || "demo-reviewer-token"
+    reviewerToken: initialSession.reviewerToken || ""
   }), [initialSession]);
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(defaultedSession.apiBaseUrl);
   const [draftReviewerToken, setDraftReviewerToken] = useState(defaultedSession.reviewerToken);
   const [session, setSession] = useState(defaultedSession);
-  const [reviewerSurface, setReviewerSurface] = useState<ReviewerSurface>("prelaunch");
+  const [reviewerSurface, setReviewerSurface] = useState<ReviewerSurface>("active");
   const [activeFilter, setActiveFilter] = useState("all");
   const [queueResponse, setQueueResponse] = useState<ReviewerQueueResponse | null>(null);
   const [prelaunchQueueResponse, setPrelaunchQueueResponse] =
@@ -845,7 +868,7 @@ function ReviewerConsole() {
   function clearReviewer() {
     clearStoredSession(REVIEWER_SESSION_STORAGE_KEY);
     setDraftApiBaseUrl("http://127.0.0.1:3000");
-    setDraftReviewerToken("demo-reviewer-token");
+    setDraftReviewerToken("");
     setSession({ apiBaseUrl: "", reviewerToken: "" });
     setQueueResponse(null);
     setPrelaunchQueueResponse(null);
@@ -872,11 +895,11 @@ function ReviewerConsole() {
     setPrelaunchDetailErrorMessage(null);
 
     try {
-      const endpoint = new URL(
+      const scanEndpoint = new URL(
         `/api/reviewer/prelaunch/scan/${encodeURIComponent(eventId)}`,
         session.apiBaseUrl
       );
-      const response = await fetch(endpoint, {
+      const response = await fetch(scanEndpoint, {
         method: "POST",
         headers: {
           "x-reviewer-token": session.reviewerToken
@@ -888,7 +911,28 @@ function ReviewerConsole() {
         throw new Error(payload?.error?.message ?? "Upcoming scan could not be started.");
       }
 
-      refreshReviewerData();
+      // Job accepted — poll the detail endpoint until a scan result appears (up to 60s)
+      const detailEndpoint = new URL(
+        `/api/reviewer/prelaunch/markets/${encodeURIComponent(eventId)}`,
+        session.apiBaseUrl
+      );
+      for (let attempt = 0; attempt < 30; attempt++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        try {
+          const detailRes = await fetch(detailEndpoint, {
+            headers: { "x-reviewer-token": session.reviewerToken }
+          });
+          if (detailRes.ok) {
+            const detailData = await detailRes.json();
+            if (detailData?.latestScan?.scanId) {
+              refreshReviewerData();
+              break;
+            }
+          }
+        } catch {
+          // keep polling
+        }
+      }
     } catch (error) {
       setPrelaunchDetailErrorMessage(
         error instanceof Error ? error.message : "Upcoming scan could not be started."
@@ -954,11 +998,11 @@ function ReviewerConsole() {
               />
             </label>
             <label className="grid gap-2 text-base">
-              <span className="text-muted">Reviewer auth token</span>
+              <span className="text-muted">Reviewer token</span>
               <input
                 className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
                 onChange={(event) => setDraftReviewerToken(event.target.value)}
-                placeholder="demo-reviewer-token"
+                placeholder="reviewer-token"
                 type="password"
                 value={draftReviewerToken}
               />
@@ -1043,17 +1087,19 @@ function ReviewerConsole() {
 
             {/* Filter / category chips */}
             {reviewerSurface === "active" ? (
-              <div className="flex flex-wrap gap-2 border-b border-border-low px-5 py-3">
+              <div data-testid="reviewer-filter-list" className="flex flex-wrap gap-2 border-b border-border-low px-5 py-3">
                 <button
+                  data-testid="filter-all"
                   className={`rounded-full px-3 py-1.5 text-sm transition ${activeFilter === "all" ? "bg-foreground text-background" : "border border-border-low text-muted"}`}
                   onClick={() => setActiveFilter("all")}
                   type="button"
                 >
-                  All
+                  All markets
                 </button>
                 {filters.map((filter) => (
                   <button
                     key={filter.key}
+                    data-testid={`filter-${filter.key}`}
                     className={`rounded-full px-3 py-1.5 text-sm transition ${activeFilter === filter.key ? "bg-foreground text-background" : "border border-border-low text-muted"}`}
                     onClick={() => setActiveFilter(filter.key)}
                     type="button"
@@ -1074,9 +1120,37 @@ function ReviewerConsole() {
 
             {/* Queue list */}
             <div className="space-y-3 p-4">
-              {!session.apiBaseUrl || !session.reviewerToken ? (
-                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-base leading-7 text-muted">
-                  Add reviewer credentials to load queue data.
+              {!session.reviewerToken ? (
+                <div data-testid="reviewer-session-blocked" className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 space-y-4">
+                  <p className="text-base text-muted">Enter reviewer credentials to unlock the queue</p>
+                  <form className="grid gap-3" onSubmit={connectReviewer}>
+                    <label className="grid gap-1.5 text-sm">
+                      <span className="text-muted">Backend API base URL</span>
+                      <input
+                        className="rounded-xl border border-border-low bg-card px-3 py-2 text-base outline-none transition focus:border-border-strong"
+                        onChange={(event) => setDraftApiBaseUrl(event.target.value)}
+                        placeholder="http://127.0.0.1:3000"
+                        value={draftApiBaseUrl}
+                      />
+                    </label>
+                    <label className="grid gap-1.5 text-sm">
+                      <span className="text-muted">Reviewer token</span>
+                      <input
+                        className="rounded-xl border border-border-low bg-card px-3 py-2 text-base outline-none transition focus:border-border-strong"
+                        onChange={(event) => setDraftReviewerToken(event.target.value)}
+                        placeholder="reviewer-token"
+                        type="password"
+                        value={draftReviewerToken}
+                      />
+                    </label>
+                    <button
+                      className="rounded-full bg-foreground px-4 py-2.5 text-base font-medium text-background transition disabled:opacity-60"
+                      disabled={!draftApiBaseUrl.trim() || !draftReviewerToken.trim()}
+                      type="submit"
+                    >
+                      Load reviewer queue
+                    </button>
+                  </form>
                 </div>
               ) : null}
 
@@ -1087,7 +1161,7 @@ function ReviewerConsole() {
                 <div className="py-4 text-base text-muted">Loading upcoming queue…</div>
               ) : null}
               {reviewerSurface === "active" && errorMessage ? (
-                <div className="rounded-[1.6rem] border border-border-low bg-card p-4 text-base text-muted">
+                <div data-testid="reviewer-queue-error" className="rounded-[1.6rem] border border-border-low bg-card p-4 text-base text-muted">
                   {errorMessage}
                 </div>
               ) : null}
@@ -1098,8 +1172,8 @@ function ReviewerConsole() {
               ) : null}
 
               {reviewerSurface === "active" && !isLoading && !errorMessage && activeQueue.length === 0 ? (
-                <div className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-base leading-7 text-muted">
-                  No live markets match the current filter.
+                <div data-testid="reviewer-empty-state" className="rounded-[1.6rem] border border-dashed border-border-low bg-card/60 p-5 text-base leading-7 text-muted">
+                  No markets match the current filter.
                 </div>
               ) : null}
 
@@ -1117,6 +1191,7 @@ function ReviewerConsole() {
                   {activeQueue.map((item) => (
                     <article
                       key={item.eventId}
+                      data-testid={`queue-item-${item.eventId}`}
                       className={`rounded-[1.6rem] border p-4 transition ${
                         item.latestClarificationId &&
                         item.latestClarificationId === selectedClarificationId
@@ -1145,6 +1220,7 @@ function ReviewerConsole() {
                       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border-low pt-3">
                         <p className="text-xs text-muted">{formatOptionalTimestamp(item.endTime)}</p>
                         <button
+                          data-testid={`open-detail-${item.eventId}`}
                           className="rounded-full border border-border-low px-3 py-1.5 text-base text-muted transition hover:text-foreground disabled:opacity-50"
                           disabled={!item.latestClarificationId}
                           onClick={() => setSelectedClarificationId(item.latestClarificationId)}
@@ -1238,15 +1314,15 @@ function ReviewerConsole() {
             ) : null}
 
             {reviewerSurface === "active" && !detail && !isDetailLoading && !detailErrorMessage ? (
-              <div className="flex min-h-[32rem] flex-col items-center justify-center gap-4 p-10 text-center">
+              <div data-testid="reviewer-detail-empty" className="flex min-h-[32rem] flex-col items-center justify-center gap-4 p-10 text-center">
                 <span className="text-muted/30">
                   <svg aria-hidden="true" className="h-12 w-12" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.2" />
                     <circle cx="12" cy="12" r="3" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.2" />
                   </svg>
                 </span>
-                <h3 className="font-display text-[1.6rem] leading-none text-foreground/60">Select a clarification</h3>
-                <p className="max-w-xs text-base leading-7 text-muted">Choose a live clarification from the queue to inspect its wording, funding, and oracle output.</p>
+                <h3 className="font-display text-[1.6rem] leading-none text-foreground/60">Pick a queue item with a paid clarification</h3>
+                <p className="max-w-xs text-base leading-7 text-muted">Choose a live clarification from the queue to inspect its wording, payment, and oracle output.</p>
               </div>
             ) : null}
 
@@ -1264,8 +1340,8 @@ function ReviewerConsole() {
             ) : null}
 
             {reviewerSurface === "active" && detail ? (
-                <div className="grid gap-5">
-                  <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                <div data-testid="reviewer-detail-panel" className="grid gap-5">
+                  <article data-testid="reviewer-market-section" className="rounded-[1.6rem] border border-border-low bg-card p-5">
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
                         <p className="text-xs uppercase tracking-[0.18em] text-muted">
@@ -1304,7 +1380,7 @@ function ReviewerConsole() {
                   </article>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                    <article data-testid="reviewer-llm-section" className="rounded-[1.6rem] border border-border-low bg-card p-5">
                       <p className="text-xs uppercase tracking-[0.18em] text-muted">
                         Interpretation
                       </p>
@@ -1321,7 +1397,7 @@ function ReviewerConsole() {
                           {hasVisibleText(detail.llmOutput.suggested_market_text) ? (
                             <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
                               <p className="text-xs uppercase tracking-[0.14em] text-muted">
-                                Suggested wording
+                                Suggested edited market text
                               </p>
                               <p className="mt-2 text-base leading-7 text-foreground">
                                 {detail.llmOutput.suggested_market_text}
@@ -1347,10 +1423,10 @@ function ReviewerConsole() {
                     </article>
 
                     <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
-                      <p className="text-xs uppercase tracking-[0.18em] text-muted">Funding + Review</p>
+                      <p className="text-xs uppercase tracking-[0.18em] text-muted">Payment + Review</p>
                       <div className="mt-4 grid gap-3">
                         <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
-                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Funding</p>
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Payment</p>
                           <p className="mt-2 text-base text-foreground">
                             {formatCurrency(detail.funding.raisedAmount)} of{" "}
                             {formatCurrency(detail.funding.targetAmount)}
@@ -1364,7 +1440,7 @@ function ReviewerConsole() {
                             {detail.review_window_reason}
                           </p>
                         </div>
-                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                        <div data-testid="reviewer-vote-section" className="rounded-2xl border border-border-low bg-bg1/80 p-3">
                           <p className="text-xs uppercase tracking-[0.14em] text-muted">Vote state</p>
                           <p className="mt-2 text-base text-foreground">{detail.vote.label}</p>
                         </div>
@@ -1372,11 +1448,16 @@ function ReviewerConsole() {
                     </article>
                   </div>
 
-                  <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                  <article data-testid="reviewer-artifact-section" className="rounded-[1.6rem] border border-border-low bg-card p-5">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-xs uppercase tracking-[0.18em] text-muted">
-                        Artifact + contribution trace
-                      </p>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-muted">
+                          Artifact + contribution trace
+                        </p>
+                        {detail.artifact?.cid ? (
+                          <p className="mt-1 font-mono text-xs text-muted">{detail.artifact.cid}</p>
+                        ) : null}
+                      </div>
                       {selectedArtifactHref ? (
                         <a
                           className="text-base text-muted underline underline-offset-4 transition hover:text-foreground"
@@ -1422,7 +1503,7 @@ function ReviewerConsole() {
                           </p>
                         )}
                       </div>
-                      <div className="grid gap-3">
+                      <div data-testid="reviewer-funding-history-section" className="grid gap-3">
                         {detail.funding.history.length > 0 ? (
                           detail.funding.history.map((entry) => (
                             <div
@@ -1453,12 +1534,36 @@ function ReviewerConsole() {
                           ))
                         ) : (
                           <div className="rounded-2xl border border-dashed border-border-low bg-bg1/80 p-4 text-base text-muted">
-                            No funding history is recorded yet.
+                            No payment history is recorded yet.
                           </div>
                         )}
                       </div>
                     </div>
                   </article>
+
+                  {detail.llmTrace ? (
+                    <article data-testid="reviewer-trace-section" className="rounded-[1.6rem] border border-border-low bg-card p-5">
+                      <p className="text-xs uppercase tracking-[0.18em] text-muted">LLM Trace</p>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Template version</p>
+                          <p className="mt-2 text-base text-foreground">{detail.llmTrace.promptTemplateVersion}</p>
+                        </div>
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Model</p>
+                          <p className="mt-2 text-base text-foreground">{detail.llmTrace.modelId}</p>
+                        </div>
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Requested at</p>
+                          <p className="mt-2 text-base text-foreground">{formatOptionalTimestamp(detail.llmTrace.requestedAt)}</p>
+                        </div>
+                        <div className="rounded-2xl border border-border-low bg-bg1/80 p-3">
+                          <p className="text-xs uppercase tracking-[0.14em] text-muted">Processing version</p>
+                          <p className="mt-2 text-base text-foreground">{detail.llmTrace.processingVersion}</p>
+                        </div>
+                      </div>
+                    </article>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -1980,7 +2085,11 @@ function PublicConsole() {
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
-  const [intakeState, setIntakeState] = useState<IntakeResponseState | null>(null);
+  const [intakeState, setIntakeStateRaw] = useState<IntakeResponseState | null>(() => loadStoredIntakeState());
+  const setIntakeState = (state: IntakeResponseState | null) => {
+    persistIntakeState(state);
+    setIntakeStateRaw(state);
+  };
   const [clarificationResult, setClarificationResult] = useState<PublicClarificationResult | null>(null);
   const [isClarificationPolling, setIsClarificationPolling] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -2015,6 +2124,9 @@ function PublicConsole() {
           setClarificationResult(result);
 
           if (result.status === "completed" || result.status === "failed") break;
+
+          // Wait before polling again to avoid busy-polling
+          await new Promise((r) => setTimeout(r, 2000));
         } catch {
           if (cancelled) break;
           await new Promise((r) => setTimeout(r, 2000));

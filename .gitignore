@@ -5,3 +5,4 @@ offchain-backend/node_modules/
 skills-lock.json
 **/.env
 .env.demo
+smoke-test-report/

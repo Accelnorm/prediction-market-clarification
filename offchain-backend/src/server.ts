@@ -583,7 +583,7 @@ function buildClarificationAuditPayload({ clarification, artifact }: { clarifica
 const REVIEWER_QUEUE_FILTERS = [
   { key: "needs_scan", label: "Needs Scan" },
   { key: "high_ambiguity", label: "High Ambiguity" },
-  { key: "funded", label: "Funded" },
+  { key: "paid", label: "Paid" },
   { key: "near_expiry", label: "Near Expiry" },
   { key: "awaiting_panel_vote", label: "Awaiting Panel Vote" },
   { key: "finalized", label: "Finalized" }
@@ -669,7 +669,7 @@ function buildQueueStates({ latestScan, fundingProgress, reviewWindow, voteStatu
   }
 
   if (fundingProgress.fundingState !== "unfunded") {
-    queueStates.push("funded");
+    queueStates.push("paid");
   }
 
   if (["lt_6h", "lt_24h"].includes(reviewWindow.time_to_end_bucket)) {
@@ -1147,6 +1147,11 @@ export function createServer({
       const failedAt = now().toISOString();
       const pipelineErrorMessage = pipelineError instanceof Error ? pipelineError.message : String(pipelineError);
 
+      console.error(
+        `[clarification_pipeline] job ${job.jobId} failed for clarification ${job.target.clarificationId}:`,
+        pipelineErrorMessage
+      );
+
       await clarificationRequestRepository.updateByClarificationId(job.target.clarificationId as string, {
         status: "failed",
         updatedAt: failedAt,
@@ -1191,11 +1196,18 @@ export function createServer({
         }
       });
     } catch (scanError: unknown) {
+      const scanErrorMessage = scanError instanceof Error ? scanError.message : String(scanError);
+
+      console.error(
+        `[reviewer_scan] job ${job.jobId} failed for event ${job.target.eventId}:`,
+        scanErrorMessage
+      );
+
       await backgroundJobRepository?.updateByJobId?.(job.jobId, {
         status: "failed",
         updatedAt: now().toISOString(),
         retryable: true,
-        errorMessage: scanError instanceof Error ? scanError.message : String(scanError),
+        errorMessage: scanErrorMessage,
         result: null
       });
     }
