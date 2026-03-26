@@ -152,6 +152,7 @@ type PrelaunchQueueItem = {
   endTime: string;
   ambiguityScore: number | null;
   needsScan: boolean;
+  globalTerms: boolean;
   latestScanId: string | null;
   reviewWindow: {
     review_window_secs: number;
@@ -167,6 +168,7 @@ type PrelaunchQueueResponse = {
   ok: true;
   queue: PrelaunchQueueItem[];
   availableCategories?: string[];
+  globalTermsUrls?: string[];
 };
 
 type PrelaunchMarketDetailResponse = {
@@ -544,6 +546,7 @@ function ReviewerConsole() {
   const [isArtifactPreviewLoading, setIsArtifactPreviewLoading] = useState(false);
   const [prelaunchScanTargetId, setPrelaunchScanTargetId] = useState<string | null>(null);
   const [isPrelaunchScanAllRunning, setIsPrelaunchScanAllRunning] = useState(false);
+  const [isTogglingSkipScanTerms, setIsTogglingSkipScanTerms] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
@@ -791,6 +794,7 @@ function ReviewerConsole() {
   const filters = queueResponse?.filters ?? [];
   const prelaunchQueue = prelaunchQueueResponse?.queue ?? [];
   const availableCategories = prelaunchQueueResponse?.availableCategories ?? [];
+  const globalTermsUrls = prelaunchQueueResponse?.globalTermsUrls ?? [];
 
   useEffect(() => {
     if (!session.apiBaseUrl || !session.reviewerToken || !selectedArtifactCid) {
@@ -974,7 +978,38 @@ function ReviewerConsole() {
     }
   }
 
+  async function toggleSkipScanTerms(url: string, adding: boolean) {
+    if (!session.apiBaseUrl || !session.reviewerToken || isTogglingSkipScanTerms) return;
+    setIsTogglingSkipScanTerms(true);
+
+    try {
+      const endpoint = new URL("/api/reviewer/prelaunch/skip-scan-terms", session.apiBaseUrl);
+      const response = await fetch(endpoint, {
+        method: adding ? "POST" : "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "x-reviewer-token": session.reviewerToken
+        },
+        body: JSON.stringify({ url })
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error?.message ?? "Could not update skip-scan list.");
+      }
+
+      refreshReviewerData();
+    } catch (error) {
+      setPrelaunchErrorMessage(
+        error instanceof Error ? error.message : "Could not update skip-scan list."
+      );
+    } finally {
+      setIsTogglingSkipScanTerms(false);
+    }
+  }
+
   const openCount = prelaunchQueue.filter((item) => item.needsScan).length;
+  const globalTermsCount = prelaunchQueue.filter((item) => item.globalTerms).length;
   const liveNeedsAttention = activeQueue.filter((item) =>
     item.queueStates.includes("needs_scan") || item.queueStates.includes("high_ambiguity")
   ).length;
@@ -1049,6 +1084,12 @@ function ReviewerConsole() {
               <p className="text-xs uppercase tracking-[0.22em] text-muted">Unscanned</p>
               <p className="mt-1 text-2xl font-semibold text-foreground">{openCount}</p>
             </div>
+            {globalTermsCount > 0 ? (
+              <div className="rounded-[1.2rem] border border-border-low bg-panel/80 px-4 py-3 backdrop-blur">
+                <p className="text-xs uppercase tracking-[0.22em] text-muted">Global terms</p>
+                <p className="mt-1 text-2xl font-semibold text-foreground">{globalTermsCount}</p>
+              </div>
+            ) : null}
             <div className="rounded-[1.2rem] border border-border-low bg-panel/80 px-4 py-3 backdrop-blur">
               <p className="text-xs uppercase tracking-[0.22em] text-muted">Needs attention</p>
               <p className="mt-1 text-2xl font-semibold text-foreground">{liveNeedsAttention}</p>
@@ -1255,7 +1296,11 @@ function ReviewerConsole() {
                             <span className="rounded-full border border-border-low px-2.5 py-0.5 text-xs uppercase tracking-[0.14em] text-muted">
                               {item.category ?? "Uncategorized"}
                             </span>
-                            {item.needsScan ? (
+                            {item.globalTerms ? (
+                              <span className="rounded-full border border-border-low px-2.5 py-0.5 text-xs uppercase tracking-[0.14em] text-muted">
+                                Global terms
+                              </span>
+                            ) : item.needsScan ? (
                               <span className="rounded-full bg-signal/[0.12] px-2.5 py-0.5 text-xs uppercase tracking-[0.14em] text-signal">
                                 Needs scan
                               </span>
@@ -1631,14 +1676,31 @@ function ReviewerConsole() {
                         </a>
                       ) : null}
                       {prelaunchDetail.termsLink ? (
-                        <a
-                          className="text-base text-muted underline underline-offset-4 transition hover:text-foreground"
-                          href={prelaunchDetail.termsLink}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          Open terms
-                        </a>
+                        <>
+                          <a
+                            className="text-base text-muted underline underline-offset-4 transition hover:text-foreground"
+                            href={prelaunchDetail.termsLink}
+                            rel="noreferrer"
+                            target="_blank"
+                          >
+                            Open terms
+                          </a>
+                          {(() => {
+                            const isSkipped = globalTermsUrls.includes(prelaunchDetail.termsLink);
+                            return (
+                              <button
+                                className="text-base text-muted underline underline-offset-4 transition hover:text-foreground disabled:opacity-50"
+                                disabled={isTogglingSkipScanTerms}
+                                onClick={() =>
+                                  void toggleSkipScanTerms(prelaunchDetail.termsLink!, !isSkipped)
+                                }
+                                type="button"
+                              >
+                                {isSkipped ? "Remove from skip-scan list" : "Add to skip-scan list"}
+                              </button>
+                            );
+                          })()}
+                        </>
                       ) : null}
                     </div>
                   </article>

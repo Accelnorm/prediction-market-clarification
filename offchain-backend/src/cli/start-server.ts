@@ -30,6 +30,7 @@ import {
   PostgresVerifiedPaymentRepository
 } from "../postgres-storage.js";
 import { FileReviewerScanRepository } from "../reviewer-scan-repository.js";
+import { FileSkipScanTermsRepository } from "../skip-scan-terms-repository.js";
 import {
   resolveClarificationFinalityConfig,
   resolvePhase2RoutesEnabled,
@@ -121,6 +122,10 @@ async function createStorageRuntime() {
     "UPCOMING_REVIEWER_SCANS_PATH",
     "../../data/upcoming-reviewer-scans.json"
   );
+  const skipScanTermsPath = resolvePathFromEnv(
+    "SKIP_SCAN_TERMS_PATH",
+    "../../data/skip-scan-terms.json"
+  );
 
   return {
     pool: null,
@@ -136,6 +141,7 @@ async function createStorageRuntime() {
     upcomingMarketCacheRepository: new FileMarketCacheRepository(upcomingMarketCachePath),
     upcomingCategoryCatalogRepository: new FileCategoryCatalogRepository(categoryCatalogPath),
     upcomingReviewerScanRepository: new FileReviewerScanRepository(upcomingReviewerScansPath),
+    skipScanTermsRepository: new FileSkipScanTermsRepository(skipScanTermsPath),
     phase1Coordinator: null,
     readinessCheck: async () => ({
       ok: true,

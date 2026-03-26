@@ -705,7 +705,7 @@ function buildReviewerScanListItem(scan: Record<string, unknown>) {
   };
 }
 
-function buildPrelaunchQueueItem({ market, latestScan, now }: { market: Record<string, unknown>; latestScan: Record<string, unknown> | null; now: Date }) {
+function buildPrelaunchQueueItem({ market, latestScan, now, globalTermsUrls }: { market: Record<string, unknown>; latestScan: Record<string, unknown> | null; now: Date; globalTermsUrls: Set<string> }) {
   const reviewWindow =
     latestScan?.review_window ??
     buildAdaptiveReviewWindow({
@@ -718,6 +718,9 @@ function buildPrelaunchQueueItem({ market, latestScan, now }: { market: Record<s
       now
     });
 
+  const termsLink = typeof market.termsLink === "string" ? market.termsLink : null;
+  const globalTerms = termsLink !== null && globalTermsUrls.has(termsLink);
+
   return {
     eventId: market.marketId,
     marketTitle: market.title,
@@ -727,7 +730,8 @@ function buildPrelaunchQueueItem({ market, latestScan, now }: { market: Record<s
     startsAt: market.effectiveDate ?? null,
     endTime: market.closesAt,
     ambiguityScore: latestScan?.ambiguity_score ?? null,
-    needsScan: latestScan === null,
+    needsScan: !globalTerms && latestScan === null,
+    globalTerms,
     latestScanId: latestScan?.scanId ?? null,
     reviewWindow,
     contracts: Array.isArray(market.contracts) ? market.contracts : []
@@ -857,6 +861,12 @@ interface Phase1CoordinatorRepo {
   createPaidClarification: (opts: { clarification: ClarificationRequest; verifiedPayment: VerifiedPayment; backgroundJob: BackgroundJob }) => Promise<{ created: boolean; clarification: ClarificationRequest; job: BackgroundJob | null }>;
 }
 
+interface SkipScanTermsRepo {
+  list: () => Promise<string[]>;
+  add: (url: string) => Promise<string[]>;
+  remove: (url: string) => Promise<string[]>;
+}
+
 interface CreateServerOptions {
   clarificationRequestRepository: ClarificationRequestRepo;
   artifactRepository?: ArtifactRepo | null;
@@ -882,6 +892,7 @@ interface CreateServerOptions {
   x402PaymentConfig?: X402PaymentConfig & Record<string, unknown>;
   verifiedPaymentRepository?: VerifiedPaymentRepo | null;
   phase1Coordinator?: Phase1CoordinatorRepo | null;
+  skipScanTermsRepository?: SkipScanTermsRepo | null;
   verifyX402Payment?: (opts: VerifyClarificationPaymentOptions) => Promise<unknown>;
   buildX402PaymentChallenge?: (opts: BuildPaymentRequirementsOptions) => unknown;
   fetchReviewerMarketSource?: ((eventId: string) => Promise<Record<string, unknown> | null>) | null;
@@ -922,6 +933,7 @@ export function createServer({
   x402PaymentConfig = loadX402PaymentConfig(),
   verifiedPaymentRepository = null,
   phase1Coordinator = null,
+  skipScanTermsRepository = null,
   verifyX402Payment = verifyDefaultClarificationPayment,
   buildX402PaymentChallenge = buildX402PaymentRequiredPayload,
   fetchReviewerMarketSource = null,
@@ -1788,6 +1800,8 @@ export function createServer({
       try {
         const markets = (await upcomingMarketCacheRepository?.list?.()) ?? [];
         const queue: Record<string, unknown>[] = [];
+        const skipTermsUrls = await skipScanTermsRepository?.list?.() ?? [];
+        const globalTermsUrls = new Set(skipTermsUrls);
 
         for (const market of markets) {
           const latestScan =
@@ -1796,7 +1810,8 @@ export function createServer({
             buildPrelaunchQueueItem({
               market,
               latestScan,
-              now: now()
+              now: now(),
+              globalTermsUrls
             })
           );
         }
@@ -1806,7 +1821,8 @@ export function createServer({
         sendJson(response, 200, {
           ok: true,
           queue,
-          availableCategories: availableCategories.categories
+          availableCategories: availableCategories.categories,
+          globalTermsUrls: skipTermsUrls
         });
       } catch (error: unknown) {
         sendJson(response, 500, {
@@ -2144,6 +2160,70 @@ export function createServer({
       return;
     }
 
+    if (request.method === "GET" && requestUrl.pathname === "/api/reviewer/prelaunch/skip-scan-terms") {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const urls = await skipScanTermsRepository?.list?.() ?? [];
+        sendJson(response, 200, { ok: true, urls });
+      } catch (error: unknown) {
+        sendJson(response, 500, { ok: false, error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred." } });
+      }
+
+      return;
+    }
+
+    if (request.method === "POST" && requestUrl.pathname === "/api/reviewer/prelaunch/skip-scan-terms") {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const body = await readJsonBody(request);
+        const url = typeof body?.url === "string" ? body.url.trim() : null;
+
+        if (!url) {
+          sendJson(response, 400, { ok: false, error: { code: "INVALID_URL", message: "A terms URL is required." } });
+          return;
+        }
+
+        const urls = await skipScanTermsRepository?.add?.(url) ?? [];
+        sendJson(response, 200, { ok: true, urls });
+      } catch (error: unknown) {
+        sendJson(response, 500, { ok: false, error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred." } });
+      }
+
+      return;
+    }
+
+    if (request.method === "DELETE" && requestUrl.pathname === "/api/reviewer/prelaunch/skip-scan-terms") {
+      if (!hasReviewerAccess(request, reviewerAuthToken)) {
+        sendReviewerAuthRequired(response);
+        return;
+      }
+
+      try {
+        const body = await readJsonBody(request);
+        const url = typeof body?.url === "string" ? body.url.trim() : null;
+
+        if (!url) {
+          sendJson(response, 400, { ok: false, error: { code: "INVALID_URL", message: "A terms URL is required." } });
+          return;
+        }
+
+        const urls = await skipScanTermsRepository?.remove?.(url) ?? [];
+        sendJson(response, 200, { ok: true, urls });
+      } catch (error: unknown) {
+        sendJson(response, 500, { ok: false, error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred." } });
+      }
+
+      return;
+    }
+
     if (request.method === "POST" && requestUrl.pathname === "/api/reviewer/prelaunch/scan-all") {
       if (!hasReviewerAccess(request, reviewerAuthToken)) {
         sendReviewerAuthRequired(response);
@@ -2151,9 +2231,12 @@ export function createServer({
       }
 
       try {
-        const markets = ((await upcomingMarketCacheRepository?.list?.()) ?? []).filter((market: Record<string, unknown>) =>
-          isFutureUpcomingMarket(market, now())
-        );
+        const skipTermsUrlsForScan = new Set(await skipScanTermsRepository?.list?.() ?? []);
+        const markets = ((await upcomingMarketCacheRepository?.list?.()) ?? []).filter((market: Record<string, unknown>) => {
+          if (!isFutureUpcomingMarket(market, now())) return false;
+          const termsLink = typeof market.termsLink === "string" ? market.termsLink : null;
+          return termsLink === null || !skipTermsUrlsForScan.has(termsLink);
+        });
         const jobs: Record<string, unknown>[] = [];
 
         for (const market of markets) {
