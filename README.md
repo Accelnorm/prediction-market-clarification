@@ -54,7 +54,7 @@ POST /api/clarify/:eventId
 
 The backend pulls live market data from the Gemini Prediction Markets API, processes clarification jobs in a durable background queue with crash recovery, and exposes a public status endpoint for polling.
 
-A reviewer desk lets authorized operators scan upcoming markets for ambiguity before launch.
+A reviewer desk lets authorized operators scan upcoming markets for ambiguity before launch. Markets that share the same standard terms can be put on a persistent skip-scan list so the prelaunch queue does not keep resurfacing duplicate ambiguity reviews.
 
 ---
 
@@ -201,6 +201,8 @@ Prediction market resolution disputes are a recurring cost with no clean solutio
 
 **Telegram intake:** Partly developed — Set `ENABLE_TELEGRAM_ROUTES=1` with a bot token and webhook URL. Telegram is a status-delivery and intake channel only — x402 payment required.
 
+**Shared-terms skip-scan:** Implemented for prelaunch review — reviewers can mark a shared `termsLink` as global standard terms so identical upcoming markets stop generating duplicate scan work.
+
 ---
 
 ## Known Limitations
@@ -211,4 +213,3 @@ Prediction market resolution disputes are a recurring cost with no clean solutio
 - **No database migration system.** Schema changes require manual SQL; there is no migration framework.
 
 ---
-

@@ -267,13 +267,15 @@ Then verify both surfaces.
 3. Pick an event and click `Inspect`.
 4. Click `Run scan`.
 5. Confirm the detail panel updates with score, recommendation, and reason.
-6. Optionally run `Scan all upcoming` once.
+6. If a market uses shared standard terms, verify the UI can show or toggle the `Global terms` / skip-scan state.
+7. Optionally run `Scan all upcoming` once.
 
 Pass criteria:
 
 - Queue loads with no auth error.
 - Inspect works.
 - Running a scan creates or refreshes a stored result.
+- Shared-terms markets can be suppressed from repeated scan work when appropriate.
 - The UI remains usable after refresh.
 
 ### Live clarifications surface

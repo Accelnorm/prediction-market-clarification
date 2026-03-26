@@ -2,6 +2,8 @@
 
 This service exposes the Phase 1 paid clarification API, market sync jobs, health endpoints, and optional Telegram routes. Non-Phase-1 reviewer and crowdfunding routes remain available only when `ENABLE_PHASE2_REVIEWER_ROUTES=1`.
 
+Recent reviewer additions include prelaunch market scans for upcoming markets and a persistent skip-scan list for shared standard `termsLink` URLs, so operators can suppress duplicate reviews for markets that inherit the same global terms.
+
 ## Gemini API Usage
 
 The backend currently uses these Gemini endpoints:
@@ -110,6 +112,13 @@ cp .env.example .env
 
 The root env template includes `REVIEWER_AUTH_TOKEN=demo-reviewer-token`, and the demo compose file enables reviewer routes by default so the reviewer and prelaunch flows are immediately testable.
 
+When reviewer routes are enabled, the prelaunch surface also supports:
+
+- `GET /api/reviewer/prelaunch/queue`
+- `POST /api/reviewer/prelaunch/scan/:eventId`
+- `POST /api/reviewer/prelaunch/scan-all`
+- `GET|POST|DELETE /api/reviewer/prelaunch/skip-scan-terms`
+
 ## Health Endpoints
 
 - `GET /health/live`
@@ -132,7 +141,7 @@ Use `/health/ready` for deployment health checks. It verifies runtime readiness 
 - `MARKET_CACHE_PATH`, `UPCOMING_MARKET_CACHE_PATH` for file-backed mode
 - `SYNC_STATE_PATH`, `CATEGORY_CATALOG_PATH`, `TRADE_ACTIVITY_PATH` for file-backed Gemini sync metadata
 - `CLARIFICATION_REQUESTS_PATH`, `VERIFIED_PAYMENTS_PATH`, `BACKGROUND_JOBS_PATH`
-- `ARTIFACTS_PATH`, `REVIEWER_SCANS_PATH`, `UPCOMING_REVIEWER_SCANS_PATH`
+- `ARTIFACTS_PATH`, `REVIEWER_SCANS_PATH`, `UPCOMING_REVIEWER_SCANS_PATH`, `SKIP_SCAN_TERMS_PATH`
 - `LLM_PROMPT_TEMPLATE_VERSION`, `LLM_MODEL_ID`, `LLM_PROCESSING_VERSION`
 - `CLARIFICATION_FINALITY_MODE`
 - `CLARIFICATION_FINALITY_STATIC_SECS`
@@ -140,9 +149,11 @@ Use `/health/ready` for deployment health checks. It verifies runtime readiness 
 - `PUBLIC_API_BASE_URL`
 - `X402_VERSION`, `X402_SCHEME`, `X402_PRICE_USD`, `X402_MAX_AMOUNT_REQUIRED`
 - `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`, `X402_FEE_PAYER`
-- `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
+- `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `X402_FACILITATOR_AUTH_TOKEN`
+- `X402_VERIFICATION_SOURCE`, `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
 - `ARTIFACT_PUBLICATION_PROVIDER`, `IPFS_API_URL`, `IPFS_GATEWAY_BASE_URL`, `IPFS_AUTH_TOKEN`
 - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_API_BASE_URL`
+- `OPENROUTER_APP_URL`, `OPENROUTER_APP_NAME`
 
 Clarification timing config:
 
@@ -203,6 +214,29 @@ Poll clarification status:
 ```bash
 curl http://127.0.0.1:3000/api/clarifications/<CLARIFICATION_ID>
 ```
+
+## Phase 2 Reviewer Routes
+
+When `ENABLE_PHASE2_REVIEWER_ROUTES=1`, the backend also exposes reviewer-authenticated routes for live review, prelaunch review, and post-clarification workflow:
+
+- `GET /api/reviewer/queue`
+- `POST /api/reviewer/scan/:eventId`
+- `POST /api/reviewer/scan-all`
+- `GET /api/reviewer/scans`
+- `POST /api/reviewer/jobs/:jobId/retry`
+- `POST /api/reviewer/refresh-market/:eventId`
+- `GET /api/reviewer/prelaunch/queue`
+- `GET /api/reviewer/prelaunch/markets/:eventId`
+- `POST /api/reviewer/prelaunch/scan/:eventId`
+- `POST /api/reviewer/prelaunch/scan-all`
+- `GET|POST|DELETE /api/reviewer/prelaunch/skip-scan-terms`
+- `GET /api/reviewer/clarifications/:clarificationId`
+- `GET /api/reviewer/clarifications/:clarificationId/audit`
+- `GET /api/reviewer/clarifications/:clarificationId/funding`
+- `POST /api/reviewer/clarifications/:clarificationId/funding/contributions`
+- `POST /api/reviewer/clarifications/:clarificationId/awaiting-panel-vote`
+- `POST /api/reviewer/clarifications/:clarificationId/finalize`
+- `GET /api/artifacts/:cid`
 
 ## Telegram
 
