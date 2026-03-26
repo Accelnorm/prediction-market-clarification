@@ -1,283 +1,215 @@
-# Oracle's Wake-Up Call
+# The Prediction Market Oracle's Wake-Up Call
 
-This repo currently centers on an API-first off-chain clarification service for prediction markets. Phase 1 is the paid clarification primitive itself: x402-gated request creation, asynchronous LLM processing, public status lookup, market sync, and optional Telegram intake.
+**A pay-per-clarification API for Gemini prediction markets — resolving contract ambiguity before it becomes a dispute.**
 
-## Custom Skills
+When a prediction market's resolution criteria are unclear, traders lose trust and operators face costly settlement disputes. This project proposes a new primitive to that stack: a paid clarification endpoint. A trader or AI agent sends a question about a Gemini market, makes a $1 micropayment via the [x402 protocol](https://www.x402.org) on Solana, and receives an LLM-generated authoritative clarification. Human review could ensue if someone feels the LLM response should be escalated.
 
-Repo-local skills now live under [`new-skills/`](/home/user/gemini-pm/new-skills).
+The clarification follows a structured AI skill that reviews the operative clause, scores ambiguity, writes a binding clarification note, and proposes tighter market text if needed — not a freeform LLM opinion.
 
-- [`new-skills/request-gemini-clarification/SKILL.md`](/home/user/gemini-pm/new-skills/request-gemini-clarification/SKILL.md) tells AI agents when Gemini market uncertainty should be escalated into a paid clarification request and how to use the API flow in [`new-skills/request-gemini-clarification/references/api-flow.md`](/home/user/gemini-pm/new-skills/request-gemini-clarification/references/api-flow.md).
-- [`new-skills/issue-clarification-response/SKILL.md`](/home/user/gemini-pm/new-skills/issue-clarification-response/SKILL.md) guides the paid-clarification LLM on how to answer a Gemini market clarification request with deterministic reasoning, a tighter rewrite, and an operator note.
-- [`new-skills/review-upcoming-market/SKILL.md`](/home/user/gemini-pm/new-skills/review-upcoming-market/SKILL.md) guides reviewer LLMs on how to detect ambiguity and other launch-blocking issues in upcoming markets and produce tighter replacement wording.
+---
 
-Use `$request-gemini-clarification` when an agent is unsure about Gemini market resolution criteria, price sources, timing, or settlement edge cases and needs a concrete clarification request path.
+## Why this matters for prediction market operators
 
-Use `$issue-clarification-response` when an agent or prompt needs to answer a paid Gemini clarification request by identifying the contract gap, citing the relevant clause, and proposing binding market wording.
+Ambiguous resolution criteria are one of the highest sources of user complaints and reputational risk in prediction markets. This system lets operators:
 
-Use `$review-upcoming-market` when an agent is reviewing a proposed or upcoming market for ambiguity, unclear sources, time-boundary problems, missing conditional branches, or other issue patterns that could lead to a bad resolution.
+- **Offload clarification requests** to an automated, paid service
+- **Build a precedent library** — every clarification becomes a reusable artifact
+- **Integrate AI-powered pre-launch review** to catch ambiguity before markets go live
+- **Monetize the clarification channel** — the x402 payment gate means spam is economically infeasible and genuine requests not only cover the LLM cost but also generate revenue
 
-## Phase 1 Scope
+The system is API-first. In this prototype, it tests the concept based on data from the Gemini Prediction Markets API and exposes clean REST endpoints for clarification intake, status polling, and reviewer workflows. Such endpoints could potentially be added to the Gemini API.
 
-Phase 1 is:
+---
 
-- paid off-chain clarification via API
-- real x402 payment verification
-- asynchronous LLM processing with public status lookup
+## Custom AI skills
 
-The repo now also includes a lightweight public console under [`apps/public-console`](/home/user/gemini-pm/apps/public-console) for manual demoing of the clarification intake and reviewer desk. The API remains the primary integration surface.
+This repo ships three agent skills for AI-assisted workflows:
 
-Telegram is not part of the default Phase 1 runtime. It remains an optional intake and status-delivery channel, gated behind `ENABLE_TELEGRAM_ROUTES=1`, and it does not perform x402 payment natively.
+- **`$request-gemini-clarification`** — guides an AI agent on when and how to escalate market uncertainty into a paid clarification request
+- **`$issue-clarification-response`** — guides the clarification LLM on deterministic reasoning, tighter rewrites, and operator notes
+- **`$review-upcoming-market`** — guides a reviewer LLM on detecting ambiguity, bad sources, time-boundary problems, and missing conditional branches in upcoming markets
 
-## What Works Today
+Skills live under [`new-skills/`](new-skills/).
 
-- Gemini market sync into file-backed or Postgres-backed caches
-- Incremental Gemini market ingest from newly listed events with dedupe by `marketId`
-- Official Gemini category catalog sync for validation and reviewer queue metadata
-- Paid clarification API flow with durable background-job persistence
-- Crash recovery for queued and in-flight clarification jobs on server startup
-- Clarification timing with configurable static or dynamic finality windows
-- Health endpoints at `GET /health/live` and `GET /health/ready`
-- Request ID logging and rate limiting on the public clarify endpoint
-- Optional Phase 2 reviewer routes behind `ENABLE_PHASE2_REVIEWER_ROUTES=1`
-- Optional Telegram intake and outbound delivery behind `ENABLE_TELEGRAM_ROUTES=1`
+---
 
-## Gemini API Usage
+## How it works
 
-This repo currently uses these Gemini API endpoints:
-
-- `GET /v1/prediction-markets/events?status=active&limit=500`
-  - authoritative full sync for active events
-  - refreshes the active market cache in file-backed or Postgres-backed storage
-- `GET /v1/prediction-markets/events/upcoming?limit=500`
-  - authoritative full sync for approved or upcoming events
-  - refreshes the upcoming market cache used by prelaunch and reviewer flows
-- `GET /v1/prediction-markets/events/newly-listed?limit=500`
-  - incremental ingest path between full syncs
-  - reduces full-cache refetching and upserts events by `marketId` so reruns stay idempotent
-- `GET /v1/prediction-markets/events/{ticker}`
-  - targeted refresh for a single event when the backend needs to rehydrate or confirm a market by ticker
-- `GET /v1/prediction-markets/categories`
-  - syncs Gemini's official category catalog
-  - used to validate cached categories and expose `availableCategories` in reviewer and prelaunch queue payloads
-- `GET /v1/trades/{instrumentSymbol}`
-  - used only for clarification lifecycle timing
-  - refreshes trade activity while the LLM clarification job is running for active markets
-  - supports dynamic finality windows after a clarification is produced
-
-No Gemini order-management endpoints are used. This project is clarification-only.
-
-## What Is Tested
-
-The backend test suite passes locally:
-
-```bash
-cd offchain-backend
-npm install
-npm test
+```
+Trader / AI agent
+       │
+       ▼
+POST /api/clarify/:marketId
+       │
+       ├─► 402 Payment Required (x402 challenge, $1 USDC on Solana)
+       │
+       ├─► Client signs & retries with payment proof
+       │
+       ├─► Payment verified via x402 facilitator
+       │
+       └─► LLM processes question against market contract text
+               │
+               └─► Clarification stored + returned (async or sync)
 ```
 
-Automated coverage includes:
+The backend pulls live market data from the Gemini Prediction Markets API, processes clarification jobs in a durable background queue with crash recovery, and exposes a public status endpoint for polling.
 
-- Gemini market sync normalization
-- Paid clarification creation, deduplication, and retry behavior
-- Health endpoints and route gating for disabled Phase 2 / Telegram routes
-- Reviewer routes when explicitly enabled
-- Telegram webhook parsing, persistence, lookup, and status update payloads
-- Production config validation
+A reviewer desk lets authorized operators scan upcoming markets for ambiguity before launch.
 
-Important limitation: Telegram coverage is still HTTP-level only. The code is tested for receiving Telegram-style webhook payloads and producing status messages, but not end-to-end against the live Telegram Bot API.
+---
 
-## Local Run
+## Quickstart (Docker Compose)
 
-Sync market data:
+**You only need three things to run this:**
 
-```bash
-cd offchain-backend
-MARKET_CACHE_PATH="$PWD/data/market-cache.json" \
-UPCOMING_MARKET_CACHE_PATH="$PWD/data/upcoming-market-cache.json" \
-npm run sync:markets
-```
-
-Start the API locally:
-
-```bash
-cd offchain-backend
-PORT=3000 \
-npm run start
-```
-
-Without `DATABASE_URL`, the backend stores state in file-backed JSON under `offchain-backend/data`. With `DATABASE_URL`, the API and market sync CLIs bootstrap the Postgres schema automatically and use Postgres-backed repositories.
-
-Useful environment variables:
-
-- `PORT`, `HOST`
-- `DATABASE_URL`
-- `APP_ENV` or `NODE_ENV`
-- `ENABLE_PHASE2_REVIEWER_ROUTES`
-- `ENABLE_TELEGRAM_ROUTES`
-- `REVIEWER_AUTH_TOKEN` when Phase 2 routes are enabled
-- `LLM_PROVIDER`, `LLM_MODEL`
-- `OPENROUTER_API_KEY`, `OPENROUTER_BASE_URL`
-- `OPENROUTER_APP_URL`, `OPENROUTER_APP_NAME`
-- `OPENAI_COMPATIBLE_API_KEY`, `OPENAI_COMPATIBLE_BASE_URL`
-- `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_VERSION`
-- `PUBLIC_API_BASE_URL`
-- `SYNC_STATE_PATH`, `CATEGORY_CATALOG_PATH`, `TRADE_ACTIVITY_PATH` for file-backed Gemini sync state
-- `CLARIFICATION_REQUESTS_PATH`, `VERIFIED_PAYMENTS_PATH`, `BACKGROUND_JOBS_PATH`
-- `ARTIFACTS_PATH`, `REVIEWER_SCANS_PATH`, `UPCOMING_REVIEWER_SCANS_PATH`
-- `LLM_PROMPT_TEMPLATE_VERSION`, `LLM_MODEL_ID`, `LLM_PROCESSING_VERSION`
-- `CLARIFICATION_FINALITY_MODE`
-- `CLARIFICATION_FINALITY_STATIC_SECS`
-- `CLARIFICATION_PROCESSING_ACTIVITY_ENABLED`
-- `X402_VERSION`, `X402_SCHEME`, `X402_PRICE_USD`, `X402_MAX_AMOUNT_REQUIRED`
-- `X402_ASSET_SYMBOL`, `X402_NETWORK`, `X402_MINT_ADDRESS`, `X402_RECIPIENT_ADDRESS`, `X402_FEE_PAYER`
-- `X402_MAX_TIMEOUT_SECONDS`, `X402_FACILITATOR_URL`, `X402_FACILITATOR_AUTH_TOKEN`, `X402_VERIFICATION_SOURCE`, `PAYAI_API_KEY_ID`, `PAYAI_API_KEY_SECRET`
-- `ARTIFACT_PUBLICATION_PROVIDER`, `IPFS_API_URL`, `IPFS_GATEWAY_BASE_URL`, `IPFS_AUTH_TOKEN`
-- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_URL`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_API_BASE_URL`
-
-Clarification timing modes:
-
-- `CLARIFICATION_FINALITY_MODE=static`
-  - every clarification uses the same finality window
-  - default fixed value comes from `CLARIFICATION_FINALITY_STATIC_SECS` and defaults to `86400`
-- `CLARIFICATION_FINALITY_MODE=dynamic`
-  - finality is shortened for more important or actively traded markets using Gemini trade history plus market metadata
-  - in-flight LLM jobs can also refresh trade activity when `CLARIFICATION_PROCESSING_ACTIVITY_ENABLED=1`
-
-## Manual API Check
-
-1. Request the x402 payment challenge:
-
-```bash
-curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
-  -H 'content-type: application/json' \
-  -d '{
-    "requesterId": "wallet_123",
-    "question": "Should auction prints count?"
-  }'
-```
-
-2. Retry with a paid proof in `PAYMENT-SIGNATURE`:
-
-```bash
-curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
-  -H 'content-type: application/json' \
-  -H 'PAYMENT-SIGNATURE: <base64-encoded-x402-payment-payload>' \
-  -d '{
-    "requesterId": "wallet_123",
-    "question": "Should auction prints count?"
-  }'
-```
-
-3. Optionally wait briefly for a fast clarification:
-
-```bash
-curl -X POST 'http://127.0.0.1:3000/api/clarify/gm_btc_above_100k?wait=true&timeoutMs=10000' \
-  -H 'content-type: application/json' \
-  -H 'PAYMENT-SIGNATURE: <base64-encoded-x402-payment-payload>' \
-  -d '{
-    "requesterId": "wallet_123",
-    "question": "Should auction prints count?"
-  }'
-```
-
-4. Poll clarification status or fetch the completed inline result:
-
-```bash
-curl http://127.0.0.1:3000/api/clarifications/<CLARIFICATION_ID>
-```
-
-## Hackathon Demo Path
-
-For a hackathon demo, the recommended path is one Docker Compose stack with:
-
-- one `offchain-backend` container
-- one bundled Postgres container
-- Phase 2 reviewer routes enabled for demo use
-- Telegram disabled unless you explicitly want it
-
-Minimal demo env:
-
-```bash
-APP_ENV="production"
-DATABASE_URL="postgres://<USER>:<PASS>@<HOST>:5432/<DB>"
-ENABLE_PHASE2_REVIEWER_ROUTES="1"
-REVIEWER_AUTH_TOKEN="demo-reviewer-token"
-ENABLE_TELEGRAM_ROUTES="0"
-LLM_PROVIDER="openrouter"
-OPENROUTER_API_KEY="replace-me"
-LLM_MODEL="openrouter/auto"
-X402_RECIPIENT_ADDRESS="<YOUR_SOLANA_USDC_RECIPIENT>"
-X402_NETWORK="solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
-X402_MINT_ADDRESS="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-X402_FEE_PAYER=""
-X402_FACILITATOR_URL="https://facilitator.payai.network"
-PAYAI_API_KEY_ID=""
-PAYAI_API_KEY_SECRET=""
-ARTIFACT_PUBLICATION_PROVIDER="disabled"
-PORT="3000"
-```
-
-That is enough for a hackathon demo as long as:
-
-- the LLM provider key is valid
-- the facilitator accepts unauthenticated low-volume verification or valid facilitator credentials are supplied
-- the recipient wallet has a USDC token account on the selected network
-- the Postgres volume can persist data
-- artifact publication remains disabled unless you explicitly configure IPFS later
-
-One-command demo deploy after creating root `.env`:
-
-```bash
-./scripts/deploy-demo.sh
-```
-
-The script runs `docker compose` against [`docker-compose.demo.yml`](/home/user/gemini-pm/docker-compose.demo.yml), starts a bundled Postgres instance, builds the backend image from [`offchain-backend/Dockerfile`](/home/user/gemini-pm/offchain-backend/Dockerfile), syncs Gemini markets on boot, and starts the API.
-It also prints the configured reviewer demo token after startup so you can immediately test the reviewer and prelaunch flows.
-If `.env` is absent, the script falls back to [`.env.demo`](/home/user/gemini-pm/.env.demo).
-
-Bootstrap the env file from [`.env.example`](/home/user/gemini-pm/.env.example):
+| Variable | What it is |
+|---|---|
+| `OPENROUTER_API_KEY` | Any LLM via [OpenRouter](https://openrouter.ai) |
+| `X402_RECIPIENT_ADDRESS` | Your Solana wallet address (USDC) |
+| `POSTGRES_PASSWORD` | Any password for the bundled DB |
 
 ```bash
 cp .env.example .env
+# Edit .env — fill in the three values above
+./scripts/deploy-demo.sh
 ```
 
-For a local UI demo, run the public console separately:
+The script starts a Docker Compose stack (backend + Postgres), syncs Gemini markets on boot, and prints your reviewer auth token.
+
+**Optional:** Enable the reviewer desk UI locally:
 
 ```bash
-cd apps/public-console
-npm install
-npm run dev
+cd apps/public-console && npm install && npm run dev
 ```
 
-Then point the console at `http://127.0.0.1:3000` and use the reviewer token from `./scripts/deploy-demo.sh` for the reviewer desk.
+Then open the console and use the reviewer auth token printed by the deploy script.
 
-## Telegram
-
-Telegram is optional and off by default. If you want it for a demo, explicitly enable it and provide the full webhook config:
+### Full `.env.example`
 
 ```bash
-ENABLE_TELEGRAM_ROUTES="1"
-TELEGRAM_BOT_TOKEN="<TELEGRAM_BOT_TOKEN>"
-TELEGRAM_WEBHOOK_URL="https://<YOUR_DOMAIN>/api/telegram/webhook"
-TELEGRAM_WEBHOOK_SECRET="<TELEGRAM_WEBHOOK_SECRET>"
+# LLM (required)
+OPENROUTER_API_KEY=replace-me
+
+# x402 payments (required: your recipient wallet)
+X402_RECIPIENT_ADDRESS=replace-with-your-solana-usdc-wallet
+
+# Postgres (bundled in Docker — just set a password)
+POSTGRES_PASSWORD=replace-me-with-a-strong-password
+
+# ── Everything below has sensible defaults ──
+
+PORT=3000
+LLM_PROVIDER=openrouter
+LLM_MODEL=openrouter/auto
+X402_NETWORK=solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp
+X402_MINT_ADDRESS=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+X402_FACILITATOR_URL=https://x402.org/facilitator
+ENABLE_PHASE2_REVIEWER_ROUTES=1
+REVIEWER_AUTH_TOKEN=demo-reviewer-token
+ARTIFACT_PUBLICATION_PROVIDER=disabled
 ```
 
-When Telegram is enabled, the server registers the webhook on boot. Telegram remains an intake and status-delivery channel only; it does not perform x402 payment natively.
+---
 
-## Future Improvements
+## API walkthrough
 
-### Precedent-based clarification consistency (stare decisis)
+**Step 1 — Request the payment challenge:**
 
-When a clarification request arrives, the system should first check whether any prior clarifications exist for substantially similar markets — same underlying asset, same threshold structure, or overlapping resolution criteria. If a prior clarification addressed the same contract gap, the new response should follow that precedent rather than reasoning from scratch.
+```bash
+curl -X POST http://localhost:3000/api/clarify/gm_us_stablecoin_bill \
+  -H 'content-type: application/json' \
+  -d '{"requesterId": "wallet_abc", "question": "If Congress passes a broader digital-asset package that includes stablecoin provisions alongside market-structure rules, does this market resolve Yes, or does resolution require standalone stablecoin-only legislation?"}'
+```
 
-Implementation steps:
+Returns `402 Payment Required` with x402 payment terms.
 
-1. **Similarity lookup** — on each new request, search prior clarifications by market title keywords, event category, and resolution-clause tokens to surface candidate matches.
-2. **Precedent selection** — rank candidates by structural similarity and recency; surface the closest match to the LLM alongside the new request.
-3. **Consistency instruction** — instruct the LLM to treat the prior clarification as binding precedent and to deviate only when the new market has a materially different clause or fact pattern, with an explicit note explaining the deviation.
-4. **Precedent index** — maintain a lightweight index (event ID, resolution clause fingerprint, clarification ID) to make lookup fast without a full vector search in the initial version.
+**Step 2 — Retry with payment proof:**
 
-## Status
+```bash
+curl -X POST http://localhost:3000/api/clarify/gm_us_stablecoin_bill \
+  -H 'content-type: application/json' \
+  -H 'PAYMENT-SIGNATURE: <base64-encoded-x402-payload>' \
+  -d '{"requesterId": "wallet_abc", "question": "If Congress passes a broader digital-asset package that includes stablecoin provisions alongside market-structure rules, does this market resolve Yes, or does resolution require standalone stablecoin-only legislation?"}'
+```
 
-This repo is set up for a hackathon demo as a one-command Docker Compose deployment with bundled Postgres, production-mode env vars, and reviewer routes enabled by default in the demo compose stack.
+Returns a `clarificationId`. Use `?wait=true&timeoutMs=10000` for a synchronous response.
+
+**Step 3 — Poll or fetch the result:**
+
+```bash
+curl http://localhost:3000/api/clarifications/<CLARIFICATION_ID>
+```
+
+The same pattern applies to any Gemini market with ambiguous resolution criteria. A recession market, for instance, raises a different but equally real dispute: "If the NBER formally declares a recession before the deadline but no two consecutive quarters of negative GDP appear in the BEA advance estimates, does this market resolve Yes or No?" — a question that hinges on which of two materially different standards the resolver applies.
+
+---
+
+## Gemini API endpoints used
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /v1/prediction-markets/events?status=active` | Full active market sync |
+| `GET /v1/prediction-markets/events/upcoming` | Upcoming markets for pre-launch review |
+| `GET /v1/prediction-markets/events/newly-listed` | Incremental ingest between full syncs |
+| `GET /v1/prediction-markets/events/{ticker}` | Single-market rehydration |
+| `GET /v1/prediction-markets/categories` | Category catalog for validation |
+| `GET /v1/trades/{instrumentSymbol}` | Trade activity for dynamic finality windows |
+
+No order-management endpoints are used. This is clarification infrastructure, not a trading tool.
+
+---
+
+## Tests
+
+```bash
+cd offchain-backend && npm install && npm test
+```
+
+Covers: market sync normalization, clarification creation and deduplication, payment verification flow, health endpoints, route gating, reviewer routes, Telegram webhook parsing, and production config validation.
+
+---
+
+## How this project relates to challenges in the Penn Blockchain Hackathon 2026
+
+### Gemini Prediction Markets API
+
+This project does something different than visualizing data or trading: it uses the API as the foundation for a *resolution layer* that sits between a market and its participants. Six endpoints are in active use — active market sync, upcoming market sync, incremental ingest, single-market lookup, category catalog, and trade history for dynamic finality windows. Market data flows into both the clarification engine and the pre-launch reviewer desk, so the integration is load-bearing, not decorative.
+
+The pay-per-clarification model creates incentives that a dashboard never could. Traders have a formal recourse channel. Operators are rewarded for maintaining clear contracts. And because clarifications are stored against specific market IDs, every ruling becomes an auditable artifact tied to the Gemini market data that generated it.
+
+The backend is built to production standards: durable job queue with crash recovery, idempotent incremental ingest by `marketId`, configurable static/dynamic finality windows, rate limiting, request ID logging, health endpoints, and a full test suite. There are three surfaces — a REST API, a public status endpoint, and a browser-based reviewer desk — each aimed at a different user: developer, trader, and operator. One-command Docker Compose deploy, no manual schema migration.
+
+---
+
+### x402 Agentic Payments on Solana
+
+x402 is frequently demoed with a simple paywall in front of a file or webpage. This project applies it to a knowledge market: you pay for a structured expert opinion, not a static asset. That distinction matters because it creates a real use case for agentic clarification — an AI agent with a funded Solana wallet can autonomously identify an ambiguous market contract, pay for a clarification, and act on the result, with no API keys, no accounts, and no human in the loop.
+
+The payment gate does double duty. It makes spam economically infeasible. And it creates skin-in-the-game for requesters — a question worth asking is worth $1.
+
+The x402 implementation is complete end-to-end: 402 challenge issued, payment signed on Solana, facilitator verifies settlement, clarification job runs. The backend handles the full 402→sign→retry flow with proper header parsing, payment proof storage, and idempotent deduplication so a client retrying after a timeout cannot be charged twice. Supports both `exact` and `unauthenticated` scheme variants. The x402 handshake is invisible to users of the public console; for developers and agents, any x402-compatible client wallet works without custom integration.
+
+Prediction market resolution disputes are a recurring cost with no clean solution today. This system is directly deployable by any operator, and the x402 payment model makes it self-sustaining — LLM costs are covered by clarification fees.
+
+---
+
+## Feature ideas or in progress
+
+**Precedent-based consistency:** Idea — when a new clarification arrives, the system checks for prior clarifications on substantially similar markets and follows that precedent rather than reasoning from scratch.
+
+**IPFS publication:** Idea — Set `ARTIFACT_PUBLICATION_PROVIDER=ipfs` with `IPFS_API_URL` and `IPFS_AUTH_TOKEN` to publish clarification artifacts to IPFS for permanent public audit trails. IPFS CID can then be published on-chain.
+
+**Telegram intake:** Partly developed — Set `ENABLE_TELEGRAM_ROUTES=1` with a bot token and webhook URL. Telegram is a status-delivery and intake channel only — x402 payment required.
+
+---
+
+## Known Limitations
+
+- **Need for adoption by prediction market operator.** This hackathon project is not an official Gemini feature. Unless adopted, Gemini's settlement engine will not apply clarifications automatically.
+- **x402 facilitator is a single point of failure.** Verification is one HTTP call with no retry. A facilitator outage blocks all incoming clarifications, and payment events are not logged.
+- **Reviewer auth and rate limiting are prototype-grade.** Plaintext bearer token, in-memory rate limiter that resets on restart.
+- **No database migration system.** Schema changes require manual SQL; there is no migration framework.
+
+---
+
+

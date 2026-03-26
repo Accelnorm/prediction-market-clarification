@@ -1977,15 +1977,15 @@ function HowItWorksStrip() {
 }
 
 const BEFORE_ISSUES = [
-  "\"Recession\" is undefined — NBER declaration and two consecutive negative GDP quarters are different standards",
-  "No GDP release vintage named — advance, second, and third estimates often diverge",
-  "Silent on whether a later BEA revision that reverses a negative quarter changes the outcome"
+  "\"Stablecoin legislation\" is undefined — a standalone stablecoin bill and a broader digital-asset package containing stablecoin rules are different instruments",
+  "No bill number or named act — contract does not specify whether a package deal qualifies",
+  "Silent on the package question: if a stablecoin-only bill is amended to include market-structure provisions, it is unclear whether it still counts"
 ] as const;
 
 const AFTER_FIXES = [
-  "Resolution binds exclusively to the BEA advance GDP estimate — NBER declaration is not sufficient",
-  "Two consecutive quarters of negative BEA advance real GDP growth required",
-  "Later revisions to the advance estimate do not affect settlement once the advance figure is published"
+  "Resolves Yes if Congress passes and the President signs any legislation establishing a federal framework for payment stablecoins, whether as standalone legislation or as a primary named component of a broader digital-asset package",
+  "Resolution based on official enrolled bill text and Congressional Record — executive orders and emergency proclamations are not sufficient",
+  "A bill introduced as stablecoin-only that is later amended to include market-structure provisions still qualifies, provided the stablecoin framework remains a primary enacted component"
 ] as const;
 
 function BeforeAfterDemo() {
@@ -2006,12 +2006,12 @@ function BeforeAfterDemo() {
           <div className="mb-5 flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-signal/[0.12] px-3 py-1 text-sm font-medium text-signal">
               <span className="h-1.5 w-1.5 rounded-full bg-signal" />
-              Ambiguity score 0.78 — High
+              Ambiguity score 0.72 — High
             </span>
           </div>
           <p className="mb-3 text-xs uppercase tracking-[0.22em] text-muted">Original resolution text</p>
           <blockquote className="rounded-xl border border-signal/25 bg-signal/[0.05] px-5 py-4 text-base leading-7 text-foreground">
-            Resolves Yes if the U.S. economy experiences a recession in 2026.
+            Resolves Yes if the U.S. Congress passes stablecoin legislation before the deadline.
           </blockquote>
           <div className="mt-5 space-y-2.5">
             <p className="text-xs uppercase tracking-[0.20em] text-muted">Identified issues</p>
@@ -2034,10 +2034,10 @@ function BeforeAfterDemo() {
           </div>
           <p className="mb-3 text-xs uppercase tracking-[0.22em] text-muted">Suggested resolution text</p>
           <blockquote className="rounded-xl border border-border-low bg-card px-5 py-4 text-base leading-7 text-foreground">
-            Resolves Yes if the BEA advance GDP estimate shows two consecutive quarters of negative
-            real GDP growth in 2026, with Q1 2026 as the earliest qualifying quarter. An NBER
-            recession declaration alone is not sufficient. Later revisions to the advance estimate
-            are not binding.
+            Resolves Yes if Congress passes and the President signs any legislation establishing a
+            federal framework for payment stablecoins — whether as standalone legislation or as a
+            primary named component of a broader digital-asset package — based on official enrolled
+            bill text. Executive orders and emergency proclamations are not sufficient.
           </blockquote>
           <div className="mt-5 space-y-2.5">
             <p className="text-xs uppercase tracking-[0.20em] text-muted">Clarifications applied</p>
@@ -2054,14 +2054,15 @@ function BeforeAfterDemo() {
       <div className="mt-6 rounded-[1.6rem] border border-border-low bg-card/60 p-6">
         <p className="text-xs uppercase tracking-[0.22em] text-muted">Oracle reasoning excerpt (illustrative)</p>
         <p className="mt-3 text-base leading-7 text-muted">
-          "The term 'recession' is undefined in the contract text. The NBER and BEA use materially
-          different standards — the NBER can declare a recession without two consecutive negative
-          GDP quarters, and the BEA advance estimate is frequently revised. A trader who holds Yes
-          because NBER declares a recession may win or lose depending on which standard the resolver
-          applies, creating a dispute surface that is entirely about resolver behavior rather than
-          the underlying event. Ambiguity score: 0.78."
+          "The contract does not define 'stablecoin legislation.' The GENIUS Act established a
+          federal stablecoin framework as standalone legislation, but the question is whether a
+          broader digital-asset package containing stablecoin provisions would also qualify. The
+          contract's silence creates a dispute surface: a trader holding Yes expecting a standalone
+          bill may be surprised if a larger package passes and the resolver must decide whether it
+          counts. The contract should either name a specific act or specify that any legislation
+          establishing a federal payment-stablecoin framework qualifies. Ambiguity score: 0.72."
         </p>
-        <p className="mt-3 text-sm text-muted/60">Based on Gemini market #4020 — illustrative oracle output.</p>
+        <p className="mt-3 text-sm text-muted/60">Based on Gemini market gm_us_stablecoin_bill — illustrative oracle output.</p>
       </div>
     </section>
   );
@@ -2141,9 +2142,9 @@ function PublicConsole() {
   const initialSession = useMemo(() => loadStoredSession(PUBLIC_SESSION_STORAGE_KEY), []);
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl || "http://127.0.0.1:3000");
   const [apiBaseUrl, setApiBaseUrl] = useState(initialSession.apiBaseUrl);
-  const [draftEventId, setDraftEventId] = useState("4020");
+  const [draftEventId, setDraftEventId] = useState("gm_us_stablecoin_bill");
   const [draftQuestion, setDraftQuestion] = useState(
-    "If the NBER formally declares a recession before the deadline but no two consecutive quarters of negative GDP appear in the BEA advance estimates, does this market resolve Yes or No?"
+    "If Congress passes a broader digital-asset package that includes stablecoin provisions alongside market-structure rules, does this market resolve Yes, or does resolution require standalone stablecoin-only legislation?"
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPaying, setIsPaying] = useState(false);

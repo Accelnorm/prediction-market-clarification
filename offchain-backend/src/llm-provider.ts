@@ -14,7 +14,7 @@ function validationError(code: string, message: string, statusCode: number = 500
 export function buildDefaultInterpretation({ market }: { market: MarketRecord }) {
   return {
     verdict: "needs_clarification",
-    llm_status: "completed",
+    llm_status: "stub",
     reasoning:
       "The market text depends on Gemini BTC/USD spot prints but leaves room for ambiguity around which Gemini price feed or session record is authoritative.",
     cited_clause: market.resolution,
@@ -137,7 +137,7 @@ async function fetchTermsContent(url: string): Promise<string | null> {
       const buffer = await response.arrayBuffer();
       const text = await extractPdfText(buffer);
       const trimmed = text.replace(/\s+/g, " ").trim();
-      return trimmed.length > 6000 ? trimmed.slice(0, 6000) + "…" : trimmed || null;
+      return trimmed.length > 24000 ? trimmed.slice(0, 24000) + "…" : trimmed || null;
     }
 
     if (contentType.includes("text/html") || contentType.includes("text/plain")) {
@@ -152,7 +152,7 @@ async function fetchTermsContent(url: string): Promise<string | null> {
         .replace(/&nbsp;/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-      return text.length > 6000 ? text.slice(0, 6000) + "…" : text || null;
+      return text.length > 24000 ? text.slice(0, 24000) + "…" : text || null;
     }
 
     return null;
