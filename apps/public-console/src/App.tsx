@@ -1706,28 +1706,7 @@ function ReviewerConsole() {
                     </article>
 
                     <article className="rounded-[1.6rem] border border-border-low bg-card p-5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <p className="text-xs uppercase tracking-[0.18em] text-muted">Contract map</p>
-                        {(() => {
-                          const urls = prelaunchDetail.contracts
-                            ?.map((c) => c.termsAndConditionsUrl)
-                            .filter(Boolean);
-                          const sharedUrl =
-                            urls && urls.length > 0 && urls.every((u) => u === urls[0])
-                              ? urls[0]
-                              : null;
-                          return sharedUrl ? (
-                            <a
-                              className="text-xs text-muted underline underline-offset-4 transition hover:text-foreground"
-                              href={sharedUrl}
-                              rel="noreferrer"
-                              target="_blank"
-                            >
-                              Terms &amp; conditions
-                            </a>
-                          ) : null;
-                        })()}
-                      </div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-muted">Contract map</p>
                       {prelaunchDetail.contracts && prelaunchDetail.contracts.length > 0 ? (
                         <div className="mt-4 grid gap-3">
                           {prelaunchDetail.contracts.map((contract) => (
@@ -1751,10 +1730,7 @@ function ReviewerConsole() {
                                 ) : null}
                               </div>
                               <p className="mt-3 text-base leading-7 text-muted">
-                                {(contract.description ?? "No contract description cached.").replace(
-                                  /\s*Read the full contract \[terms & conditions\]\([^)]+\)\.?$/,
-                                  ""
-                                )}
+                                {contract.description ?? "No contract description cached."}
                               </p>
                               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                                 <div className="rounded-2xl border border-border-low bg-card/70 p-3">
