@@ -319,7 +319,9 @@ function buildFundingDetails(clarification: ClarificationRequest, relatedClarifi
     );
   }
 
-  return buildFundingDetailsFromClarifications(relatedClarifications);
+  // Fall back to per-clarification payment only — do not sum across all related
+  // clarifications for the same market, which would inflate the raised amount.
+  return buildFundingDetailsFromClarifications([clarification]);
 }
 
 function buildStoredFundingDetails(clarification: ClarificationRequest) {
