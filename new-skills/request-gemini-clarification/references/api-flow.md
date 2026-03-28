@@ -2,7 +2,7 @@
 
 ## Use This Reference
 
-Load this file when an agent needs the exact request flow, endpoint behavior, or source pointers for Gemini market clarifications.
+Load this file when an agent needs the exact request flow or endpoint behavior for Gemini market clarifications against the live demo backend.
 
 ## Preconditions
 
@@ -11,54 +11,51 @@ Load this file when an agent needs the exact request flow, endpoint behavior, or
 - The route parameter is named `eventId` in the live backend and tests, even if some repo docs still say `marketId`.
 - The JSON body must include a non-empty `question`. The backend trims whitespace and enforces a 500-character maximum.
 
-Relevant source files:
-
-- [README.md](/home/user/gemini-pm/README.md)
-- [server.ts](/home/user/gemini-pm/offchain-backend/src/server.ts)
-- [x402-paid-clarification.ts](/home/user/gemini-pm/offchain-backend/src/x402-paid-clarification.ts)
-- [request-clarification.sh](/home/user/gemini-pm/scripts/request-clarification.sh)
-
 ## Request Flow
+
+Base URL:
+
+- `https://prediction-market-clarification-api.onrender.com`
 
 1. Create an unpaid request to obtain the x402 challenge:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
+curl -X POST https://prediction-market-clarification-api.onrender.com/api/clarify/2640 \
   -H 'content-type: application/json' \
   -d '{
     "requesterId": "wallet_123",
-    "question": "Should auction prints count?"
+    "question": "If Congress passes a broader digital-asset bill that includes market-structure rules but also substantial stablecoin or other crypto provisions, what makes that bill qualify as crypto market structure legislation for this market?"
   }'
 ```
 
 2. Retry the same request with the x402 proof in `PAYMENT-SIGNATURE`:
 
 ```bash
-curl -X POST http://127.0.0.1:3000/api/clarify/gm_btc_above_100k \
+curl -X POST https://prediction-market-clarification-api.onrender.com/api/clarify/2640 \
   -H 'content-type: application/json' \
   -H 'PAYMENT-SIGNATURE: <base64-encoded-x402-payment-payload>' \
   -d '{
     "requesterId": "wallet_123",
-    "question": "Should auction prints count?"
+    "question": "If Congress passes a broader digital-asset bill that includes market-structure rules but also substantial stablecoin or other crypto provisions, what makes that bill qualify as crypto market structure legislation for this market?"
   }'
 ```
 
 3. If a fast inline response is useful, add `wait=true` and a timeout:
 
 ```bash
-curl -X POST 'http://127.0.0.1:3000/api/clarify/gm_btc_above_100k?wait=true&timeoutMs=10000' \
+curl -X POST 'https://prediction-market-clarification-api.onrender.com/api/clarify/2640?wait=true&timeoutMs=10000' \
   -H 'content-type: application/json' \
   -H 'PAYMENT-SIGNATURE: <base64-encoded-x402-payment-payload>' \
   -d '{
     "requesterId": "wallet_123",
-    "question": "Should auction prints count?"
+    "question": "If Congress passes a broader digital-asset bill that includes market-structure rules but also substantial stablecoin or other crypto provisions, what makes that bill qualify as crypto market structure legislation for this market?"
   }'
 ```
 
 4. Poll by clarification id:
 
 ```bash
-curl http://127.0.0.1:3000/api/clarifications/<CLARIFICATION_ID>
+curl https://prediction-market-clarification-api.onrender.com/api/clarifications/<CLARIFICATION_ID>
 ```
 
 ## Behavioral Notes

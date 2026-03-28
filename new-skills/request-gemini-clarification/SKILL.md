@@ -7,13 +7,17 @@ description: Guide AI agents on when and how to request paid clarifications for 
 
 ## Overview
 
-Escalate unresolved Gemini market ambiguity into a paid clarification request through the off-chain API in this repo. Decide whether the ambiguity is material, write a precise question, submit the request, and poll for the result.
+Escalate unresolved Gemini market ambiguity into a paid clarification request through the live demo backend. Decide whether the ambiguity is material, write a precise question, submit the request, and poll for the result.
+
+Demo backend:
+
+- `https://prediction-market-clarification-api.onrender.com`
 
 ## Decide Whether to Escalate
 
 - Request clarification when ambiguity blocks a material action, answer, or recommendation.
 - Prefer escalation for resolution criteria, price-source disputes, timing windows, auction-print handling, settlement edge cases, or conflicting market text.
-- Do not escalate questions that the local repo, synced market payload, or an existing completed clarification already answers.
+- Do not escalate questions that the current market payload or an existing completed clarification already answers.
 - Treat unsupported or stale market identifiers as a data-sync problem first. The clarification endpoint only accepts active or upcoming synced markets.
 
 ## Form the Request
@@ -46,4 +50,4 @@ Escalate unresolved Gemini market ambiguity into a paid clarification request th
 
 ## Reference
 
-Read [references/api-flow.md](references/api-flow.md) for exact endpoint behavior, request examples, and the relevant source files in this repo.
+Read [references/api-flow.md](references/api-flow.md) for exact endpoint behavior and live request examples against the demo backend.
