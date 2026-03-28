@@ -21,7 +21,7 @@ import {
   parseTelegramStatusUpdate
 } from "./telegram-status-delivery.js";
 import { buildAdaptiveReviewWindow } from "./review-window-policy.js";
-import { createReviewerMarketScan } from "./reviewer-scan-service.js";
+import { buildReviewerMarketTemplateKey, createReviewerMarketScan } from "./reviewer-scan-service.js";
 import type { CreateReviewerMarketScanOptions } from "./reviewer-scan-service.js";
 import { parseClarificationRequestInput } from "./x402-paid-clarification.js";
 import { buildX402PaymentRequiredPayload } from "./x402-payment-challenge.js";
@@ -659,10 +659,10 @@ function parseReviewerFundingContributionPayload(payload: Record<string, unknown
   };
 }
 
-function buildQueueStates({ latestScan, fundingProgress, reviewWindow, voteStatus }: { latestScan: Record<string, unknown> | null; fundingProgress: { fundingState: string }; reviewWindow: { time_to_end_bucket: string }; voteStatus: string }) {
+function buildQueueStates({ latestScan, fundingProgress, reviewWindow, voteStatus, needsScan }: { latestScan: Record<string, unknown> | null; fundingProgress: { fundingState: string }; reviewWindow: { time_to_end_bucket: string }; voteStatus: string; needsScan: boolean }) {
   const queueStates: string[] = [];
 
-  if (!latestScan) {
+  if (needsScan) {
     queueStates.push("needs_scan");
   }
 
@@ -707,7 +707,7 @@ function buildReviewerScanListItem(scan: Record<string, unknown>) {
   };
 }
 
-function buildPrelaunchQueueItem({ market, latestScan, now, globalTermsUrls }: { market: Record<string, unknown>; latestScan: Record<string, unknown> | null; now: Date; globalTermsUrls: Set<string> }) {
+function buildPrelaunchQueueItem({ market, latestScan, now, globalTermsUrls, needsScan }: { market: Record<string, unknown>; latestScan: Record<string, unknown> | null; now: Date; globalTermsUrls: Set<string>; needsScan: boolean }) {
   const reviewWindow =
     latestScan?.review_window ??
     buildAdaptiveReviewWindow({
@@ -732,7 +732,7 @@ function buildPrelaunchQueueItem({ market, latestScan, now, globalTermsUrls }: {
     startsAt: market.effectiveDate ?? null,
     endTime: market.closesAt,
     ambiguityScore: latestScan?.ambiguity_score ?? null,
-    needsScan: !globalTerms && latestScan === null,
+    needsScan: !globalTerms && needsScan,
     globalTerms,
     latestScanId: latestScan?.scanId ?? null,
     reviewWindow,
@@ -1714,12 +1714,24 @@ export function createServer({
       try {
         const markets = (await marketCacheRepository?.list?.()) ?? [];
         const clarifications = (await clarificationRequestRepository?.list?.()) ?? [];
+        const scans = (await reviewerScanRepository?.list?.()) ?? [];
+        const coveredTemplateKeys = new Set(
+          (scans as ReviewerScan[])
+            .map((scan) => (typeof scan.marketTextKey === "string" ? scan.marketTextKey : ""))
+            .filter((key) => key !== "")
+        );
+        const queuedTemplateKeys = new Set<string>();
         const queue: Record<string, unknown>[] = [];
 
         for (const market of markets) {
           const marketId = market.marketId as string;
+          const templateKey = buildReviewerMarketTemplateKey(market as MarketRecord);
           const latestScan =
             (await reviewerScanRepository?.findLatestByEventId?.(marketId)) ?? null;
+          const hasTemplateCoverage =
+            templateKey !== "" &&
+            (coveredTemplateKeys.has(templateKey) || queuedTemplateKeys.has(templateKey));
+          const needsScan = latestScan === null && !hasTemplateCoverage;
           const eventClarifications = (clarifications as ClarificationRequest[]).filter(
             (clarification) => clarification.eventId === marketId
           );
@@ -1748,8 +1760,13 @@ export function createServer({
             latestScan,
             fundingProgress,
             reviewWindow,
-            voteStatus
+            voteStatus,
+            needsScan
           });
+
+          if (needsScan && templateKey !== "") {
+            queuedTemplateKeys.add(templateKey);
+          }
 
           queue.push({
             eventId: marketId,
@@ -1801,6 +1818,13 @@ export function createServer({
 
       try {
         const markets = (await upcomingMarketCacheRepository?.list?.()) ?? [];
+        const scans = (await upcomingReviewerScanRepository?.list?.()) ?? [];
+        const coveredTemplateKeys = new Set(
+          (scans as ReviewerScan[])
+            .map((scan) => (typeof scan.marketTextKey === "string" ? scan.marketTextKey : ""))
+            .filter((key) => key !== "")
+        );
+        const queuedTemplateKeys = new Set<string>();
         const queue: Record<string, unknown>[] = [];
         const skipTermsUrls = await skipScanTermsRepository?.list?.() ?? [];
         const globalTermsUrls = new Set(skipTermsUrls);
@@ -1808,14 +1832,24 @@ export function createServer({
         for (const market of markets) {
           const latestScan =
             (await upcomingReviewerScanRepository?.findLatestByEventId?.(market.marketId as string)) ?? null;
+          const templateKey = buildReviewerMarketTemplateKey(market as MarketRecord);
+          const hasTemplateCoverage =
+            templateKey !== "" &&
+            (coveredTemplateKeys.has(templateKey) || queuedTemplateKeys.has(templateKey));
+          const needsScan = latestScan === null && !hasTemplateCoverage;
           queue.push(
             buildPrelaunchQueueItem({
               market,
               latestScan,
               now: now(),
-              globalTermsUrls
+              globalTermsUrls,
+              needsScan
             })
           );
+
+          if (needsScan && templateKey !== "") {
+            queuedTemplateKeys.add(templateKey);
+          }
         }
 
         const availableCategories = await getAvailableCategoriesForStage("upcoming");

@@ -12,8 +12,51 @@ function normalizeMarketText(text: unknown) {
     .replace(/\s+/g, " ");
 }
 
+function normalizeTemplateText(text: string) {
+  return text
+    .toLowerCase()
+    .replace(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/g, "<month>")
+    .replace(/\b(mon|tue|wed|thu|fri|sat|sun)(day)?\b/g, "<day>")
+    .replace(/\b(today|tomorrow|yesterday|tonight|this year|next year|this month|next month)\b/g, "<relative_time>")
+    .replace(/\b\d{4}-\d{2}-\d{2}\b/g, "<date>")
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, "<time>")
+    .replace(/\$\s?\d+(?:[.,]\d+)?/g, "<price>")
+    .replace(/\b\d+(?:[.,]\d+)?%?\b/g, "<num>")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function buildReviewerMarketTemplateKey(market: MarketRecord | Record<string, unknown>) {
+  const title = normalizeTemplateText(String(market?.title ?? ""));
+  const resolution = normalizeTemplateText(
+    normalizeMarketText(market?.resolution ?? market?.resolutionText ?? market?.description ?? "")
+  );
+  const category = normalizeTemplateText(String(market?.category ?? ""));
+
+  if (
+    title.includes(" price ") ||
+    title.endsWith(" price?") ||
+    resolution.includes("price prediction event")
+  ) {
+    return "template:price-prediction";
+  }
+
+  if (category === "sports" && /\bvs\b/.test(title)) {
+    return "template:sports-head-to-head";
+  }
+
+  if (
+    category === "sports" &&
+    (title.includes(" winner") || title.includes(" champion") || title.includes(" qualifiers"))
+  ) {
+    return "template:sports-outright";
+  }
+
+  return `exact:${resolution || title}`;
+}
+
 function buildMarketTextKey(market: MarketRecord) {
-  return normalizeMarketText(market?.resolution ?? market?.resolutionText ?? market?.title ?? "");
+  return buildReviewerMarketTemplateKey(market);
 }
 
 function isUpcomingMarket(market: MarketRecord, now: Date) {

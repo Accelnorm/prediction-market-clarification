@@ -166,26 +166,78 @@ test("reviewer prelaunch queue and scan endpoints operate on upcoming Gemini mar
   }
 });
 
-test("prelaunch scan-all only analyzes future upcoming markets and reuses identical market text", async () => {
+test("prelaunch queue marks repeated template markets as covered instead of separate needs-scan work", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "prelaunch-reviewer-"));
   const upcomingMarkets = [
     buildUpcomingMarket({
       marketId: "9058",
-      ticker: "BRENT2603222100",
-      resolution:
-        "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC.",
-      resolutionText:
-        "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC."
+      ticker: "BTC2603220200",
+      title: "BTC price today at 2am EDT",
+      slug: "btc-price-today-at-2am-edt",
+      description: "Interval BTC price prediction event expiring on March 22, 2026 @ 2am EDT",
+      resolution: "Interval BTC price prediction event expiring on March 22, 2026 @ 2am EDT",
+      resolutionText: "Interval BTC price prediction event expiring on March 22, 2026 @ 2am EDT",
+      termsLink: null
     }),
     buildUpcomingMarket({
       marketId: "9059",
-      ticker: "BRENT2603222200",
-      title: "Oil (Brent) alternate listing?",
-      slug: "oil-brent-price-alternate",
-      resolution:
-        "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC.",
-      resolutionText:
-        "Resolves YES if Gemini BTC/USD prints above $100,000 before December 31 2026 23:59 UTC."
+      ticker: "ETH2603220200",
+      title: "ETH price today at 2am EDT",
+      slug: "eth-price-today-at-2am-edt",
+      description: "Interval ETH price prediction event expiring on March 22, 2026 @ 2am EDT",
+      resolution: "Interval ETH price prediction event expiring on March 22, 2026 @ 2am EDT",
+      resolutionText: "Interval ETH price prediction event expiring on March 22, 2026 @ 2am EDT",
+      termsLink: null
+    })
+  ];
+  const upcomingMarketCacheRepository = await createUpcomingMarketCacheRepository(tempDir, upcomingMarkets);
+  const upcomingReviewerScanRepository = await createUpcomingReviewerScanRepository(tempDir);
+  const { server, baseUrl } = await startTestServer({
+    reviewerAuthToken: "reviewer-secret",
+    now: () => new Date("2026-03-21T21:00:00.000Z"),
+    upcomingMarketCacheRepository,
+    upcomingReviewerScanRepository
+  });
+
+  try {
+    const queueResponse = await fetch(`${baseUrl}/api/reviewer/prelaunch/queue`, {
+      headers: createReviewerHeaders()
+    });
+
+    assert.equal(queueResponse.status, 200);
+    const queuePayload = await queueResponse.json();
+    assert.equal(queuePayload.queue.length, 2);
+    assert.equal(queuePayload.queue[0].eventId, "9058");
+    assert.equal(queuePayload.queue[0].needsScan, true);
+    assert.equal(queuePayload.queue[1].eventId, "9059");
+    assert.equal(queuePayload.queue[1].needsScan, false);
+  } finally {
+    await stopTestServer(server);
+  }
+});
+
+test("prelaunch scan-all only analyzes future upcoming markets and reuses shared template scans", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "prelaunch-reviewer-"));
+  const upcomingMarkets = [
+    buildUpcomingMarket({
+      marketId: "9058",
+      ticker: "BTC2603220200",
+      title: "BTC price today at 2am EDT",
+      slug: "btc-price-today-at-2am-edt",
+      description: "Interval BTC price prediction event expiring on March 22, 2026 @ 2am EDT",
+      resolution: "Interval BTC price prediction event expiring on March 22, 2026 @ 2am EDT",
+      resolutionText: "Interval BTC price prediction event expiring on March 22, 2026 @ 2am EDT",
+      termsLink: null
+    }),
+    buildUpcomingMarket({
+      marketId: "9059",
+      ticker: "ETH2603220200",
+      title: "ETH price today at 2am EDT",
+      slug: "eth-price-today-at-2am-edt",
+      description: "Interval ETH price prediction event expiring on March 22, 2026 @ 2am EDT",
+      resolution: "Interval ETH price prediction event expiring on March 22, 2026 @ 2am EDT",
+      resolutionText: "Interval ETH price prediction event expiring on March 22, 2026 @ 2am EDT",
+      termsLink: null
     }),
     buildUpcomingMarket({
       marketId: "9060",
@@ -292,14 +344,8 @@ test("prelaunch scan-all only analyzes future upcoming markets and reuses identi
     assert.ok(reusedScan);
     assert.equal(primaryScan.ambiguity_score, 0.81);
     assert.equal(reusedScan.ambiguity_score, 0.81);
-    assert.equal(
-      reusedScan.reusedFromEventId,
-      "9058"
-    );
-    assert.equal(
-      reusedScan.marketTextKey,
-      primaryScan.marketTextKey
-    );
+    assert.equal(reusedScan.reusedFromEventId, "9058");
+    assert.equal(reusedScan.marketTextKey, primaryScan.marketTextKey);
   } finally {
     globalThis.fetch = originalFetch;
     await stopTestServer(server);
