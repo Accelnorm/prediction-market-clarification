@@ -4,6 +4,8 @@ import { useWalletSession, useWalletConnection } from "@solana/react-hooks";
 import { createWalletTransactionSigner } from "@solana/client";
 import { exact } from "x402/schemes";
 
+const DEFAULT_API_BASE_URL = import.meta.env.VITE_PUBLIC_API_BASE_URL?.trim() || "http://127.0.0.1:3000";
+
 type ReviewerQueueFilter = {
   key: string;
   label: string;
@@ -515,7 +517,7 @@ function ReviewerConsole() {
     []
   );
   const defaultedSession = useMemo(() => ({
-    apiBaseUrl: initialSession.apiBaseUrl || "http://127.0.0.1:3000",
+    apiBaseUrl: initialSession.apiBaseUrl || DEFAULT_API_BASE_URL,
     reviewerToken: initialSession.reviewerToken || ""
   }), [initialSession]);
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(defaultedSession.apiBaseUrl);
@@ -2140,8 +2142,8 @@ function FooterStrip() {
 
 function PublicConsole() {
   const initialSession = useMemo(() => loadStoredSession(PUBLIC_SESSION_STORAGE_KEY), []);
-  const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl || "http://127.0.0.1:3000");
-  const [apiBaseUrl, setApiBaseUrl] = useState(initialSession.apiBaseUrl);
+  const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl || DEFAULT_API_BASE_URL);
+  const [apiBaseUrl, setApiBaseUrl] = useState(initialSession.apiBaseUrl || DEFAULT_API_BASE_URL);
   const [draftEventId, setDraftEventId] = useState("gm_us_stablecoin_bill");
   const [draftQuestion, setDraftQuestion] = useState(
     "If Congress passes a broader digital-asset package that includes stablecoin provisions alongside market-structure rules, does this market resolve Yes, or does resolution require standalone stablecoin-only legislation?"
