@@ -1,10 +1,12 @@
 import { SolanaProvider } from "@solana/react-hooks";
 import { PropsWithChildren } from "react";
-import { autoDiscover, createClient } from "@solana/client";
+import { autoDiscover, createClient, filterByNames } from "@solana/client";
 
 const client = createClient({
   endpoint: "https://api.devnet.solana.com",
-  walletConnectors: autoDiscover(),
+  walletConnectors: autoDiscover({
+    filter: filterByNames("phantom", "solflare", "backpack"),
+  }),
 });
 
 export function Providers({ children }: PropsWithChildren) {

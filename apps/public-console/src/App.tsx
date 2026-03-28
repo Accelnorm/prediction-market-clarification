@@ -2621,7 +2621,7 @@ function PublicConsole() {
                                 </button>
                               ))}
                               {connectors.length === 0 ? (
-                                <p className="text-base text-muted">No wallets detected. Install Phantom or Backpack.</p>
+                                <p className="text-base text-muted">No supported wallets detected. Install or enable Solflare, Phantom, or Backpack.</p>
                               ) : null}
                             </div>
                           </div>
