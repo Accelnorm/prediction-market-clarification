@@ -5,6 +5,35 @@ import { createWalletTransactionSigner } from "@solana/client";
 import { exact } from "x402/schemes";
 
 const DEFAULT_API_BASE_URL = import.meta.env.VITE_PUBLIC_API_BASE_URL?.trim() || "http://127.0.0.1:3000";
+const DEFAULT_REVIEWER_TOKEN = import.meta.env.VITE_REVIEWER_TOKEN?.trim() || "";
+
+const AGENT_USE_CASES = [
+  "Use this when an agent is materially blocked by Gemini market ambiguity and needs a paid clarification before answering, trading, or recommending an action.",
+  "Escalate resolution criteria disputes, price-source conflicts, timing-window edge cases, auction-print questions, settlement edge cases, and conflicting or underspecified market wording.",
+  "Do not use it for questions already answered by local repo context, synced market payloads, or an existing completed clarification."
+] as const;
+
+const AGENT_FLOW = [
+  "Confirm the market is in the active or upcoming synced cache and use the exact Gemini eventId the backend recognizes.",
+  "Ask one concrete ambiguity at a time, keep the question specific to the contract text, and keep it under 500 characters.",
+  "POST /api/clarify/:eventId with requesterId and question, handle 402 PAYMENT_REQUIRED, then retry with PAYMENT-SIGNATURE.",
+  "If low latency matters, add wait=true with a bounded timeout, then poll GET /api/clarifications/:clarificationId until the result is terminal."
+] as const;
+
+const AGENT_REFERENCES = [
+  {
+    label: "$request-gemini-clarification",
+    description: "Use this skill when an agent needs to decide whether ambiguity should be escalated into a paid clarification request."
+  },
+  {
+    label: "$issue-clarification-response",
+    description: "Use this skill to keep the clarification output structured, cited, and consistent once a paid request is in flight."
+  },
+  {
+    label: "$review-upcoming-market",
+    description: "Use this skill when pre-analyzing upcoming markets for ambiguity before they go live."
+  }
+] as const;
 
 type ReviewerQueueFilter = {
   key: string;
@@ -518,7 +547,7 @@ function ReviewerConsole() {
   );
   const defaultedSession = useMemo(() => ({
     apiBaseUrl: initialSession.apiBaseUrl || DEFAULT_API_BASE_URL,
-    reviewerToken: initialSession.reviewerToken || ""
+    reviewerToken: initialSession.reviewerToken || DEFAULT_REVIEWER_TOKEN
   }), [initialSession]);
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(defaultedSession.apiBaseUrl);
   const [draftReviewerToken, setDraftReviewerToken] = useState(defaultedSession.reviewerToken);
@@ -1040,7 +1069,6 @@ function ReviewerConsole() {
                 className="rounded-2xl border border-border-low bg-card px-4 py-3 outline-none transition focus:border-border-strong"
                 onChange={(event) => setDraftReviewerToken(event.target.value)}
                 placeholder="reviewer-token"
-                type="password"
                 value={draftReviewerToken}
               />
             </label>
@@ -1071,7 +1099,13 @@ function ReviewerConsole() {
         </SettingsFlyout>
       ) : null}
 
-      <NavBar onOpenSettings={() => setIsSettingsOpen(true)} contextLink={{ href: "/", label: "Public intake" }} />
+      <NavBar
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        contextLinks={[
+          { href: "/", label: "Public intake" },
+          { href: "/agents", label: "Agent playbook" }
+        ]}
+      />
 
       <div className="border-b border-border-low">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-6 px-5 py-6 sm:px-8 lg:px-10">
@@ -1182,7 +1216,6 @@ function ReviewerConsole() {
                         className="rounded-xl border border-border-low bg-card px-3 py-2 text-base outline-none transition focus:border-border-strong"
                         onChange={(event) => setDraftReviewerToken(event.target.value)}
                         placeholder="reviewer-token"
-                        type="password"
                         value={draftReviewerToken}
                       />
                     </label>
@@ -1863,7 +1896,13 @@ function OracleEyeIcon() {
   );
 }
 
-function NavBar({ onOpenSettings, contextLink }: { onOpenSettings: () => void; contextLink: { href: string; label: string } }) {
+function NavBar({
+  onOpenSettings,
+  contextLinks
+}: {
+  onOpenSettings?: () => void;
+  contextLinks: Array<{ href: string; label: string }>;
+}) {
   return (
     <nav className="sticky top-0 z-30 border-b border-border-low bg-panel/90 backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-3.5 sm:px-8 lg:px-10">
@@ -1875,24 +1914,31 @@ function NavBar({ onOpenSettings, contextLink }: { onOpenSettings: () => void; c
             The Oracle's Wakeup Call
           </span>
           <span className="hidden rounded-full border border-border-low px-2.5 py-0.5 text-[10px] uppercase tracking-[0.22em] text-muted sm:inline">
-            Beta
+            Feature Idea
           </span>
         </div>
         <div className="flex items-center gap-4">
-          <a
-            href={contextLink.href}
-            className="hidden text-sm text-muted transition hover:text-foreground sm:inline"
-          >
-            {contextLink.label}
-          </a>
-          <button
-            aria-label="Open settings"
-            onClick={onOpenSettings}
-            type="button"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border-low bg-card/80 text-muted transition hover:text-foreground"
-          >
-            <SettingsIcon />
-          </button>
+          <div className="hidden items-center gap-4 sm:flex">
+            {contextLinks.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                className="text-sm text-muted transition hover:text-foreground"
+              >
+                {link.label}
+              </a>
+            ))}
+          </div>
+          {onOpenSettings ? (
+            <button
+              aria-label="Open settings"
+              onClick={onOpenSettings}
+              type="button"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border-low bg-card/80 text-muted transition hover:text-foreground"
+            >
+              <SettingsIcon />
+            </button>
+          ) : null}
         </div>
       </div>
     </nav>
@@ -1910,9 +1956,14 @@ function PublicHero() {
         </h1>
         <p className="animate-fade-up animation-delay-100 mt-8 max-w-2xl text-lg leading-8 text-muted sm:text-xl">
           When resolution criteria are unclear, traders dispute outcomes, platforms absorb
-          reputational damage, and edge cases go to lawyers — not editors. The Oracle's
-          Wakeup Call sends an AI-powered alert the moment ambiguous wording surfaces,
-          before it becomes a settlement problem.
+          reputational damage, and edge cases go to lawyers* rather than editors. The
+          Oracle's Wakeup Call pre-analyzes upcoming markets for ambiguity and responds to
+          paid clarification requests on live ones before wording problems become
+          settlement problems.
+        </p>
+        <p className="animate-fade-up animation-delay-100 mt-4 max-w-2xl text-sm leading-6 text-muted/80">
+          * The Kalshi death-carveout lawsuit is the kind of post-hoc dispute surface this
+          feature is trying to prevent.
         </p>
         <div className="animate-fade-up animation-delay-200 mt-10 flex flex-wrap gap-4">
           <a
@@ -1927,6 +1978,12 @@ function PublicHero() {
           >
             See the reviewer desk
           </a>
+          <a
+            href="/agents"
+            className="rounded-full border border-border-low px-6 py-3.5 text-base text-muted transition hover:text-foreground"
+          >
+            Agent playbook
+          </a>
         </div>
       </div>
     </section>
@@ -1937,7 +1994,7 @@ const HOW_IT_WORKS_STEPS = [
   {
     step: "01",
     title: "Trader submits a question",
-    body: "A trader who spots vague resolution criteria opens a clarification request against the market ID for $1. The fee keeps submissions honest — not expensive."
+    body: "A trader who spots vague resolution criteria opens a clarification request against the market ID for $1. The fee makes spam expensive and turns the clarification lane into a revenue line instead of a cost center."
   },
   {
     step: "02",
@@ -1947,7 +2004,7 @@ const HOW_IT_WORKS_STEPS = [
   {
     step: "03",
     title: "Verdict published automatically",
-    body: "The clarification and any suggested note are published immediately — no human gate. The full reasoning trace is stored for audit. Crowdfunded escalation to a review panel is available for high-stakes disputes."
+    body: "The clarification and any suggested note are published immediately — no human gate. The full reasoning trace is stored for audit. Crowdfunded escalation to a review panel could be added later for high-stakes disputes."
   }
 ] as const;
 
@@ -2075,7 +2132,7 @@ function NewsStrip() {
     <section className="border-t border-border-low bg-panel/40">
       <div className="mx-auto max-w-7xl px-5 py-14 sm:px-8 lg:px-10">
         <p className="mb-2 text-xs uppercase tracking-[0.22em] text-muted">Why this matters</p>
-        <h2 className="mb-10 text-2xl font-semibold text-foreground">What we're built to avoid</h2>
+        <h2 className="mb-10 text-2xl font-semibold text-foreground">What it's built to avoid</h2>
         <div className="grid gap-6 md:grid-cols-2">
           {/* Kalshi lawsuit card */}
           <a
@@ -2137,6 +2194,86 @@ function FooterStrip() {
         <p className="text-xs text-muted">AI analysis · Human review · No after-the-fact rule changes</p>
       </div>
     </footer>
+  );
+}
+
+function AgentsConsole() {
+  return (
+    <div className="min-h-screen bg-bg1 text-foreground">
+      <NavBar
+        contextLinks={[
+          { href: "/", label: "Public intake" },
+          { href: "/reviewer", label: "Reviewer desk" }
+        ]}
+      />
+      <section className="mx-auto max-w-7xl px-5 pb-14 pt-20 sm:px-8 lg:px-10">
+        <p className="text-xs uppercase tracking-[0.30em] text-muted">Agent playbook</p>
+        <h1 className="mt-2 max-w-4xl font-display text-[clamp(2.6rem,6vw,5rem)] leading-[0.9] text-foreground">
+          When an agent should pay for clarity instead of guessing.
+        </h1>
+        <p className="mt-6 max-w-3xl text-lg leading-8 text-muted">
+          This page turns the repo&apos;s agent skills into an operator-facing guide:
+          pre-analyze upcoming markets before launch, escalate live ambiguity into paid
+          clarifications when it blocks action, and avoid wasting requests on questions the
+          synced market payload or an existing clarification already answers.
+        </p>
+      </section>
+
+      <section className="border-t border-border-low bg-card/40">
+        <div className="mx-auto grid max-w-7xl gap-6 px-5 py-14 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:px-10">
+          <article className="rounded-[2rem] border border-border-low bg-panel/85 p-7 backdrop-blur">
+            <p className="text-xs uppercase tracking-[0.22em] text-muted">Use this when</p>
+            <div className="mt-5 space-y-4">
+              {AGENT_USE_CASES.map((item) => (
+                <div key={item} className="flex gap-3 text-base leading-7 text-muted">
+                  <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-signal" />
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          </article>
+
+          <article className="rounded-[2rem] border border-border-low bg-panel/85 p-7 backdrop-blur">
+            <p className="text-xs uppercase tracking-[0.22em] text-muted">Agent workflow</p>
+            <ol className="mt-5 space-y-4">
+              {AGENT_FLOW.map((item, index) => (
+                <li key={item} className="flex gap-4 text-base leading-7 text-muted">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border-low text-sm font-medium text-foreground">
+                    {index + 1}
+                  </span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ol>
+          </article>
+        </div>
+      </section>
+
+      <section className="border-t border-border-low">
+        <div className="mx-auto max-w-7xl px-5 py-14 sm:px-8 lg:px-10">
+          <p className="text-xs uppercase tracking-[0.22em] text-muted">Mapped skills</p>
+          <div className="mt-6 grid gap-6 lg:grid-cols-3">
+            {AGENT_REFERENCES.map((item) => (
+              <article key={item.label} className="rounded-[1.8rem] border border-border-low bg-panel/80 p-6 backdrop-blur">
+                <p className="font-mono text-sm text-foreground">{item.label}</p>
+                <p className="mt-3 text-base leading-7 text-muted">{item.description}</p>
+              </article>
+            ))}
+          </div>
+
+          <div className="mt-10 rounded-[2rem] border border-border-low bg-card/70 p-7">
+            <p className="text-xs uppercase tracking-[0.22em] text-muted">Protocol reference</p>
+            <div className="mt-4 space-y-3 text-base leading-7 text-muted">
+              <p>`POST /api/clarify/:eventId` starts the flow and returns a 402 payment challenge when the market is supported but unpaid.</p>
+              <p>`PAYMENT-SIGNATURE` carries the x402 proof on the paid retry. Use `wait=true` only when low latency matters.</p>
+              <p>`GET /api/clarifications/:clarificationId` is the public poll route for completed output, artifacts, and failure states.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <FooterStrip />
+    </div>
   );
 }
 
@@ -2374,8 +2511,15 @@ function PublicConsole() {
         </SettingsFlyout>
       ) : null}
 
-      <NavBar onOpenSettings={() => setIsSettingsOpen(true)} contextLink={{ href: "/reviewer", label: "Reviewer desk" }} />
+      <NavBar
+        onOpenSettings={() => setIsSettingsOpen(true)}
+        contextLinks={[
+          { href: "/reviewer", label: "Reviewer desk" },
+          { href: "/agents", label: "Agent playbook" }
+        ]}
+      />
       <PublicHero />
+      <NewsStrip />
       <HowItWorksStrip />
       <BeforeAfterDemo />
 
@@ -2580,8 +2724,6 @@ function PublicConsole() {
           </div>
         </div>
       </section>
-
-      <NewsStrip />
       <FooterStrip />
     </div>
   );
@@ -2590,6 +2732,10 @@ function PublicConsole() {
 export default function App() {
   if (window.location.pathname.startsWith("/reviewer")) {
     return <ReviewerConsole />;
+  }
+
+  if (window.location.pathname.startsWith("/agents")) {
+    return <AgentsConsole />;
   }
 
   return <PublicConsole />;
