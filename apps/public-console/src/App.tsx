@@ -20,20 +20,12 @@ const AGENT_FLOW = [
   "If low latency matters, add wait=true with a bounded timeout, then poll GET /api/clarifications/:clarificationId until the result is terminal."
 ] as const;
 
-const AGENT_REFERENCES = [
-  {
-    label: "$request-gemini-clarification",
-    description: "Use this skill when an agent needs to decide whether ambiguity should be escalated into a paid clarification request."
-  },
-  {
-    label: "$issue-clarification-response",
-    description: "Use this skill to keep the clarification output structured, cited, and consistent once a paid request is in flight."
-  },
-  {
-    label: "$review-upcoming-market",
-    description: "Use this skill when pre-analyzing upcoming markets for ambiguity before they go live."
-  }
-] as const;
+const AGENT_REFERENCE = {
+  label: "$request-gemini-clarification",
+  href: "https://github.com/Accelnorm/prediction-market-clarification/tree/main/new-skills/request-gemini-clarification",
+  description:
+    "Use this skill when ambiguity in a Gemini market is material enough that the agent should escalate into a paid clarification request."
+} as const;
 
 type ReviewerQueueFilter = {
   key: string;
@@ -1961,9 +1953,11 @@ function PublicHero() {
           paid clarification requests on live ones before wording problems become
           settlement problems.
         </p>
-        <p className="animate-fade-up animation-delay-100 mt-4 max-w-2xl text-sm leading-6 text-muted/80">
-          * The Kalshi death-carveout lawsuit is the kind of post-hoc dispute surface this
-          feature is trying to prevent.
+        <p className="animate-fade-up animation-delay-100 mt-4 max-w-2xl text-base leading-7 text-muted/85 sm:text-[1.05rem]">
+          * The Kalshi death-carveout lawsuit shows what can happen when ambiguous market
+          wording is left unresolved until after trading begins. This feature is about
+          clarifying existing terms early, before anyone has to reinterpret what the
+          market was supposed to mean.
         </p>
         <div className="animate-fade-up animation-delay-200 mt-10 flex flex-wrap gap-4">
           <a
@@ -2131,7 +2125,7 @@ function NewsStrip() {
   return (
     <section className="border-t border-border-low bg-panel/40">
       <div className="mx-auto max-w-7xl px-5 py-14 sm:px-8 lg:px-10">
-        <p className="mb-2 text-xs uppercase tracking-[0.22em] text-muted">Why this matters</p>
+        <p className="mb-2 text-sm uppercase tracking-[0.22em] text-muted">Why this matters</p>
         <h2 className="mb-10 text-2xl font-semibold text-foreground">What it's built to avoid</h2>
         <div className="grid gap-6 md:grid-cols-2">
           {/* Kalshi lawsuit card */}
@@ -2150,12 +2144,13 @@ function NewsStrip() {
             <p className="text-base font-medium leading-snug text-foreground group-hover:underline">
               Kalshi Sued Over Death Carveout in Iran Leader Prediction Market
             </p>
-            <p className="text-sm leading-relaxed text-muted">
-              A post-hoc rule change — a "death carveout" quietly inserted after trading opened —
-              led to a federal lawsuit. Opaque resolution criteria and after-the-fact modifications
-              are exactly the failure mode this system is designed to surface before markets go live.
+            <p className="text-base leading-relaxed text-muted">
+              The dispute centered on ambiguity severe enough that later interpretation became
+              controversial and ended up in court. That is the failure mode this system tries to
+              catch early: unclear wording that should be clarified before launch, before anyone is
+              pushed toward changing terms or stretching their meaning after trading starts.
             </p>
-            <span className="mt-auto text-xs text-muted/60">bloomberglaw.com ↗</span>
+            <span className="mt-auto text-sm text-muted/70">bloomberglaw.com ↗</span>
           </a>
 
           {/* X post embed card */}
@@ -2164,9 +2159,9 @@ function NewsStrip() {
               <span className="rounded-full bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-500">
                 Community
               </span>
-              <span className="text-xs text-muted">X / Twitter</span>
+              <span className="text-sm text-muted">X / Twitter</span>
             </div>
-            <p className="text-sm text-muted">Trader reaction to ambiguous resolution:</p>
+            <p className="text-base text-muted">Trader reaction to ambiguous resolution:</p>
             <div className="overflow-hidden rounded-xl border border-border-low">
               <blockquote
                 className="twitter-tweet"
@@ -2190,8 +2185,8 @@ function FooterStrip() {
   return (
     <footer className="border-t border-border-low">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-5 py-8 sm:px-8 lg:px-10">
-        <p className="text-xs text-muted">The Oracle's Wakeup Call — a prediction market clarification prototype, tested on live Gemini markets</p>
-        <p className="text-xs text-muted">AI analysis · Human review · No after-the-fact rule changes</p>
+        <p className="text-sm text-muted sm:text-base">The Oracle's Wakeup Call — a prediction market clarification prototype, tested on live Gemini markets</p>
+        <p className="text-sm text-muted sm:text-base">AI analysis · Human review · Clarify existing terms before launch pressure turns ambiguity into dispute</p>
       </div>
     </footer>
   );
@@ -2207,22 +2202,21 @@ function AgentsConsole() {
         ]}
       />
       <section className="mx-auto max-w-7xl px-5 pb-14 pt-20 sm:px-8 lg:px-10">
-        <p className="text-xs uppercase tracking-[0.30em] text-muted">Agent playbook</p>
+        <p className="text-sm uppercase tracking-[0.30em] text-muted">Agent playbook</p>
         <h1 className="mt-2 max-w-4xl font-display text-[clamp(2.6rem,6vw,5rem)] leading-[0.9] text-foreground">
-          When an agent should pay for clarity instead of guessing.
+          `$request-gemini-clarification` for agents blocked by Gemini ambiguity.
         </h1>
         <p className="mt-6 max-w-3xl text-lg leading-8 text-muted">
-          This page turns the repo&apos;s agent skills into an operator-facing guide:
-          pre-analyze upcoming markets before launch, escalate live ambiguity into paid
-          clarifications when it blocks action, and avoid wasting requests on questions the
-          synced market payload or an existing clarification already answers.
+          This page is only about the `$request-gemini-clarification` skill. Use it when a
+          Gemini market is ambiguous enough that an agent should stop guessing, pay for a
+          clarification, and wait for the repo&apos;s off-chain service to answer.
         </p>
       </section>
 
       <section className="border-t border-border-low bg-card/40">
         <div className="mx-auto grid max-w-7xl gap-6 px-5 py-14 sm:px-8 lg:grid-cols-[1.05fr_0.95fr] lg:px-10">
           <article className="rounded-[2rem] border border-border-low bg-panel/85 p-7 backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.22em] text-muted">Use this when</p>
+            <p className="text-sm uppercase tracking-[0.22em] text-muted">Use this when</p>
             <div className="mt-5 space-y-4">
               {AGENT_USE_CASES.map((item) => (
                 <div key={item} className="flex gap-3 text-base leading-7 text-muted">
@@ -2234,7 +2228,7 @@ function AgentsConsole() {
           </article>
 
           <article className="rounded-[2rem] border border-border-low bg-panel/85 p-7 backdrop-blur">
-            <p className="text-xs uppercase tracking-[0.22em] text-muted">Agent workflow</p>
+            <p className="text-sm uppercase tracking-[0.22em] text-muted">Agent workflow</p>
             <ol className="mt-5 space-y-4">
               {AGENT_FLOW.map((item, index) => (
                 <li key={item} className="flex gap-4 text-base leading-7 text-muted">
@@ -2251,18 +2245,22 @@ function AgentsConsole() {
 
       <section className="border-t border-border-low">
         <div className="mx-auto max-w-7xl px-5 py-14 sm:px-8 lg:px-10">
-          <p className="text-xs uppercase tracking-[0.22em] text-muted">Mapped skills</p>
-          <div className="mt-6 grid gap-6 lg:grid-cols-3">
-            {AGENT_REFERENCES.map((item) => (
-              <article key={item.label} className="rounded-[1.8rem] border border-border-low bg-panel/80 p-6 backdrop-blur">
-                <p className="font-mono text-sm text-foreground">{item.label}</p>
-                <p className="mt-3 text-base leading-7 text-muted">{item.description}</p>
-              </article>
-            ))}
-          </div>
+          <p className="text-sm uppercase tracking-[0.22em] text-muted">Skill reference</p>
+          <article className="mt-6 rounded-[1.8rem] border border-border-low bg-panel/80 p-6 backdrop-blur">
+            <p className="font-mono text-base text-foreground">{AGENT_REFERENCE.label}</p>
+            <p className="mt-3 max-w-3xl text-base leading-7 text-muted">{AGENT_REFERENCE.description}</p>
+            <a
+              className="mt-5 inline-flex rounded-full border border-border-low px-5 py-3 text-base text-muted transition hover:text-foreground"
+              href={AGENT_REFERENCE.href}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              Open skill on GitHub
+            </a>
+          </article>
 
           <div className="mt-10 rounded-[2rem] border border-border-low bg-card/70 p-7">
-            <p className="text-xs uppercase tracking-[0.22em] text-muted">Protocol reference</p>
+            <p className="text-sm uppercase tracking-[0.22em] text-muted">Protocol reference</p>
             <div className="mt-4 space-y-3 text-base leading-7 text-muted">
               <p>`POST /api/clarify/:eventId` starts the flow and returns a 402 payment challenge when the market is supported but unpaid.</p>
               <p>`PAYMENT-SIGNATURE` carries the x402 proof on the paid retry. Use `wait=true` only when low latency matters.</p>
