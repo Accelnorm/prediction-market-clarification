@@ -2030,41 +2030,43 @@ function HowItWorksStrip() {
 }
 
 const BEFORE_ISSUES = [
-  "\"Stablecoin legislation\" is undefined — a standalone stablecoin bill and a broader digital-asset package containing stablecoin rules are different instruments",
-  "No bill number or named act — contract does not specify whether a package deal qualifies",
-  "Silent on the package question: if a stablecoin-only bill is amended to include market-structure provisions, it is unclear whether it still counts"
+  "\"Qualifying crypto market structure legislation\" depends on a three-part test, but the contract does not clearly say how to handle mixed bills that also include stablecoin or other crypto provisions",
+  "The disqualifying language is explicit for bills that solely regulate stablecoins, tax, or narrow activity bans, but it is not explicit for broader packages that combine those topics with market-structure rules",
+  "That leaves a real settlement question: does a mixed digital-asset package qualify if it satisfies the market-structure criteria, or do the extra provisions change the outcome?"
 ] as const;
 
 const AFTER_FIXES = [
-  "Resolves Yes if Congress passes and the President signs any legislation establishing a federal framework for payment stablecoins, whether as standalone legislation or as a primary named component of a broader digital-asset package",
-  "Resolution based on official enrolled bill text and Congressional Record — executive orders and emergency proclamations are not sufficient",
-  "A bill introduced as stablecoin-only that is later amended to include market-structure provisions still qualifies, provided the stablecoin framework remains a primary enacted component"
+  "The published clarification says a bill can still qualify if it satisfies the three market-structure criteria, even when other crypto provisions are present",
+  "The exclusion list is read narrowly: it blocks bills whose sole focus is stablecoins, taxation, or specific activity bans, not mixed bills that also create a broader market-structure framework",
+  "The market text itself stays intact here; the useful action is publishing the clarification note so traders understand how the existing terms should be interpreted"
 ] as const;
 
 function BeforeAfterDemo() {
   return (
     <section className="mx-auto max-w-7xl px-5 py-20 sm:px-8 lg:px-10">
-      <p className="text-xs uppercase tracking-[0.30em] text-muted">Real Gemini market · #4020</p>
+      <p className="text-xs uppercase tracking-[0.30em] text-muted">Real Gemini market · #2640</p>
       <h2 className="mt-2 font-display text-[clamp(2rem,4vw,3.2rem)] leading-none text-foreground">
         See the difference clarity makes
       </h2>
       <p className="mt-4 max-w-2xl text-base leading-7 text-muted">
-        The left card shows market wording as-written. The right shows the oracle's clarification
-        note and light edit — published automatically, seconds after submission.
+        The left card shows the live Gemini market wording as-written. The right shows a real
+        clarification note published by this system on March 28, 2026. This is a case where
+        interpretation mattered more than rewriting the contract.
       </p>
 
       <div className="mt-10 grid gap-6 lg:grid-cols-2">
         {/* BEFORE */}
         <div className="card-lift rounded-[2rem] border border-border-low bg-panel/80 p-7 backdrop-blur">
           <div className="mb-5 flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-signal/[0.12] px-3 py-1 text-sm font-medium text-signal">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-signal/[0.12] px-3 py-1 text-sm font-medium text-signal">
               <span className="h-1.5 w-1.5 rounded-full bg-signal" />
-              Ambiguity score 0.72 — High
+              Ambiguity score 0.65 — Real output
             </span>
           </div>
           <p className="mb-3 text-xs uppercase tracking-[0.22em] text-muted">Original resolution text</p>
           <blockquote className="rounded-xl border border-signal/25 bg-signal/[0.05] px-5 py-4 text-base leading-7 text-foreground">
-            Resolves Yes if the U.S. Congress passes stablecoin legislation before the deadline.
+            Resolves to Yes if qualifying crypto market structure legislation becomes law before
+            this date; otherwise No.
           </blockquote>
           <div className="mt-5 space-y-2.5">
             <p className="text-xs uppercase tracking-[0.20em] text-muted">Identified issues</p>
@@ -2082,18 +2084,20 @@ function BeforeAfterDemo() {
           <div className="mb-5 flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-foreground/10 px-3 py-1 text-sm font-medium text-foreground">
               <span className="h-1.5 w-1.5 rounded-full bg-foreground" />
-              Oracle clarification — auto-published
+              Clarification note — published
             </span>
           </div>
-          <p className="mb-3 text-xs uppercase tracking-[0.22em] text-muted">Suggested resolution text</p>
+          <p className="mb-3 text-xs uppercase tracking-[0.22em] text-muted">Published clarification note</p>
           <blockquote className="rounded-xl border border-border-low bg-card px-5 py-4 text-base leading-7 text-foreground">
-            Resolves Yes if Congress passes and the President signs any legislation establishing a
-            federal framework for payment stablecoins — whether as standalone legislation or as a
-            primary named component of a broader digital-asset package — based on official enrolled
-            bill text. Executive orders and emergency proclamations are not sufficient.
+            The market should resolve to Yes if a bill meets the three positive criteria for crypto
+            market structure legislation, even if it contains other provisions, as long as the
+            bill&apos;s primary purpose is to establish a market structure framework. The
+            &quot;NOT satisfy&quot; clause should be interpreted to exclude bills where the sole
+            focus is on stablecoins, specific activity bans, or taxation, rather than bills that
+            include those elements alongside market structure rules.
           </blockquote>
           <div className="mt-5 space-y-2.5">
-            <p className="text-xs uppercase tracking-[0.20em] text-muted">Clarifications applied</p>
+            <p className="text-xs uppercase tracking-[0.20em] text-muted">Why this output matters</p>
             {AFTER_FIXES.map((fix) => (
               <div key={fix} className="flex gap-2 text-base text-muted">
                 <span className="mt-0.5 shrink-0 text-foreground">✓</span>
@@ -2105,17 +2109,17 @@ function BeforeAfterDemo() {
       </div>
 
       <div className="mt-6 rounded-[1.6rem] border border-border-low bg-card/60 p-6">
-        <p className="text-xs uppercase tracking-[0.22em] text-muted">Oracle reasoning excerpt (illustrative)</p>
+        <p className="text-xs uppercase tracking-[0.22em] text-muted">Oracle reasoning excerpt (real output)</p>
         <p className="mt-3 text-base leading-7 text-muted">
-          "The contract does not define 'stablecoin legislation.' The GENIUS Act established a
-          federal stablecoin framework as standalone legislation, but the question is whether a
-          broader digital-asset package containing stablecoin provisions would also qualify. The
-          contract's silence creates a dispute surface: a trader holding Yes expecting a standalone
-          bill may be surprised if a larger package passes and the resolver must decide whether it
-          counts. The contract should either name a specific act or specify that any legislation
-          establishing a federal payment-stablecoin framework qualifies. Ambiguity score: 0.72."
+          "The ambiguity lies in how to weigh a bill that includes market structure rules
+          alongside other provisions. Specifically, if a bill meets all three positive criteria
+          for market structure legislation but also contains provisions that would disqualify it
+          if they were the sole focus, does it still qualify?"
         </p>
-        <p className="mt-3 text-sm text-muted/60">Based on Gemini market gm_us_stablecoin_bill — illustrative oracle output.</p>
+        <p className="mt-3 text-sm text-muted/60">
+          Based on live clarification `clar_f79e8198f8514391` for Gemini market `2640` —
+          "Will crypto market structure legislation become law?"
+        </p>
       </div>
     </section>
   );
@@ -2279,9 +2283,9 @@ function PublicConsole() {
   const initialSession = useMemo(() => loadStoredSession(PUBLIC_SESSION_STORAGE_KEY), []);
   const [draftApiBaseUrl, setDraftApiBaseUrl] = useState(initialSession.apiBaseUrl || DEFAULT_API_BASE_URL);
   const [apiBaseUrl, setApiBaseUrl] = useState(initialSession.apiBaseUrl || DEFAULT_API_BASE_URL);
-  const [draftEventId, setDraftEventId] = useState("gm_us_stablecoin_bill");
+  const [draftEventId, setDraftEventId] = useState("2640");
   const [draftQuestion, setDraftQuestion] = useState(
-    "If Congress passes a broader digital-asset package that includes stablecoin provisions alongside market-structure rules, does this market resolve Yes, or does resolution require standalone stablecoin-only legislation?"
+    "If Congress passes a broader digital-asset bill that includes market-structure rules but also substantial stablecoin or other crypto provisions, what makes that bill qualify as crypto market structure legislation for this market?"
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
